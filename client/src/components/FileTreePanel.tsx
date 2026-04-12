@@ -201,39 +201,62 @@ export default function FileTreePanel({ visible, mode, tree, initialSelection, e
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
+  const prevFocusPathRef = useRef<string | undefined>();
+  const prevVisibleRef = useRef(false);
+  const pendingScrollRef = useRef(false);
 
   // Initialize expanded paths on first render with tree data
   useEffect(() => {
     if (tree.length === 0 || expandedPaths !== null) return;
 
     const initialExpanded = new Set<string>();
-    for (const node of tree) {
-      if (node.type === 'folder') initialExpanded.add(node.path);
+    function collectAllFolders(nodes: FileTreeNode[]) {
+      for (const node of nodes) {
+        if (node.type === 'folder') {
+          initialExpanded.add(node.path);
+          collectAllFolders(node.children ?? []);
+        }
+      }
     }
+    collectAllFolders(tree);
     onExpandedPathsChange(initialExpanded);
   }, [tree, expandedPaths, onExpandedPathsChange]);
 
-  // Expand ancestors for focusPath
+  // When panel opens: expand ancestors for focusPath + scroll to it
+  // When focusPath changes: scroll to it (but don't force-expand)
+  // User expand/collapse: no auto-scroll, no forced expansion
   useEffect(() => {
-    if (!focusPath || !expandedPaths) return;
-    const ancestors = getAncestorPaths(focusPath);
-    const needsExpand = ancestors.filter(p => !expandedPaths.has(p));
-    if (needsExpand.length > 0) {
-      const next = new Set(expandedPaths);
-      for (const p of needsExpand) next.add(p);
-      onExpandedPathsChange(next);
-    }
-  }, [focusPath, expandedPaths, onExpandedPathsChange]);
+    const becameVisible = visible && !prevVisibleRef.current;
+    const focusPathChanged = focusPath !== prevFocusPathRef.current;
 
-  // Scroll to focusPath (instant when hidden so panel opens at correct position)
-  useEffect(() => {
-    if (!focusPath || !expandedPaths) return;
+    prevVisibleRef.current = visible;
+    prevFocusPathRef.current = focusPath;
+
+    // Only auto-expand ancestors when panel opens, not while user interacts
+    if (becameVisible && focusPath && expandedPaths) {
+      const ancestors = getAncestorPaths(focusPath);
+      const needsExpand = ancestors.filter(p => !expandedPaths.has(p));
+      if (needsExpand.length > 0) {
+        const next = new Set(expandedPaths);
+        for (const p of needsExpand) next.add(p);
+        onExpandedPathsChange(next);
+      }
+    }
+
+    // Mark scroll as needed when focusPath changes or panel opens
+    if (focusPathChanged || becameVisible) {
+      pendingScrollRef.current = true;
+    }
+
+    if (!pendingScrollRef.current || !focusPath || !expandedPaths) return;
+
     const raf1 = requestAnimationFrame(() => {
       const raf2 = requestAnimationFrame(() => {
         if (!scrollContainerRef.current) return;
         const escapedPath = focusPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const el = scrollContainerRef.current.querySelector(`[data-tree-path="${escapedPath}"]`);
         if (el) {
+          pendingScrollRef.current = false;
           el.scrollIntoView({
             block: 'center',
             behavior: visible ? 'smooth' : 'instant',
@@ -247,7 +270,7 @@ export default function FileTreePanel({ visible, mode, tree, initialSelection, e
       cancelAnimationFrame(raf1);
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [visible, focusPath, expandedPaths]);
+  }, [visible, focusPath, expandedPaths, onExpandedPathsChange]);
 
   // Initialize selection
   useEffect(() => {
