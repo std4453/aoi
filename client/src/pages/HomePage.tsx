@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePacks } from '../hooks/usePacks';
 import { formatBytes, statusLabels, statusColors } from '../lib/utils';
-import { getHomeScrollY, saveHomeScrollY } from '../lib/homeScrollStore';
+import { getHomeScrollY, saveHomeScrollY, saveLastHomeSearch, clearHomeScrollY } from '../lib/homeScrollStore';
 import { Trash2, Search, X, Image, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 function renderPageButtons(currentPage: number, totalPages: number, goToPage: (p: number) => void) {
@@ -44,14 +44,15 @@ function SkeletonGrid() {
         <div key={i} className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800 animate-pulse">
           <div className="aspect-[4/3] bg-gray-800" />
           <div className="p-3">
-            <div className="h-4 bg-gray-800 rounded w-3/4" />
-            <div className="flex gap-1 mt-1.5">
-              <div className="h-4 bg-gray-800 rounded w-10" />
-              <div className="h-4 bg-gray-800 rounded w-10" />
+            <div className="h-[1.125rem] bg-gray-800 rounded w-3/4" />
+            <div className="flex gap-1 mt-1.5 min-h-[20px]">
+              <div className="h-[18px] bg-gray-800 rounded w-10" />
+              <div className="h-[18px] bg-gray-800 rounded w-10" />
+              <div className="h-[18px] bg-gray-800 rounded w-10" />
             </div>
-            <div className="flex justify-between mt-1.5">
-              <div className="h-3 bg-gray-800 rounded w-8" />
-              <div className="h-3 bg-gray-800 rounded w-12" />
+            <div className="flex items-center justify-between mt-1.5">
+              <div className="h-[1.125rem] bg-gray-800 rounded w-8" />
+              <div className="h-[1.125rem] bg-gray-800 rounded w-12" />
             </div>
           </div>
         </div>
@@ -62,13 +63,15 @@ function SkeletonGrid() {
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const { packs, total, page, pageSize, loading, error, deletePack, goToPage, setSearchQuery, search } = usePacks();
+  const { packs, total, page, pageSize, loading, error, deletePack, goToPage, setSearchQuery, search, hardReset } = usePacks();
   const [deleting, setDeleting] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState(search);
   const [searching, setSearching] = useState(!!search);
+  const [debouncing, setDebouncing] = useState(false);
   const restoredRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isFirstRender = useRef(true);
+  const pendingScrollTopRef = useRef(false);
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -84,16 +87,20 @@ export default function HomePage() {
     if (debounceRef.current !== undefined) clearTimeout(debounceRef.current);
     if (!value.trim()) {
       setSearchQuery('');
+      setDebouncing(false);
       return;
     }
+    setDebouncing(true);
     debounceRef.current = setTimeout(() => {
       setSearchQuery(value);
+      setDebouncing(false);
     }, 300);
   }, [setSearchQuery]);
 
   const handleSearchSubmit = useCallback(() => {
     if (debounceRef.current !== undefined) clearTimeout(debounceRef.current);
     setSearchQuery(inputValue);
+    setDebouncing(false);
   }, [inputValue, setSearchQuery]);
 
   const handleClearSearch = useCallback(() => {
@@ -104,6 +111,7 @@ export default function HomePage() {
     } else {
       setSearching(false);
     }
+    setDebouncing(false);
   }, [inputValue, setSearchQuery]);
 
   // Cleanup debounce on unmount
@@ -111,10 +119,36 @@ export default function HomePage() {
     return () => { if (debounceRef.current !== undefined) clearTimeout(debounceRef.current); };
   }, []);
 
+  // Save current URL params for tab restoration
+  useEffect(() => {
+    saveLastHomeSearch(window.location.search);
+  }, [page, search]);
+
+  // Handle hard reset from tab double-click / click-at-top
+  useEffect(() => {
+    const handler = () => {
+      hardReset();
+      clearHomeScrollY();
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener('home:hard-reset', handler);
+    return () => window.removeEventListener('home:hard-reset', handler);
+  }, [hardReset]);
+
   const handlePageChange = useCallback((p: number) => {
     goToPage(p);
-    window.scrollTo(0, 0);
+    pendingScrollTopRef.current = true;
   }, [goToPage]);
+
+  // After page change data loads, smooth scroll to top
+  useEffect(() => {
+    if (!loading && pendingScrollTopRef.current) {
+      pendingScrollTopRef.current = false;
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    }
+  }, [loading]);
 
   // Restore scroll position after content renders
   useEffect(() => {
@@ -146,6 +180,7 @@ export default function HomePage() {
   };
 
   const isInitialLoad = loading && packs.length === 0;
+  const stale = packs.length > 0 && (loading || debouncing);
 
   // Search box — always rendered regardless of loading state
   const searchBox = searching ? (
@@ -220,7 +255,7 @@ export default function HomePage() {
           )}
         </div>
       ) : (
-        <>
+        <div className={`transition-opacity duration-150 ${stale ? 'opacity-50' : ''}`}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {packs.map((pack) => (
               <div
@@ -309,7 +344,7 @@ export default function HomePage() {
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );

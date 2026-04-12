@@ -1,6 +1,7 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useRef } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Home, Upload, Settings } from 'lucide-react';
-import { saveHomeScrollY, clearHomeScrollY } from '../../lib/homeScrollStore';
+import { saveHomeScrollY, clearHomeScrollY, getLastHomeSearch, saveLastHomeSearch, clearLastHomeSearch } from '../../lib/homeScrollStore';
 
 const navItems = [
   { to: '/', icon: Home, label: '图包' },
@@ -10,6 +11,8 @@ const navItems = [
 
 export default function AppShell() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const lastTabClickRef = useRef(0);
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-950">
@@ -27,12 +30,32 @@ export default function AppShell() {
               <NavLink
                 key={to}
                 to={to}
-                onClick={() => {
-                  if (to === '/' && location.pathname === '/') {
-                    clearHomeScrollY();
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                onClick={(e) => {
+                  if (to === '/') {
+                    if (location.pathname === '/') {
+                      e.preventDefault();
+                      const now = Date.now();
+                      const isAtTop = window.scrollY < 10;
+                      const isDoubleTap = now - lastTabClickRef.current < 300;
+                      lastTabClickRef.current = now;
+
+                      clearHomeScrollY();
+                      if (isAtTop || isDoubleTap) {
+                        clearLastHomeSearch();
+                        window.dispatchEvent(new CustomEvent('home:hard-reset'));
+                      } else {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }
+                    } else {
+                      const savedSearch = getLastHomeSearch();
+                      if (savedSearch) {
+                        e.preventDefault();
+                        navigate(`/${savedSearch}`);
+                      }
+                    }
                   } else if (location.pathname === '/') {
                     saveHomeScrollY();
+                    saveLastHomeSearch(window.location.search);
                   }
                 }}
                 className={`flex-1 flex flex-col items-center py-2 gap-0.5 transition-colors ${

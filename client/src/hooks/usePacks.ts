@@ -12,6 +12,7 @@ export function usePacks() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Read page/search from URL
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
@@ -55,7 +56,7 @@ export function usePacks() {
     if (search) params.search = search;
     refresh(params);
     return () => { abortRef.current?.abort(); };
-  }, [page, search, refresh]);
+  }, [page, search, refreshKey, refresh]);
 
   const deletePack = useCallback(
     async (id: string) => {
@@ -73,6 +74,15 @@ export function usePacks() {
       next.set('page', String(p));
       return next;
     }); // push (default)
+  }, [setSearchParams]);
+
+  const hardReset = useCallback(() => {
+    setPacks([]);
+    setTotal(0);
+    setError(null);
+    setLoading(true);
+    setSearchParams({}, { replace: true });
+    setRefreshKey(k => k + 1);
   }, [setSearchParams]);
 
   const setSearchQuery = useCallback((q: string) => {
@@ -101,6 +111,7 @@ export function usePacks() {
       if (search) params.search = search;
       refresh(params);
     }, [page, search, refresh]),
+    hardReset,
     deletePack,
     goToPage,
     setSearchQuery,
