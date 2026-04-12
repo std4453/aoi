@@ -1,0 +1,21 @@
+{
+  "name": "pack-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npx tsx watch src/index.ts",
+    "dev:client": "cd client && npx vite",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "cd client && npx vite build --outDir ../server/public",
+    "build:server": "cd server && npx tsc && cp src/db/schema.sql dist/server/src/db/schema.sql",
+    "start": "cd server && node dist/server/src/index.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "dependencies": {
+    "react-zoom-pan-pinch": "^4.0.3"
+  }
+}

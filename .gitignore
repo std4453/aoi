@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build output
+dist/
+*/dist/
+server/public/
+
+# Data directory (runtime data)
+data/
+
+# Database files
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Environment variables
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
