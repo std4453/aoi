@@ -1,11 +1,10 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Home, Upload, SlidersHorizontal, Settings } from 'lucide-react';
+import { Home, Upload, Settings } from 'lucide-react';
 import { saveHomeScrollY, clearHomeScrollY } from '../../lib/homeScrollStore';
 
 const navItems = [
   { to: '/', icon: Home, label: '图包' },
   { to: '/upload', icon: Upload, label: '上传' },
-  { to: '/presets', icon: SlidersHorizontal, label: '预设' },
   { to: '/settings', icon: Settings, label: '设置' },
 ];
 

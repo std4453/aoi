@@ -175,9 +175,9 @@ uploading → extracting → thumbnailing → extracted → generating → gener
 | `/upload` | `UploadPage` | 上传 (tus + 表单) |
 | `/packs/:id` | `PackDetailPage` | 图包详情 + 压缩配置 |
 | `/packs/:id?image=N` | `PackDetailPage` | 图包详情 + ImageViewer 打开在第 N 张 |
-| `/presets` | `PresetsPage` | 压缩预设管理 |
 | `/settings` | `SettingsPage` | 系统设置 |
 | `/settings/tags` | `TagManagerPage` | 标签管理 |
+| `/settings/presets` | `PresetsPage` | 压缩预设管理 |
 
 ### 前端
 - API 封装在 `api/client.ts`，`post()` 发送 JSON 时即使 body 为空也必须传 `{}`，否则 Fastify 返回 400 (FST_ERR_CTP_EMPTY_JSON_BODY)。

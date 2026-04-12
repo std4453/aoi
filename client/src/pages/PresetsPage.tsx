@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { usePresets } from '../hooks/usePresets';
 import type { CompressionOptions } from '../../../shared/types.js';
-import { Plus, Trash2, Star, Edit3, Check, X } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Star, Edit3, Check, X } from 'lucide-react';
 
 const DEFAULT_OPTIONS: CompressionOptions = {
   format: 'jpeg',
@@ -12,6 +13,7 @@ const DEFAULT_OPTIONS: CompressionOptions = {
 };
 
 export default function PresetsPage() {
+  const navigate = useNavigate();
   const { presets, loading, add, edit, remove, setDefault } = usePresets();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -73,7 +75,17 @@ export default function PresetsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 h-9">
+      <div className="h-9 flex items-center mb-4">
+        <button
+          onClick={() => navigate('/settings')}
+          className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft size={18} />
+          <span className="text-sm">返回</span>
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-white">压缩预设</h2>
         <button
           onClick={startAdd}

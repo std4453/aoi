@@ -25,9 +25,9 @@ export default function App() {
           <Route index element={<HomePage />} />
           <Route path="upload" element={<UploadPage />} />
           <Route path="packs/:id" element={<PackDetailPage />} />
-          <Route path="presets" element={<PresetsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/tags" element={<TagManagerPage />} />
+          <Route path="settings/presets" element={<PresetsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
