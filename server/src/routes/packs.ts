@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   listPacks,
+  listPacksPaginated,
   getPack,
   deletePack as deletePackFromDb,
   createPack,
@@ -20,9 +21,16 @@ import { config } from '../config.js';
 import { jobQueue } from '../services/job-queue.js';
 
 export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
-  // List all packs (with tags)
-  fastify.get('/api/packs', async () => {
-    return listPacks();
+  // List packs (paginated, with search)
+  fastify.get<{
+    Querystring: { page?: string; pageSize?: string; search?: string };
+  }>('/api/packs', async (request) => {
+    const { page, pageSize, search } = request.query;
+    return listPacksPaginated({
+      page: page ? parseInt(page, 10) : undefined,
+      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+      search: search || undefined,
+    });
   });
 
   // Get single pack (with tags)

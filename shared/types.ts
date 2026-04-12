@@ -103,3 +103,16 @@ export interface FileTreeNode {
   imageUrl?: string;
   children?: FileTreeNode[];
 }
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PackListParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+}

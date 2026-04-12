@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb, saveDb } from './connection.js';
-import type { Pack, PackStatus, Preset, Job, CompressionOptions, Tag } from '../types.js';
+import type { Pack, PackStatus, Preset, Job, CompressionOptions, Tag, PaginatedResponse, PackListParams } from '../types.js';
 
 function queryOne(sql: string, params?: any[]): any | null {
   const db = getDb();
@@ -148,6 +148,62 @@ export function listPacks(): Pack[] {
     tagMap.get(row.pack_id)!.push({ id: row.id, name: row.name });
   }
   return rows.map(row => rowToPack(row, tagMap.get(row.id) ?? []));
+}
+
+export function listPacksPaginated(params: PackListParams): PaginatedResponse<Pack> {
+  const page = Math.max(1, params.page ?? 1);
+  const pageSize = Math.max(1, Math.min(100, params.pageSize ?? 20));
+  const search = params.search?.trim() ?? '';
+  const keywords = search.split(/\s+/).filter(Boolean);
+
+  let whereClause = '';
+  const whereParams: string[] = [];
+  if (keywords.length > 0) {
+    const conditions: string[] = [];
+    for (const kw of keywords) {
+      conditions.push('p.name LIKE ?');
+      whereParams.push(`%${kw}%`);
+      conditions.push('t.name LIKE ?');
+      whereParams.push(`%${kw}%`);
+    }
+    whereClause = 'WHERE ' + conditions.join(' OR ');
+  }
+
+  // Count query
+  const countSql = keywords.length > 0
+    ? `SELECT COUNT(DISTINCT p.id) as cnt FROM packs p LEFT JOIN pack_tags pt ON pt.pack_id = p.id LEFT JOIN tags t ON pt.tag_id = t.id ${whereClause}`
+    : 'SELECT COUNT(*) as cnt FROM packs p';
+  const countRow = queryOne(countSql, whereParams.length > 0 ? whereParams : undefined);
+  const total = (countRow?.cnt as number) ?? 0;
+
+  // Data query
+  const offset = (page - 1) * pageSize;
+  const dataSql = keywords.length > 0
+    ? `SELECT p.* FROM packs p LEFT JOIN pack_tags pt ON pt.pack_id = p.id LEFT JOIN tags t ON pt.tag_id = t.id ${whereClause} GROUP BY p.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
+    : 'SELECT * FROM packs p ORDER BY p.created_at DESC LIMIT ? OFFSET ?';
+  const dataParams = keywords.length > 0
+    ? [...whereParams, pageSize, offset]
+    : [pageSize, offset];
+  const rows = queryAll(dataSql, dataParams);
+
+  // Batch load tags for returned pack IDs only
+  const packIds = rows.map(r => r.id as string);
+  const tagPlaceholders = packIds.map(() => '?').join(',');
+  const allTags = packIds.length > 0
+    ? queryAll(`SELECT pt.pack_id, t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.pack_id IN (${tagPlaceholders})`, packIds)
+    : [];
+  const tagMap = new Map<string, Tag[]>();
+  for (const row of allTags) {
+    if (!tagMap.has(row.pack_id)) tagMap.set(row.pack_id, []);
+    tagMap.get(row.pack_id)!.push({ id: row.id, name: row.name });
+  }
+
+  return {
+    items: rows.map(row => rowToPack(row, tagMap.get(row.id as string) ?? [])),
+    total,
+    page,
+    pageSize,
+  };
 }
 
 export function updatePackStatus(id: string, status: PackStatus, errorMessage?: string): void {

@@ -1,17 +1,18 @@
 import { get, post, patch, del, put } from './client';
-import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode } from '../../../shared/types.js';
+import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams } from '../../../shared/types.js';
 
 export interface TagWithStats extends Tag {
   count: number;
   covers: string[];
 }
 
-export interface PackListResponse {
-  packs: Pack[];
-}
-
-export function fetchPacks(): Promise<Pack[]> {
-  return get<Pack[]>('/packs');
+export function fetchPacks(params?: PackListParams, signal?: AbortSignal): Promise<PaginatedResponse<Pack>> {
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  if (params?.search) searchParams.set('search', params.search);
+  const qs = searchParams.toString();
+  return get<PaginatedResponse<Pack>>(`/packs${qs ? '?' + qs : ''}`, signal);
 }
 
 export function fetchPack(id: string): Promise<Pack> {

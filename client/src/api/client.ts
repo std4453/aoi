@@ -1,7 +1,7 @@
 const BASE = '/api';
 
-export async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+export async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { signal });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as any).error || `HTTP ${res.status}`);
