@@ -98,14 +98,26 @@ export default function PackDetailPage() {
     }
   }, [id]);
 
-  // Load thumbnails when thumbnailing finishes (must run BEFORE prevStatus update)
+  // Load file tree only
+  const loadFileTree = useCallback(async () => {
+    if (!id) return;
+    try {
+      const tree = await fetchFileTree(id).catch(() => []);
+      setFileTree(tree);
+    } catch (err) {
+      console.error('Failed to load file tree:', err);
+    }
+  }, [id]);
+
+  // Load thumbnails and file tree when thumbnailing finishes (must run BEFORE prevStatus update)
   const prevStatus = useRef(pack?.status);
   useEffect(() => {
     if (prevStatus.current === 'thumbnailing' && pack?.status === 'extracted') {
       loadThumbnails();
+      loadFileTree();
     }
     prevStatus.current = pack?.status;
-  }, [pack?.status, loadThumbnails]);
+  }, [pack?.status, loadThumbnails, loadFileTree]);
 
   // Pre-compute blurhash data URLs in background for faster ImageViewer switching
   useEffect(() => {
