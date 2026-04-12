@@ -80,33 +80,30 @@ function walkDir(dir: string): string[] {
   return results;
 }
 
-type StructureType = 'flat' | 'structured';
-
-function analyzeStructure(tempDir: string): { type: StructureType; basePath: string } {
+function analyzeStructure(tempDir: string): string {
   const entries = fs.readdirSync(tempDir, { withFileTypes: true });
   const dirs = entries.filter(e => e.isDirectory());
   const files = entries.filter(e => e.isFile());
 
   if (dirs.length === 0) {
-    return { type: 'flat', basePath: tempDir };
+    return tempDir;
   }
 
   if (dirs.length === 1 && files.length === 0) {
     const innerDir = path.join(tempDir, dirs[0].name);
     const innerEntries = fs.readdirSync(innerDir, { withFileTypes: true });
     const innerDirs = innerEntries.filter(e => e.isDirectory());
-    const innerFiles = innerEntries.filter(e => e.isFile());
 
     if (innerDirs.length === 0) {
       // Single wrapper directory with only files — strip it
-      return { type: 'flat', basePath: innerDir };
+      return innerDir;
     }
 
     // Single wrapper directory but contains subdirectories — strip wrapper, keep inner structure
-    return { type: 'structured', basePath: innerDir };
+    return innerDir;
   }
 
-  return { type: 'structured', basePath: tempDir };
+  return tempDir;
 }
 
 interface ExtractStats {
@@ -116,11 +113,11 @@ interface ExtractStats {
   totalVideosSize: number;
 }
 
-function moveFilesFromTemp(tempDir: string, imagesDir: string, videosDir: string): { stats: ExtractStats; structureType: StructureType } {
+function moveFilesFromTemp(tempDir: string, imagesDir: string, videosDir: string): ExtractStats {
   ensureDir(imagesDir);
   ensureDir(videosDir);
 
-  const { type, basePath } = analyzeStructure(tempDir);
+  const basePath = analyzeStructure(tempDir);
   const files = walkDir(basePath);
 
   let imageCount = 0;
@@ -135,13 +132,7 @@ function moveFilesFromTemp(tempDir: string, imagesDir: string, videosDir: string
 
     const dir = category === 'image' ? imagesDir : videosDir;
 
-    let destRelativePath: string;
-    if (type === 'flat') {
-      destRelativePath = filename;
-    } else {
-      destRelativePath = path.relative(basePath, srcPath);
-    }
-
+    const destRelativePath = path.relative(basePath, srcPath);
     const uniquePath = getUniqueName(dir, destRelativePath);
     const dstPath = path.join(dir, uniquePath);
     ensureDir(path.dirname(dstPath));
@@ -157,7 +148,7 @@ function moveFilesFromTemp(tempDir: string, imagesDir: string, videosDir: string
     }
   }
 
-  return { stats: { imageCount, videoCount, totalImagesSize, totalVideosSize }, structureType: type };
+  return { imageCount, videoCount, totalImagesSize, totalVideosSize };
 }
 
 // Check if 7z is available
@@ -176,7 +167,7 @@ function is7zAvailable(): boolean {
 }
 
 // Extract using 7z — supports ZIP, RAR, 7z with password
-function extract7z(archivePath: string, imagesDir: string, videosDir: string, password?: string): Promise<{ stats: ExtractStats; structureType: StructureType }> {
+function extract7z(archivePath: string, imagesDir: string, videosDir: string, password?: string): Promise<ExtractStats> {
   return new Promise((resolve, reject) => {
     const tempDir = path.join(path.dirname(imagesDir), '_temp_extract');
     ensureDir(tempDir);
@@ -210,7 +201,7 @@ function extract7z(archivePath: string, imagesDir: string, videosDir: string, pa
 }
 
 // Extract ZIP using yauzl — extract to temp dir first, then apply structure detection
-function extractZip(archivePath: string, imagesDir: string, videosDir: string): Promise<{ stats: ExtractStats; structureType: StructureType }> {
+function extractZip(archivePath: string, imagesDir: string, videosDir: string): Promise<ExtractStats> {
   const tempDir = path.join(path.dirname(imagesDir), '_temp_extract');
 
   return new Promise((resolve, reject) => {
@@ -330,13 +321,12 @@ export const archiveExtractor = {
       result = await extract7z(archivePath, imagesDir, videosDir);
     }
 
-    const { updatePackStats, updatePackStructureType } = await import('../db/repositories.js');
+    const { updatePackStats } = await import('../db/repositories.js');
     updatePackStats(pack.id, {
-      imageCount: result.stats.imageCount,
-      videoCount: result.stats.videoCount,
-      totalImagesSize: result.stats.totalImagesSize,
-      totalVideosSize: result.stats.totalVideosSize,
+      imageCount: result.imageCount,
+      videoCount: result.videoCount,
+      totalImagesSize: result.totalImagesSize,
+      totalVideosSize: result.totalVideosSize,
     });
-    updatePackStructureType(pack.id, result.structureType);
   },
 };

@@ -21,7 +21,6 @@ export interface Pack {
   originalSize: number;
   originalFormat: string;
   status: PackStatus;
-  structureType: 'flat' | 'structured';
   imageCount: number;
   videoCount: number;
   totalImagesSize: number;

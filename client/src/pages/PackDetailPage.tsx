@@ -381,8 +381,7 @@ export default function PackDetailPage() {
           </div>
         )}
 
-        {/* File range selector (structured packs only) */}
-        {pack.structureType === 'structured' && (
+        {/* File range selector */}
           <div className="mb-4">
             <label className="text-xs text-gray-400 mb-2 block">文件范围</label>
             <button
@@ -397,7 +396,6 @@ export default function PackDetailPage() {
               <FolderTree size={14} className="text-gray-500" />
             </button>
           </div>
-        )}
 
         {/* Advanced toggle */}
         <button
@@ -615,7 +613,7 @@ export default function PackDetailPage() {
           initialIndex={viewerIndex}
           onIndexChange={handleViewerIndexChange}
           onClose={closeViewer}
-          showFileTreeButton={pack?.structureType === 'structured'}
+          showFileTreeButton={true}
           onOpenFileTree={openFileTreeFromViewer}
           blurhashCache={blurhashCache.current}
         />
@@ -640,8 +638,8 @@ export default function PackDetailPage() {
         />
       )}
 
-      {/* File tree panel (always mounted for structured packs to preserve DOM state) */}
-      {pack.structureType === 'structured' && id && (
+      {/* File tree panel */}
+      {id && (
         <FileTreePanel
           visible={showFileTree !== null}
           mode={showFileTree === 'select' ? 'select' : 'view'}

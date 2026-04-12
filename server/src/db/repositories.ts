@@ -54,7 +54,6 @@ function rowToPack(row: any, tags?: Tag[]): Pack {
     originalSize: row.original_size,
     originalFormat: row.original_format,
     status: row.status,
-    structureType: row.structure_type ?? 'flat',
     imageCount: row.image_count ?? 0,
     videoCount: row.video_count ?? 0,
     totalImagesSize: row.total_images_size ?? 0,
@@ -228,10 +227,6 @@ export function updatePackCompressedSize(id: string, size: number): void {
     "UPDATE packs SET compressed_size = ?, updated_at = datetime('now') WHERE id = ?",
     [size, id]
   );
-}
-
-export function updatePackStructureType(id: string, type: 'flat' | 'structured'): void {
-  run("UPDATE packs SET structure_type = ?, updated_at = datetime('now') WHERE id = ?", [type, id]);
 }
 
 export type BlurhashEntry = { hash: string; width: number; height: number };
