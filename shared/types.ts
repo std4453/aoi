@@ -20,6 +20,7 @@ export interface Pack {
   originalFilename: string;
   originalSize: number;
   originalFormat: string;
+  sourceType: 'archive' | 'folder';
   status: PackStatus;
   imageCount: number;
   videoCount: number;
@@ -31,6 +32,17 @@ export interface Pack {
   tags: Tag[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PackFile {
+  id: string;
+  packId: string;
+  relativePath: string;
+  fileSize: number;
+  uploadId: string | null;
+  status: 'pending' | 'uploading' | 'uploaded' | 'failed';
+  createdAt: string;
+  uploadedAt: string | null;
 }
 
 export interface Tag {

@@ -12,7 +12,8 @@ import { registerDownloadRoutes } from './routes/download.js';
 import { registerSystemRoutes } from './routes/system.js';
 import { tusPlugin } from './plugins/tus.js';
 import { jobQueue } from './services/job-queue.js';
-import { listPacks } from './db/repositories.js';
+import { listPacks, updatePackStatus } from './db/repositories.js';
+import { removePackFiles } from './services/storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,6 +45,11 @@ async function main() {
   for (const pack of packs) {
     if (pack.status === 'thumbnailing') {
       jobQueue.enqueue(pack.id, 'thumbnail');
+    }
+    // Folder packs stuck in 'uploading' cannot be resumed — mark as failed
+    if (pack.status === 'uploading' && pack.sourceType === 'folder') {
+      updatePackStatus(pack.id, 'failed', '上传中断（页面已关闭）');
+      removePackFiles(pack.id);
     }
   }
 

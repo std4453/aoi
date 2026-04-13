@@ -1,6 +1,8 @@
 import m001 from './migrations/001_add_compressed_size.js';
 import m002 from './migrations/002_add_structure_type.js';
 import m003 from './migrations/003_add_blurhashes_and_backfill.js';
+import m004 from './migrations/004_add_source_type.js';
+import m005 from './migrations/005_add_pack_files.js';
 
 export interface Migration {
   name: string;
@@ -11,6 +13,8 @@ const migrations: Migration[] = [
   m001,
   m002,
   m003,
+  m004,
+  m005,
 ];
 
 export function runMigrations(db: any): void {

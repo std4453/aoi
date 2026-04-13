@@ -100,3 +100,19 @@ svg.lucide[width="48"] { width: 3rem; height: 3rem; }
 .modal-exit .modal-backdrop {
   animation: backdrop-exit 0.2s ease forwards;
 }
+
+/* Toast animation */
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-35px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-exit {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-35px) scale(0.95); }
+}
+.animate-toast-enter {
+  animation: toast-enter 0.2s ease-out forwards;
+}
+.animate-toast-exit {
+  animation: toast-exit 0.15s ease-in forwards;
+}

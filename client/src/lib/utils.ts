@@ -20,7 +20,7 @@ export const statusLabels: Record<string, string> = {
   uploading: '上传中',
   extracting: '解压中',
   thumbnailing: '生成缩略图中',
-  extracted: '已解压',
+  extracted: '可预览',
   generating: '生成中',
   generated: '已生成',
   failed: '失败',

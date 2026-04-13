@@ -1,6 +1,7 @@
 export type {
   CompressionOptions,
   Pack,
+  PackFile,
   PackStatus,
   Preset,
   Job,

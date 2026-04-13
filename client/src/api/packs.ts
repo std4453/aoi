@@ -1,5 +1,5 @@
 import { get, post, patch, del, put } from './client';
-import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams } from '../../../shared/types.js';
+import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams, PackFile } from '../../../shared/types.js';
 
 export interface TagWithStats extends Tag {
   count: number;
@@ -75,4 +75,25 @@ export function startProcessing(
 
 export function fetchFileTree(packId: string): Promise<FileTreeNode[]> {
   return get<FileTreeNode[]>(`/packs/${packId}/file-tree`);
+}
+
+// --- Folder Upload APIs ---
+
+export function createFolderPack(data: {
+  packName: string;
+  files: { relativePath: string; fileSize: number }[];
+  tagIds?: string[];
+}): Promise<{ id: string; packFiles: PackFile[] }> {
+  return post<{ id: string; packFiles: PackFile[] }>('/packs/folder-create', data);
+}
+
+export function confirmFolderFileComplete(packId: string, data: {
+  packFileId: string;
+  uploadId: string;
+}): Promise<{ allComplete: boolean }> {
+  return post<{ allComplete: boolean }>(`/packs/${packId}/folder-file-complete`, data);
+}
+
+export function cancelFolderUpload(packId: string): Promise<{ ok: boolean }> {
+  return del<{ ok: boolean }>(`/packs/${packId}/cancel-upload`);
 }

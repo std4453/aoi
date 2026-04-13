@@ -8,6 +8,8 @@ import {
   deletePack as deletePackFromDb,
   createPack,
   updatePackStatus,
+  updatePackStats,
+  updatePackStructureType,
   renamePack as renamePackInDb,
   listTags as listTagsFromDb,
   createTag as createTagInDb,
@@ -15,8 +17,14 @@ import {
   deleteTag as deleteTagFromDb,
   setPackTags as setPackTagsInDb,
   getPackBlurhashes,
+  createPackFiles,
+  getPackFiles,
+  getPackFile,
+  updatePackFileUploadId,
+  completePackFile,
+  getPendingPackFileCount,
 } from '../db/repositories.js';
-import { removePackFiles, ensureDir, getArchivePath, getThumbnailsDir, getExtractedImagesDir, getExtractedVideosDir } from '../services/storage.js';
+import { removePackFiles, ensureDir, getArchivePath, getThumbnailsDir, getExtractedImagesDir, getExtractedVideosDir, getFolderStagingDir, getUploadPath } from '../services/storage.js';
 import { config } from '../config.js';
 import { jobQueue } from '../services/job-queue.js';
 
@@ -240,6 +248,176 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       return getPack(pack.id);
     } catch (err) {
       console.error('[upload-complete] Error:', err);
+      reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Create a folder-type pack (before uploading individual files)
+  fastify.post<{
+    Body: {
+      packName: string;
+      files: { relativePath: string; fileSize: number }[];
+      tagIds?: string[];
+    };
+  }>('/api/packs/folder-create', async (request, reply) => {
+    const { packName, files, tagIds } = request.body;
+
+    if (!packName?.trim()) {
+      reply.code(400).send({ error: 'Pack name is required' });
+      return;
+    }
+    if (!files || files.length === 0) {
+      reply.code(400).send({ error: 'Files list cannot be empty' });
+      return;
+    }
+
+    try {
+      const totalSize = files.reduce((sum: number, f: { fileSize: number }) => sum + f.fileSize, 0);
+      const pack = createPack({
+        name: packName.trim(),
+        originalFilename: packName.trim(),
+        originalSize: totalSize,
+        originalFormat: 'folder',
+        sourceType: 'folder',
+      });
+
+      createPackFiles(pack.id, files);
+
+      if (tagIds && tagIds.length > 0) {
+        setPackTagsInDb(pack.id, tagIds);
+      }
+
+      // Create staging directory
+      const stagingDir = getFolderStagingDir(pack.id);
+      ensureDir(stagingDir);
+
+      const packFiles = getPackFiles(pack.id);
+      return { id: pack.id, packFiles };
+    } catch (err) {
+      console.error('[folder-create] Error:', err);
+      reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Confirm a single file upload for a folder pack
+  fastify.post<{
+    Params: { id: string };
+    Body: {
+      packFileId: string;
+      uploadId: string;
+    };
+  }>('/api/packs/:id/folder-file-complete', async (request, reply) => {
+    const { id } = request.params;
+    const { packFileId, uploadId } = request.body;
+
+    const pack = getPack(id);
+    if (!pack) {
+      reply.code(404).send({ error: 'Pack not found' });
+      return;
+    }
+    if (pack.sourceType !== 'folder' || pack.status !== 'uploading') {
+      reply.code(400).send({ error: 'Pack is not a folder upload in uploading state' });
+      return;
+    }
+
+    const packFile = getPackFile(packFileId);
+    if (!packFile || packFile.packId !== id) {
+      reply.code(400).send({ error: 'Pack file does not belong to this pack' });
+      return;
+    }
+
+    try {
+      // Move uploaded file from tus uploads dir to staging dir
+      const uploadPath = getUploadPath(uploadId);
+      if (!fs.existsSync(uploadPath)) {
+        reply.code(404).send({ error: 'Upload file not found' });
+        return;
+      }
+
+      const stagingDir = getFolderStagingDir(id);
+      const destRelativePath = packFile.relativePath;
+      const destPath = path.join(stagingDir, destRelativePath);
+      ensureDir(path.dirname(destPath));
+      fs.renameSync(uploadPath, destPath);
+
+      // Clean up tus .info metadata file
+      const infoPath = uploadPath + '.info';
+      if (fs.existsSync(infoPath)) {
+        fs.unlinkSync(infoPath);
+      }
+
+      // Update pack file status
+      updatePackFileUploadId(packFileId, uploadId);
+      completePackFile(packFileId);
+
+      // Check if all files are uploaded
+      const pendingCount = getPendingPackFileCount(id);
+      if (pendingCount === 0) {
+        // Process the staging directory — classify files into images/videos
+        const { folderProcessor } = await import('../services/folder-processor.js');
+        const result = folderProcessor.processUploadedFolder(id);
+
+        updatePackStats(id, {
+          imageCount: result.imageCount,
+          videoCount: result.videoCount,
+          totalImagesSize: result.totalImagesSize,
+          totalVideosSize: result.totalVideosSize,
+        });
+        updatePackStructureType(id, result.structureType);
+        updatePackStatus(id, 'thumbnailing');
+
+        // Enqueue thumbnail generation
+        await jobQueue.enqueue(id, 'thumbnail');
+      }
+
+      return { allComplete: pendingCount === 0 };
+    } catch (err) {
+      console.error('[folder-file-complete] Error:', err);
+      reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Cancel a folder upload — clean up pack and uploaded files
+  fastify.delete<{
+    Params: { id: string };
+  }>('/api/packs/:id/cancel-upload', async (request, reply) => {
+    const { id } = request.params;
+    const pack = getPack(id);
+
+    if (!pack) {
+      reply.code(404).send({ error: 'Pack not found' });
+      return;
+    }
+    if (pack.sourceType !== 'folder' || pack.status !== 'uploading') {
+      reply.code(400).send({ error: 'Pack is not a folder upload in uploading state' });
+      return;
+    }
+
+    try {
+      // Clean up tus upload files for any uploaded/in-progress files
+      const packFiles = getPackFiles(id);
+      for (const pf of packFiles) {
+        if (pf.uploadId) {
+          const uploadPath = getUploadPath(pf.uploadId);
+          if (fs.existsSync(uploadPath)) {
+            fs.unlinkSync(uploadPath);
+          }
+          const infoPath = uploadPath + '.info';
+          if (fs.existsSync(infoPath)) {
+            fs.unlinkSync(infoPath);
+          }
+        }
+      }
+
+      // Remove extracted/staging files
+      removePackFiles(id);
+
+      // Delete pack from database (cascades to pack_files, jobs, pack_tags)
+      deletePackFromDb(id);
+
+      return { ok: true };
+    } catch (err) {
+      console.error('[cancel-upload] Error:', err);
       reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });

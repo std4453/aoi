@@ -11,6 +11,7 @@ import BlurhashPlaceholder, { blurhashToDataUrl } from '../components/BlurhashPl
 import TagSelector from '../components/TagSelector';
 import FileTreePanel from '../components/FileTreePanel';
 import Modal from '../components/Modal';
+import { showLoading } from '../components/Toast';
 
 const DEFAULT_OPTIONS: CompressionOptions = {
   format: 'jpeg',
@@ -129,6 +130,15 @@ export default function PackDetailPage() {
     }
   }, [thumbnails]);
 
+  // Show loading toast after data loads, while pack is not in an available state
+  const isAvailable = pack?.status === 'extracted' || pack?.status === 'generating' || pack?.status === 'generated' || pack?.status === 'failed';
+  useEffect(() => {
+    if (loading) return;
+    if (isAvailable) return;
+    const closeLoading = showLoading('处理中');
+    return closeLoading;
+  }, [loading, isAvailable]);
+
   // Auto-refresh pack status while extracting/thumbnailing
   useEffect(() => {
     if (pack?.status !== 'extracting' && pack?.status !== 'thumbnailing') return;
@@ -228,8 +238,43 @@ export default function PackDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div>
+        {/* Back button */}
+        <div className="h-9 flex items-center mb-4">
+          <div className="w-10 bg-gray-800 rounded animate-pulse" style={{ height: '1.3125rem' }} />
+        </div>
+
+        {/* Header skeleton */}
+        <div className="mb-6">
+          <div className="w-48 bg-gray-800 rounded animate-pulse mb-2" style={{ height: '1.5625rem' }} />
+          <div className="flex gap-3">
+            <div className="w-20 bg-gray-800 rounded animate-pulse" style={{ height: '1.3125rem' }} />
+            <div className="w-24 bg-gray-800 rounded animate-pulse" style={{ height: '1.3125rem' }} />
+            <div className="w-16 bg-gray-800 rounded animate-pulse" style={{ height: '1.3125rem' }} />
+          </div>
+        </div>
+
+        {/* Thumbnail grid skeleton */}
+        <div className="mb-6">
+          <div className="w-20 bg-gray-800 rounded animate-pulse mb-3" style={{ height: '1.3125rem' }} />
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="aspect-square bg-gray-800 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        </div>
+
+        {/* Config skeleton */}
+        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+          <div className="w-20 bg-gray-800 rounded animate-pulse mb-4" style={{ height: '1.3125rem' }} />
+          <div className="space-y-3">
+            <div className="bg-gray-800 rounded-lg animate-pulse" style={{ height: '2.25rem' }} />
+            <div className="bg-gray-800 rounded-lg animate-pulse" style={{ height: '2.25rem' }} />
+          </div>
+          <div className="mt-6">
+            <div className="bg-gray-800 rounded-xl animate-pulse" style={{ height: '2.75rem' }} />
+          </div>
+        </div>
       </div>
     );
   }

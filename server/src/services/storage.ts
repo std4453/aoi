@@ -53,6 +53,10 @@ export function getUploadPath(uploadId: string): string {
   return path.join(config.dirs.uploads, uploadId);
 }
 
+export function getFolderStagingDir(packId: string): string {
+  return path.join(config.dirs.extracted, packId, '_staging');
+}
+
 export async function getDiskSpace(): Promise<{ free: number; size: number; used: number }> {
   const space = await checkDiskSpace(config.dataDir);
   return {

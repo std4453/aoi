@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb, saveDb } from './connection.js';
-import type { Pack, PackStatus, Preset, Job, CompressionOptions, Tag, PaginatedResponse, PackListParams } from '../types.js';
+import type { Pack, PackStatus, Preset, Job, CompressionOptions, Tag, PaginatedResponse, PackListParams, PackFile } from '../types.js';
 
 function queryOne(sql: string, params?: any[]): any | null {
   const db = getDb();
@@ -53,6 +53,7 @@ function rowToPack(row: any, tags?: Tag[]): Pack {
     originalFilename: row.original_filename,
     originalSize: row.original_size,
     originalFormat: row.original_format,
+    sourceType: row.source_type ?? 'archive',
     status: row.status,
     imageCount: row.image_count ?? 0,
     videoCount: row.video_count ?? 0,
@@ -119,11 +120,15 @@ export function createPack(data: {
   originalSize: number;
   originalFormat: string;
   archivePassword?: string;
+  sourceType?: 'archive' | 'folder';
 }): Pack {
   const id = uuidv4();
+  const sourceType = data.sourceType ?? 'archive';
+  // Folder packs start in 'uploading', archive packs default to 'uploading' (schema default)
+  // and transition to 'extracting' when the extract job starts
   run(
-    'INSERT INTO packs (id, name, original_filename, original_size, original_format, archive_password) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, data.name, data.originalFilename, data.originalSize, data.originalFormat, data.archivePassword ?? null]
+    'INSERT INTO packs (id, name, original_filename, original_size, original_format, archive_password, source_type, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, data.name, data.originalFilename, data.originalSize, data.originalFormat, data.archivePassword ?? null, sourceType, sourceType === 'folder' ? 'uploading' : 'uploading']
   );
   return getPack(id)!;
 }
@@ -377,4 +382,65 @@ export function completeUpload(id: string, packId: string): void {
     packId,
     id,
   ]);
+}
+
+// --- Pack Files (folder uploads) ---
+
+function rowToPackFile(row: any): PackFile {
+  return {
+    id: row.id,
+    packId: row.pack_id,
+    relativePath: row.relative_path,
+    fileSize: row.file_size,
+    uploadId: row.upload_id ?? null,
+    status: row.status,
+    createdAt: row.created_at,
+    uploadedAt: row.uploaded_at ?? null,
+  };
+}
+
+export function createPackFiles(packId: string, files: { relativePath: string; fileSize: number }[]): void {
+  for (const file of files) {
+    const id = uuidv4();
+    run(
+      'INSERT INTO pack_files (id, pack_id, relative_path, file_size, status) VALUES (?, ?, ?, ?, ?)',
+      [id, packId, file.relativePath, file.fileSize, 'pending']
+    );
+  }
+}
+
+export function getPackFiles(packId: string): PackFile[] {
+  return queryAll('SELECT * FROM pack_files WHERE pack_id = ? ORDER BY created_at', [packId]).map(rowToPackFile);
+}
+
+export function getPackFile(id: string): PackFile | undefined {
+  const row = queryOne('SELECT * FROM pack_files WHERE id = ?', [id]);
+  if (!row) return undefined;
+  return rowToPackFile(row);
+}
+
+export function updatePackFileUploadId(id: string, uploadId: string): void {
+  run("UPDATE pack_files SET upload_id = ?, status = 'uploading' WHERE id = ?", [uploadId, id]);
+}
+
+export function completePackFile(id: string): void {
+  run("UPDATE pack_files SET status = 'uploaded', uploaded_at = datetime('now') WHERE id = ?", [id]);
+}
+
+export function failPackFile(id: string): void {
+  run("UPDATE pack_files SET status = 'failed' WHERE id = ?", [id]);
+}
+
+export function getPendingPackFileCount(packId: string): number {
+  const row = queryOne(
+    "SELECT COUNT(*) as cnt FROM pack_files WHERE pack_id = ? AND status NOT IN ('uploaded')",
+    [packId]
+  );
+  return (row?.cnt as number) ?? 0;
+}
+
+// --- Pack Structure Type ---
+
+export function updatePackStructureType(id: string, structureType: string): void {
+  run("UPDATE packs SET structure_type = ?, updated_at = datetime('now') WHERE id = ?", [structureType, id]);
 }

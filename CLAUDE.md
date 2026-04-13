@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-个人图片包下载服务。用户上传 ZIP/RAR 压缩包，服务端解压、生成缩略图、按配置压缩后供下载。
+个人图片包下载服务。用户上传 ZIP/RAR 压缩包或文件夹，服务端解压/整理、生成缩略图、按配置压缩后供下载。
 
 ## 技术栈
 
@@ -49,7 +49,9 @@ pack-server/
 │       │   ├── migrations/      # 独立迁移脚本（每个文件一个 migration）
 │       │   │   ├── 001_add_compressed_size.ts
 │       │   │   ├── 002_add_structure_type.ts
-│       │   │   └── 003_add_blurhashes_and_backfill.ts
+│       │   │   ├── 003_add_blurhashes_and_backfill.ts
+│       │   │   ├── 004_add_source_type.ts
+│       │   │   └── 005_add_pack_files.ts
 │       │   ├── repositories.ts  # 所有 CRUD 操作
 │       │   └── schema.sql       # 初始建表 (packs, presets, jobs, uploads, tags, pack_tags)
 │       ├── plugins/tus.ts       # tus 上传插件
@@ -62,6 +64,8 @@ pack-server/
 │       └── services/
 │           ├── job-queue.ts         # 串行任务队列 (extract → thumbnail → compress)
 │           ├── archive-extractor.ts # ZIP/RAR 解压 + 目录结构检测
+│           ├── file-classifier.ts   # 文件分类（图片/视频/跳过）+ 目录结构分析（从 archive-extractor 提取）
+│           ├── folder-processor.ts  # 文件夹上传后的文件整理（staging → images/videos）
 │           ├── thumbnail-generator.ts
 │           ├── image-compressor.ts
 │           ├── archive-generator.ts # 生成最终 ZIP
@@ -91,8 +95,9 @@ pack-server/
 │       │   ├── FileTreePanel.tsx   # 文件结构浏览/选择 (底部面板)
 │       │   ├── BottomPanel.tsx     # 底部面板通用组件 (slide-up 动画)
 │       │   ├── Modal.tsx           # 居中弹窗通用组件 (opacity+scale 动画)
-│       │   └── TagSelector.tsx     # 标签选择弹窗
-│       ├── hooks/                  # usePacks, usePresets, useUpload, useJobProgress, useImagePool
+│       │   ├── TagSelector.tsx     # 标签选择弹窗
+│       │   └── Toast.tsx           # 全局 Toast 通知（模块级 listener 模式）
+│       ├── hooks/                  # usePacks, usePresets, useUpload, useFolderUpload, useJobProgress, useImagePool
 │       ├── lib/utils.ts            # formatBytes, formatDate, statusLabels/Colors
 │       └── styles/globals.css      # Tailwind 入口
 └── data/                       # 运行时数据 (gitignore)
@@ -108,14 +113,21 @@ pack-server/
 ### Pack 状态机
 
 ```
-uploading → extracting → thumbnailing → extracted → generating → generated
-    ↓           ↓           ↓              ↓          ↓
-  failed       failed      failed        failed     failed
+压缩包: uploading → extracting → thumbnailing → extracted → generating → generated
+              ↓           ↓           ↓              ↓          ↓
+            failed      failed      failed        failed     failed
+
+文件夹: uploading → thumbnailing → extracted → generating → generated
+             ↓           ↓              ↓          ↓
+           failed      failed        failed     failed
 ```
+
+文件夹图包（`sourceType === 'folder'`）跳过 `extracting` 阶段：上传完成后直接整理文件进入 `thumbnailing`。
 
 ### 关键表
 
-- **packs**: 图包元数据 + 状态 + 统计 (图片数/视频数/大小)
+- **packs**: 图包元数据 + 状态 + 统计 (图片数/视频数/大小) + `source_type`（`'archive'` 或 `'folder'`）
+- **pack_files**: 文件夹图包的文件上传追踪（`status`: pending → uploading → uploaded / failed），通过 `pack_id` CASCADE 关联 packs
 - **tags**: 标签 (name UNIQUE)
 - **pack_tags**: 多对多关联
 - **presets**: 压缩预设 (options 为 JSON)
@@ -172,7 +184,7 @@ uploading → extracting → thumbnailing → extracted → generating → gener
 | 路径 | 页面 | 说明 |
 |------|------|------|
 | `/` | `HomePage` | 图包列表，多关键词搜索 |
-| `/upload` | `UploadPage` | 上传 (tus + 表单) |
+| `/upload` | `UploadPage` | 上传（压缩包 tus + 文件夹并行上传） |
 | `/packs/:id` | `PackDetailPage` | 图包详情 + 压缩配置 |
 | `/packs/:id?image=N` | `PackDetailPage` | 图包详情 + ImageViewer 打开在第 N 张 |
 | `/settings` | `SettingsPage` | 系统设置 |
@@ -183,12 +195,13 @@ uploading → extracting → thumbnailing → extracted → generating → gener
 - API 封装在 `api/client.ts`，`post()` 发送 JSON 时即使 body 为空也必须传 `{}`，否则 Fastify 返回 400 (FST_ERR_CTP_EMPTY_JSON_BODY)。
 - 页面使用 `React.lazy()` 按需加载。
 - `PackDetailPage` 中状态轮询：`extracting`/`thumbnailing` 期间每秒刷新元数据，`thumbnailing → extracted` 转换时加载缩略图。**注意 React effect 顺序**：检查状态转换的 effect 必须在更新 ref 的逻辑之前执行。
+- `PackDetailPage` 加载期间显示骨架屏（rem 高度匹配实际文字尺寸），加载完成且状态非 available 时显示 loading toast。
 - `useRef` + `useEffect` 顺序陷阱：多个 effect 依赖同一状态时，按定义顺序执行。如果先更新 ref 再检查旧值，检查会失败。
 
 ### UI 约定
 - 深色主题，使用 Tailwind CSS 4。
 - 图标统一使用 Lucide React，默认 16px。
-- 中文 UI 文案（状态标签、按钮文字、提示信息等）。
+- 中文 UI 文案（状态标签、按钮文字、提示信息等）。`extracted` 状态显示为"可预览"而非"已解压"。
 - 表单控件（checkbox 等）使用自定义样式，不用浏览器原生样式。
 
 ### 通用弹窗组件
@@ -270,6 +283,55 @@ ImageViewer 切换图片时，从对象池直接取出已加载的 `HTMLImageEle
 - 滚动使用 `scrollIntoView({ block: 'center', container: 'nearest' })`，`container: 'nearest'` 允许在动画期间正确滚动
 - `keepMounted` 模式下，面板隐藏时 `focusPath` 仍跟随当前图片变化，用 `behavior: 'instant'` 预滚动；面板可见时用 `behavior: 'smooth'`
 - Sticky 文件夹头：`position: sticky` + `top: depth * 36 - 5`（-5 补偿容器 padding）
+
+### 文件夹上传
+
+文件夹上传支持用户直接上传文件夹，无需先打包为压缩包。文件夹和压缩包是两种不同的图包来源类型（`sourceType`）。
+
+**服务端流程**：
+- `POST /api/packs/folder-create`：创建图包（`sourceType: 'folder'`, 初始状态 `uploading`）+ 创建 `pack_files` 记录 + 创建 staging 目录
+- `POST /api/packs/:id/folder-file-complete`：单个文件上传完成后调用，将文件从 tus 临时目录移动到 staging 目录，标记 pack_file 为 uploaded；所有文件完成后调用 `folder-processor.ts` 整理文件（分类图片/视频、检测目录结构）→ 入队缩略图任务
+- `DELETE /api/packs/:id/cancel-upload`：取消上传，清理 tus 文件 + 删除图包
+- `folder-processor.ts`：复用 `file-classifier.ts` 的 `moveFilesFromTemp()` 和 `analyzeStructure()`，将 staging 目录中的文件分类移动到 images/ 和 videos/ 目录
+- 服务启动恢复：文件夹图包卡在 `uploading` 状态 → 标记为 `failed`（不支持断点续传）
+
+**客户端流程** (`useFolderUpload.ts`)：
+- **扫描**：通过 `<input webkitdirectory>` 选择文件夹，遍历 FileList 读取 `webkitRelativePath` 和 `size`
+- **上传**：3 并发 tus 上传（信号量模式），每个文件上传完成后调用 `confirmFolderFileComplete` API
+- **暂停**：调用 tus `abort()` 中止活跃上传，将 packFileId 记入 `abortedPfIdsRef`；`onError`/`onSuccess` 回调检查此集合，若匹配则跳过（避免中止后的回调触发新上传）
+- **恢复**：清空 `abortedPfIdsRef`，将暂停的文件重新入队头部，重启上传
+- **取消**：中止所有上传 → 调用 `cancelFolderUpload` API → 重置状态
+- **拖拽上传**：`webkitGetAsEntry()` 检测拖入的是文件还是文件夹，文件夹递归读取 `FileSystemDirectoryEntry`
+
+**UploadPage 双模式**：
+- 初始界面同时提供"选择压缩包"和"选择文件夹"两个入口
+- 两种模式共享标签选择器，压缩包模式额外支持密码输入，文件夹模式无密码
+- 取消上传（两种模式）均需确认弹窗
+- 文件夹上传进度区显示总进度 + 已上传/总文件数 + 可展开的单文件详情（自动滚动：记录用户最后滚动时间，300ms 内无主动滚动时，新上传的文件自动滚动入视野）
+
+### Toast 通知系统
+
+全局 Toast 通知，采用模块级 listener 模式，无需 props 传递或 context。
+
+**组件** (`components/Toast.tsx`)：
+- 挂载在 `AppShell` 中，通过模块级 `addListener` / `removeListener` 函数与命令式 API 通信
+- 支持类型：`default`（灰色）、`info`（蓝色）、`success`（绿色）、`error`（红色）、`warning`（黄色）、`loading`（旋转图标）
+- 自动消失：default/info/success 2.5s，error/warning 3s，loading 不自动消失
+- loading 类型不可点击关闭，其他类型点击可关闭
+
+**命令式 API**：
+- `showToast(message)` / `showInfo(message)` / `showSuccess(message)` / `showError(message)` / `showWarning(message)` — 自动消失
+- `showLoading(message)` — 返回关闭函数 `() => void`，调用后触发退出动画并移除
+
+**动画**（`globals.css`）：
+- 入场：`toast-enter`（0.2s ease-out，从上方 -35px 缩放 0.95 滑入）
+- 退场：`toast-exit`（0.15s ease-in，向上 -35px 缩放 0.95 滑出）
+- 退场通过 `exiting` 状态标记触发，150ms 后从 DOM 移除
+
+**使用场景**：
+- 上传格式错误 → `showInfo('只支持 ZIP、RAR 格式或文件夹')`
+- 图包详情页处理中 → `showLoading('处理中')`（`loading` 为 false 且状态非 available 时显示）
+- 其他操作反馈（成功/失败/警告）
 
 ### 构建部署
 - `npm run build` 将前端构建到 `server/public`，后端编译到 `server/dist/server/src/`。
