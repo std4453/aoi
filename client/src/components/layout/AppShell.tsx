@@ -1,7 +1,7 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Home, Upload, Settings } from 'lucide-react';
-import { saveHomeScrollY, clearHomeScrollY, getLastHomeSearch, saveLastHomeSearch, clearLastHomeSearch } from '../../lib/homeScrollStore';
+import { saveHomeScrollY, clearHomeScrollY, getLastHomeSearch, saveLastHomeSearch, triggerHomeReset } from '../../lib/homeStore';
 import Toast from '../Toast';
 
 const navItems = [
@@ -14,6 +14,12 @@ export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const lastTabClickRef = useRef(0);
+
+  useEffect(() => {
+    if (location.pathname !== '/') {
+      window.scrollTo(0, 0);
+    }
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-950">
@@ -41,11 +47,10 @@ export default function AppShell() {
                       const isDoubleTap = now - lastTabClickRef.current < 300;
                       lastTabClickRef.current = now;
 
-                      clearHomeScrollY();
                       if (isAtTop || isDoubleTap) {
-                        clearLastHomeSearch();
-                        window.dispatchEvent(new CustomEvent('home:hard-reset'));
+                        triggerHomeReset();
                       } else {
+                        clearHomeScrollY();
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                       }
                     } else {

@@ -4,6 +4,7 @@ import { fetchPack, fetchThumbnails, fetchFileTree, startProcessing, removePack,
 import { usePresets } from '../hooks/usePresets';
 import { useJobProgress } from '../hooks/useJobProgress';
 import { formatBytes, statusLabels, statusColors } from '../lib/utils';
+import { getLastHomeSearch, clearPacksCache } from '../lib/homeStore';
 import type { Pack, CompressionOptions, FileSelection, FileTreeNode } from '../../../shared/types.js';
 import { Download, Play, ArrowLeft, Loader2, Image, Video, HardDrive, Pencil, Trash2, Tag, FolderTree } from 'lucide-react';
 import ImageViewer from '../components/ImageViewer';
@@ -228,7 +229,9 @@ export default function PackDetailPage() {
     setDeleting(true);
     try {
       await removePack(id);
-      navigate('/');
+      clearPacksCache();
+      const saved = getLastHomeSearch();
+      navigate(saved ? `/${saved}` : '/');
     } catch (err) {
       alert(err instanceof Error ? err.message : '删除失败');
     }
@@ -296,7 +299,7 @@ export default function PackDetailPage() {
       {/* Back button */}
       <div className="h-9 flex items-center mb-4">
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate(-1)}
           className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
         >
           <ArrowLeft size={18} />

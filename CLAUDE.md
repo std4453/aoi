@@ -99,6 +99,7 @@ pack-server/
 │       │   └── Toast.tsx           # 全局 Toast 通知（模块级 listener 模式）
 │       ├── hooks/                  # usePacks, usePresets, useUpload, useFolderUpload, useJobProgress, useImagePool
 │       ├── lib/utils.ts            # formatBytes, formatDate, statusLabels/Colors
+│       ├── lib/homeStore.ts        # HomePage 跨挂载状态保持（缓存/滚动/搜索/重置回调）
 │       └── styles/globals.css      # Tailwind 入口
 └── data/                       # 运行时数据 (gitignore)
     ├── archives/               # 原始压缩包
@@ -215,6 +216,36 @@ pack-server/
   - `className` 可扩展（如 `max-h-[80vh] flex flex-col`）
   - 动画：opacity + scale + translateY（`.modal-enter` / `.modal-exit`）
 - 使用模式：父组件用 `null | 'open' | 'closing'` 三态管理弹窗。`onClose` 设为 `'closing'` 触发退出动画，`onClosed` 设为 `null` 卸载组件。需要 `keepMounted` 时可简化为 `null | 'open'`，关闭时直接设 `null`。
+
+### HomePage 状态保持 (homeStore)
+
+`client/src/lib/homeStore.ts` 集中管理 HomePage 跨组件挂载/卸载的状态保持，使切换到其他页面再返回时能完整恢复（滚动位置、搜索分页、图包数据），无需重新请求。
+
+**设计原则**：
+- 不使用 zustand 等状态库——这些状态全是命令式读写，不需要驱动 re-render，模块级变量 + 函数是最合适的抽象层级
+- `usePacks` hook 只负责 React state 和 fetch 逻辑，不持有模块级缓存；缓存读写通过 homeStore 的函数完成
+
+**三个数据区域**：
+
+| 区域 | 保存时机 | 恢复时机 | API |
+|------|---------|---------|-----|
+| 图包数据缓存 | 每次 fetch 成功后 `setPacksCache()` | `usePacks` mount 时 `getPacksCache(page, search)` 命中则跳过请求 | `getPacksCache` / `setPacksCache` / `clearPacksCache` |
+| 滚动位置 | 离开 HomePage 时 `saveHomeScrollY()` | `useLayoutEffect` + rAF 在 paint 前 `window.scrollTo()` | `getHomeScrollY` / `saveHomeScrollY` / `clearHomeScrollY` |
+| 搜索/分页 URL | `useEffect` 监听 `page`/`search` 变化时 `saveLastHomeSearch()` | 点击图包 tab 时 `getLastHomeSearch()` 拼接导航 URL | `getLastHomeSearch` / `saveLastHomeSearch` / `clearLastHomeSearch` |
+
+**硬重置** (`triggerHomeReset` / `onHomeReset`)：
+- 用户双击图包 tab 或在顶部单击时触发 `triggerHomeReset()`，清空所有缓存 + 调用 HomePage 注册的回调
+- HomePage 通过 `onHomeReset(callback)` 注册回调，执行 `hardReset()`（清空 React state + 重新 fetch）+ `window.scrollTo(0, 0)`
+- 使用 `hardResetRef` 模式避免回调闭包捕获过期的 `hardReset` 函数
+
+**外部缓存失效**：
+- UploadPage 上传完成后调用 `clearPacksCache()`，下次回到 HomePage 会重新 fetch
+- PackDetailPage 删除图包后调用 `clearPacksCache()`，同理
+
+**关键交互流程**：
+- 从任意页面点击图包 tab：`getLastHomeSearch()` 恢复 URL 参数 → `getPacksCache()` 命中则直接渲染 → `useLayoutEffect` + rAF 恢复滚动
+- PackDetailPage 返回按钮：`navigate(-1)` 保留完整 URL 参数（而非 `navigate('/')` 丢失搜索分页）
+- PackDetailPage 删除后跳转：`navigate(saved ? '/${saved}' : '/')` 带保存的搜索参数
 
 ### 长图处理
 - **判定规则**：`height > width * 3`（ImageViewer 和 image-compressor 统一使用此阈值）

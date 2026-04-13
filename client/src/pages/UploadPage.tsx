@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUpload } from '../hooks/useUpload';
 import { useFolderUpload } from '../hooks/useFolderUpload';
-import { usePacks } from '../hooks/usePacks';
+import { clearPacksCache } from '../lib/homeStore';
 import { formatBytes } from '../lib/utils';
 import { Upload, Pause, Play, X, CheckCircle, AlertCircle, FileArchive, FolderOpen, Lock, Eye, EyeOff, Tag, ChevronDown, ChevronUp } from 'lucide-react';
 import TagSelector from '../components/TagSelector';
@@ -13,7 +13,6 @@ type UploadMode = 'archive' | 'folder' | null;
 
 export default function UploadPage() {
   const navigate = useNavigate();
-  const { refresh } = usePacks();
 
   // Archive upload
   const { progress: archiveProgress, status: archiveStatus, error: archiveError, packId: archivePackId, startUpload: startArchiveUpload, pause: pauseArchive, resume: resumeArchive, cancel: cancelArchive, reset: resetArchive } = useUpload();
@@ -250,7 +249,7 @@ export default function UploadPage() {
 
   const handleDone = () => {
     resetToIdle();
-    refresh();
+    clearPacksCache();
   };
 
   const handleViewPack = () => {

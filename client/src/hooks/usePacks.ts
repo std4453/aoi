@@ -1,22 +1,28 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchPacks, removePack } from '../api/packs';
+import { getPacksCache, setPacksCache, clearPacksCache } from '../lib/homeStore';
 import type { Pack, PackListParams } from '../../../shared/types.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 
 export function usePacks() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [packs, setPacks] = useState<Pack[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   // Read page/search from URL
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
   const search = searchParams.get('search') || '';
+
+  const cached = getPacksCache(page, search);
+  const hit = cached !== null;
+
+  const [packs, setPacks] = useState<Pack[]>(hit ? cached.packs : []);
+  const [total, setTotal] = useState(hit ? cached.total : 0);
+  const [loading, setLoading] = useState(!hit);
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const skipRef = useRef(hit);
 
   const refresh = useCallback(async (params: PackListParams) => {
     // Cancel in-flight request
@@ -31,6 +37,7 @@ export function usePacks() {
       if (controller.signal.aborted) return;
       setPacks(data.items);
       setTotal(data.total);
+      setPacksCache(data.items, data.total, page, search);
 
       // Edge case: current page is empty but total > 0 → jump to last page
       if (data.total > 0 && data.items.length === 0 && data.page > 1) {
@@ -50,8 +57,12 @@ export function usePacks() {
     }
   }, [setSearchParams]);
 
-  // Fetch on page or search change
+  // Fetch on page or search change (skip first run when cache hit)
   useEffect(() => {
+    if (skipRef.current) {
+      skipRef.current = false;
+      return;
+    }
     const params: PackListParams = { page, pageSize: DEFAULT_PAGE_SIZE };
     if (search) params.search = search;
     refresh(params);
@@ -77,6 +88,7 @@ export function usePacks() {
   }, [setSearchParams]);
 
   const hardReset = useCallback(() => {
+    clearPacksCache();
     setPacks([]);
     setTotal(0);
     setError(null);

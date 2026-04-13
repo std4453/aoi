@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePacks } from '../hooks/usePacks';
 import { formatBytes, statusLabels, statusColors } from '../lib/utils';
-import { getHomeScrollY, saveHomeScrollY, saveLastHomeSearch, clearHomeScrollY } from '../lib/homeScrollStore';
+import { getHomeScrollY, saveHomeScrollY, saveLastHomeSearch, onHomeReset } from '../lib/homeStore';
 import { Trash2, Search, X, Image, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 function renderPageButtons(currentPage: number, totalPages: number, goToPage: (p: number) => void) {
@@ -70,7 +70,6 @@ export default function HomePage() {
   const [debouncing, setDebouncing] = useState(false);
   const restoredRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const isFirstRender = useRef(true);
   const pendingScrollTopRef = useRef(false);
 
   const totalPages = Math.ceil(total / pageSize);
@@ -125,15 +124,14 @@ export default function HomePage() {
   }, [page, search]);
 
   // Handle hard reset from tab double-click / click-at-top
+  const hardResetRef = useRef(hardReset);
+  hardResetRef.current = hardReset;
   useEffect(() => {
-    const handler = () => {
-      hardReset();
-      clearHomeScrollY();
+    return onHomeReset(() => {
+      hardResetRef.current();
       window.scrollTo(0, 0);
-    };
-    window.addEventListener('home:hard-reset', handler);
-    return () => window.removeEventListener('home:hard-reset', handler);
-  }, [hardReset]);
+    });
+  }, []);
 
   const handlePageChange = useCallback((p: number) => {
     goToPage(p);
@@ -150,18 +148,8 @@ export default function HomePage() {
     }
   }, [loading]);
 
-  // Restore scroll position after content renders
-  useEffect(() => {
-    // Skip on first render while data is loading
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      if (!loading) {
-        restoredRef.current = true;
-        const saved = getHomeScrollY();
-        if (saved > 0) requestAnimationFrame(() => window.scrollTo(0, saved));
-      }
-      return;
-    }
+  // Restore scroll position before paint when data is available
+  useLayoutEffect(() => {
     if (!loading && !restoredRef.current) {
       restoredRef.current = true;
       const saved = getHomeScrollY();
