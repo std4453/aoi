@@ -11,6 +11,8 @@ import { showInfo } from '../components/Toast';
 
 type UploadMode = 'archive' | 'folder' | null;
 
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
 export default function UploadPage() {
   const navigate = useNavigate();
 
@@ -68,6 +70,12 @@ export default function UploadPage() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
+      const ext = f.name.split('.').pop()?.toLowerCase();
+      if (ext !== 'zip' && ext !== 'rar') {
+        showInfo('只支持 ZIP、RAR 格式');
+        e.target.value = '';
+        return;
+      }
       setMode('archive');
       setFile(f);
       setPackName(f.name.replace(/\.[^/.]+$/, ''));
@@ -314,7 +322,7 @@ export default function UploadPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".zip,.rar"
+            accept={isIOS ? undefined : '.zip,.rar'}
             onChange={handleFileSelect}
             className="hidden"
           />
