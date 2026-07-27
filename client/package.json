@@ -15,9 +15,9 @@
     "lucide-react": "^0.474.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.2.0",
-    "tus-js-client": "^4.2.3",
-    "zustand": "^5.0.3"
+    "react-router-dom": "7.18.1",
+    "react-zoom-pan-pinch": "4.0.3",
+    "tus-js-client": "^4.2.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.6",

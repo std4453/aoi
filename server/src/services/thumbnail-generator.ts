@@ -4,12 +4,14 @@ import os from 'node:os';
 import sharp from 'sharp';
 import pLimit from 'p-limit';
 import { encode as blurhashEncode } from 'blurhash';
+import { config } from '../config.js';
 import {
   getExtractedImagesDir,
   getThumbnailsDir,
   ensureDir,
   getPath,
 } from './storage.js';
+import { buildJpegOutputPaths } from './jpeg-output-path.js';
 
 /**
  * Blurhash 计算流程
@@ -47,6 +49,13 @@ const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif',
 ]);
 
+function openImage(imagePath: string): ReturnType<typeof sharp> {
+  return sharp(imagePath, {
+    failOn: 'error',
+    limitInputPixels: config.maxImagePixels,
+  });
+}
+
 function walkImages(dir: string): string[] {
   const results: string[] = [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -74,12 +83,12 @@ interface BlurhashResult {
 
 async function computeBlurhash(imagePath: string): Promise<BlurhashResult | null> {
   try {
-    const metadata = await sharp(imagePath).metadata();
+    const metadata = await openImage(imagePath).metadata();
     const origWidth = metadata.width;
     const origHeight = metadata.height;
     if (!origWidth || !origHeight) return null;
 
-    const { data, info } = await sharp(imagePath)
+    const { data, info } = await openImage(imagePath)
       .resize(64, 64, { fit: 'inside', withoutEnlargement: true })
       .toColorspace('srgb')
       .raw()
@@ -101,14 +110,14 @@ async function computeBlurhash(imagePath: string): Promise<BlurhashResult | null
 }
 
 async function generateThumbnail(inputPath: string, outputPath: string): Promise<void> {
-  await sharp(inputPath)
+  await openImage(inputPath)
     .resize(THUMB_SIZE, THUMB_SIZE, { fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
     .toFile(outputPath);
 }
 
 async function generateCover(inputPath: string, outputPath: string): Promise<void> {
-  await sharp(inputPath)
+  await openImage(inputPath)
     .resize(COVER_WIDTH, COVER_HEIGHT, { fit: 'cover' })
     .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
     .toFile(outputPath);
@@ -129,10 +138,14 @@ export const thumbnailGenerator = {
 
     if (files.length === 0) return {};
 
-    const limit = pLimit(Math.max(1, os.cpus().length));
+    const limit = pLimit(Math.max(1, Math.min(8, os.cpus().length)));
     let completed = 0;
     const total = files.length;
     const blurhashes: Record<string, BlurhashResult> = {};
+    const relativePaths = files.map(file =>
+      path.relative(imagesDir, file).split(path.sep).join('/')
+    );
+    const outputPaths = buildJpegOutputPaths(relativePaths);
 
     // Generate cover from first usable image
     const coverPath = getPath('thumbnails', packId);
@@ -150,8 +163,10 @@ export const thumbnailGenerator = {
       files.map((fullPath) =>
         limit(async () => {
           const relativePath = path.relative(imagesDir, fullPath);
-          const thumbRelPath = relativePath.replace(/\.[^.]+$/, '.jpg');
-          const output = path.join(thumbDir, thumbRelPath);
+          const portablePath = relativePath.split(path.sep).join('/');
+          const thumbRelPath = outputPaths.get(portablePath);
+          if (!thumbRelPath) throw new Error(`Missing thumbnail path for ${portablePath}`);
+          const output = path.join(thumbDir, ...thumbRelPath.split('/'));
           try {
             ensureDir(path.dirname(output));
             await generateThumbnail(fullPath, output);
@@ -159,7 +174,7 @@ export const thumbnailGenerator = {
             console.error(`Failed to generate thumbnail for ${relativePath}:`, err);
             try {
               ensureDir(path.dirname(output));
-              await sharp(fullPath)
+              await openImage(fullPath)
                 .jpeg({ quality: THUMB_QUALITY })
                 .toFile(output);
             } catch {

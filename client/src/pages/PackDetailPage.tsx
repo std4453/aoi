@@ -204,7 +204,7 @@ export default function PackDetailPage() {
 
   const handleDownload = () => {
     if (!id) return;
-    window.open(`/api/packs/${id}/download`, '_blank');
+    window.open(`/api/packs/${id}/download`, '_blank', 'noopener,noreferrer');
   };
 
   const handleRename = () => {

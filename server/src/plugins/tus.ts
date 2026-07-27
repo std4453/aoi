@@ -18,7 +18,8 @@ export const tusPlugin = fp(async function (fastify) {
   // Intercept tus requests BEFORE Fastify body parsing via onRequest hook.
   // This completely bypasses content-type parsing which would break tus streaming.
   fastify.addHook('onRequest', async (request, reply) => {
-    if (!request.url.startsWith('/api/upload/files')) return;
+    const pathname = request.url.split('?', 1)[0];
+    if (pathname !== '/api/upload/files' && !pathname.startsWith('/api/upload/files/')) return;
 
     const req = request.raw;
     const res = reply.raw;

@@ -1,0 +1,11 @@
+.git
+.gitignore
+node_modules
+*/node_modules
+data
+server/dist
+server/public
+client/dist
+test-artifacts
+*.log
+.env*

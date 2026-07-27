@@ -3,16 +3,25 @@ import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
 import pLimit from 'p-limit';
+import { config } from '../config.js';
 import {
   getExtractedImagesDir,
   getGeneratedDir,
   ensureDir,
 } from './storage.js';
 import type { CompressionOptions, CompressionResult, FileSelection } from '../types.js';
+import { buildJpegOutputPaths } from './jpeg-output-path.js';
 
 const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif',
 ]);
+
+function openImage(imagePath: string): ReturnType<typeof sharp> {
+  return sharp(imagePath, {
+    failOn: 'error',
+    limitInputPixels: config.maxImagePixels,
+  });
+}
 
 function walkImages(dir: string): string[] {
   const results: string[] = [];
@@ -38,7 +47,7 @@ async function compressImage(
   outputPath: string,
   options: CompressionOptions
 ): Promise<CompressionResult> {
-  let pipeline = sharp(inputPath);
+  let pipeline = openImage(inputPath);
 
   const metadata = await pipeline.metadata();
 
@@ -91,28 +100,51 @@ export const imageCompressor = {
   ): Promise<void> {
     const imagesDir = getExtractedImagesDir(packId);
     const outputDir = path.join(getGeneratedDir(packId), 'temp');
+    fs.rmSync(outputDir, { recursive: true, force: true });
     ensureDir(outputDir);
 
     if (!fs.existsSync(imagesDir)) return;
 
     const allFiles = walkImages(imagesDir);
-    const files = fileSelection?.images
-      ? allFiles.filter(f => {
-          const relPath = path.relative(imagesDir, f).split(path.sep).join('/');
-          return fileSelection.images!.includes(relPath);
-        })
+    const filesByRelativePath = new Map(
+      allFiles.map(file => [
+        path.relative(imagesDir, file).split(path.sep).join('/'),
+        file,
+      ])
+    );
+    const selectedImages = fileSelection?.images
+      ? new Set(fileSelection.images)
+      : undefined;
+    if (selectedImages) {
+      const missing = [...selectedImages].filter(relativePath => !filesByRelativePath.has(relativePath));
+      if (missing.length > 0) {
+        throw new Error(
+          `Selected image files no longer exist: ${missing.slice(0, 5).join(', ')}`
+        );
+      }
+    }
+    const files = selectedImages
+      ? [...selectedImages].map(relativePath => filesByRelativePath.get(relativePath)!)
       : allFiles;
+    const relativePaths = files.map(file =>
+      path.relative(imagesDir, file).split(path.sep).join('/')
+    );
+    const outputPaths = buildJpegOutputPaths(relativePaths);
 
-    const limit = pLimit(Math.max(1, os.cpus().length - 1));
+    const limit = pLimit(Math.max(1, Math.min(8, os.cpus().length - 1)));
     let completed = 0;
     let totalOriginalSize = 0;
     let totalCompressedSize = 0;
+    const failures: string[] = [];
 
     await Promise.all(
       files.map((fullPath) =>
         limit(async () => {
           const relativePath = path.relative(imagesDir, fullPath);
-          const output = path.join(outputDir, relativePath.replace(/\.[^.]+$/, '.jpg'));
+          const portablePath = relativePath.split(path.sep).join('/');
+          const outputRelativePath = outputPaths.get(portablePath);
+          if (!outputRelativePath) throw new Error(`Missing output path for ${portablePath}`);
+          const output = path.join(outputDir, ...outputRelativePath.split('/'));
           try {
             ensureDir(path.dirname(output));
             const result = await compressImage(fullPath, output, options);
@@ -121,6 +153,7 @@ export const imageCompressor = {
             totalCompressedSize += result.compressedSize;
           } catch (err) {
             console.error(`Failed to compress ${relativePath}:`, err);
+            failures.push(portablePath);
             completed++;
           }
           onProgress?.({
@@ -133,5 +166,11 @@ export const imageCompressor = {
         })
       )
     );
+
+    if (failures.length > 0) {
+      throw new Error(
+        `Failed to compress ${failures.length} image(s): ${failures.slice(0, 5).join(', ')}`
+      );
+    }
   },
 };

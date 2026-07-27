@@ -4,12 +4,26 @@ import { z } from 'zod';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const projectRoot = __dirname.includes(`${path.sep}dist${path.sep}server${path.sep}`)
+  ? path.resolve(__dirname, '../../../..')
+  : path.resolve(__dirname, '../..');
+const defaultDataDir = path.join(projectRoot, 'data');
+
 const configSchema = z.object({
   port: z.coerce.number().default(3000),
   host: z.string().default('0.0.0.0'),
-  dataDir: z.string().default(path.join(__dirname, '../../data')),
-  maxUploadSize: z.coerce.number().default(5 * 1024 * 1024 * 1024), // 5GB
-  uploadChunkSize: z.coerce.number().default(5 * 1024 * 1024), // 5MB
+  dataDir: z.string().min(1).default(defaultDataDir).transform(value => path.resolve(value)),
+  maxUploadSize: z.coerce.number().int().positive().default(5 * 1024 * 1024 * 1024),
+  maxApiBodySize: z.coerce.number().int().positive().max(64 * 1024 * 1024).default(16 * 1024 * 1024),
+  maxExtractedSize: z.coerce.number().int().positive().default(20 * 1024 * 1024 * 1024),
+  maxArchiveEntries: z.coerce.number().int().positive().default(100_000),
+  maxCompressionRatio: z.coerce.number().positive().default(1_000),
+  maxImagePixels: z.coerce.number().int().positive().default(100_000_000),
+  archiveCommandTimeout: z.coerce.number().int().positive().default(30 * 60 * 1_000),
+  databaseBusyTimeout: z.coerce.number().int().positive().default(5_000),
+  instanceLockTimeout: z.coerce.number().int().positive().default(1_000),
+  backupRetention: z.coerce.number().int().min(1).max(100).default(5),
+  shutdownTimeout: z.coerce.number().int().positive().default(25_000),
 });
 
 const parsed = configSchema.parse({
@@ -17,7 +31,16 @@ const parsed = configSchema.parse({
   host: process.env.HOST,
   dataDir: process.env.DATA_DIR,
   maxUploadSize: process.env.MAX_UPLOAD_SIZE,
-  uploadChunkSize: process.env.UPLOAD_CHUNK_SIZE,
+  maxApiBodySize: process.env.MAX_API_BODY_SIZE,
+  maxExtractedSize: process.env.MAX_EXTRACTED_SIZE,
+  maxArchiveEntries: process.env.MAX_ARCHIVE_ENTRIES,
+  maxCompressionRatio: process.env.MAX_COMPRESSION_RATIO,
+  maxImagePixels: process.env.MAX_IMAGE_PIXELS,
+  archiveCommandTimeout: process.env.ARCHIVE_COMMAND_TIMEOUT,
+  databaseBusyTimeout: process.env.DATABASE_BUSY_TIMEOUT,
+  instanceLockTimeout: process.env.INSTANCE_LOCK_TIMEOUT,
+  backupRetention: process.env.BACKUP_RETENTION,
+  shutdownTimeout: process.env.SHUTDOWN_TIMEOUT,
 });
 
 export const config = {
@@ -29,5 +52,6 @@ export const config = {
     generated: path.join(parsed.dataDir, 'generated'),
     thumbnails: path.join(parsed.dataDir, 'thumbnails'),
     db: path.join(parsed.dataDir, 'db'),
+    backups: path.join(parsed.dataDir, 'backups'),
   },
 };

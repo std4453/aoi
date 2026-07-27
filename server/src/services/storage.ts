@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { resolveWithin, validateIdentifier } from './safe-path.js';
 
 type DiskSpaceResult = { diskPath: string; free: number; size: number };
 
@@ -22,39 +23,39 @@ export function ensureDir(dir: string): void {
 
 export function getPath(type: 'archive' | 'extracted' | 'generated' | 'thumbnails' | 'uploads', packId: string): string {
   const base = config.dirs[type === 'archive' ? 'archives' : type];
-  return path.join(base, packId);
+  return resolveWithin(base, validateIdentifier(packId, 'pack id'), 'pack id');
 }
 
 export function getArchivePath(packId: string, filename: string): string {
-  return path.join(config.dirs.archives, packId, filename);
+  return resolveWithin(getPath('archive', packId), filename, 'archive filename');
 }
 
 export function getExtractedImagesDir(packId: string): string {
-  return path.join(config.dirs.extracted, packId, 'images');
+  return resolveWithin(getPath('extracted', packId), 'images');
 }
 
 export function getExtractedVideosDir(packId: string): string {
-  return path.join(config.dirs.extracted, packId, 'videos');
+  return resolveWithin(getPath('extracted', packId), 'videos');
 }
 
 export function getThumbnailsDir(packId: string): string {
-  return path.join(config.dirs.extracted, packId, 'thumbnails');
+  return resolveWithin(getPath('extracted', packId), 'thumbnails');
 }
 
 export function getGeneratedPath(packId: string): string {
-  return path.join(config.dirs.generated, packId, 'compressed.zip');
+  return resolveWithin(getGeneratedDir(packId), 'compressed.zip');
 }
 
 export function getGeneratedDir(packId: string): string {
-  return path.join(config.dirs.generated, packId);
+  return getPath('generated', packId);
 }
 
 export function getUploadPath(uploadId: string): string {
-  return path.join(config.dirs.uploads, uploadId);
+  return resolveWithin(config.dirs.uploads, validateIdentifier(uploadId, 'upload id'), 'upload id');
 }
 
 export function getFolderStagingDir(packId: string): string {
-  return path.join(config.dirs.extracted, packId, '_staging');
+  return resolveWithin(getPath('extracted', packId), '_staging');
 }
 
 export async function getDiskSpace(): Promise<{ free: number; size: number; used: number }> {
@@ -68,9 +69,10 @@ export async function getDiskSpace(): Promise<{ free: number; size: number; used
 
 export function removePackFiles(packId: string): void {
   const dirs = [
-    path.join(config.dirs.archives, packId),
-    path.join(config.dirs.extracted, packId),
-    path.join(config.dirs.generated, packId),
+    getPath('archive', packId),
+    getPath('extracted', packId),
+    getPath('generated', packId),
+    getPath('thumbnails', packId),
   ];
   for (const dir of dirs) {
     fs.rmSync(dir, { recursive: true, force: true });

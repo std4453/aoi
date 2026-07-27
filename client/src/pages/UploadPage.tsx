@@ -71,8 +71,8 @@ export default function UploadPage() {
     const f = e.target.files?.[0];
     if (f) {
       const ext = f.name.split('.').pop()?.toLowerCase();
-      if (ext !== 'zip' && ext !== 'rar') {
-        showInfo('只支持 ZIP、RAR 格式');
+      if (ext !== 'zip' && ext !== 'rar' && ext !== '7z') {
+        showInfo('只支持 ZIP、RAR、7z 格式');
         e.target.value = '';
         return;
       }
@@ -96,8 +96,8 @@ export default function UploadPage() {
       const f = e.dataTransfer.files?.[0];
       if (f) {
         const ext = f.name.split('.').pop()?.toLowerCase();
-        if (ext !== 'zip' && ext !== 'rar') {
-          showInfo('只支持 ZIP、RAR 格式或文件夹');
+        if (ext !== 'zip' && ext !== 'rar' && ext !== '7z') {
+          showInfo('只支持 ZIP、RAR、7z 格式或文件夹');
           return;
         }
         setMode('archive');
@@ -124,8 +124,8 @@ export default function UploadPage() {
       const f = e.dataTransfer.files?.[0];
       if (!f) return;
       const ext = f.name.split('.').pop()?.toLowerCase();
-      if (ext !== 'zip' && ext !== 'rar') {
-        showInfo('只支持 ZIP、RAR 格式或文件夹');
+      if (ext !== 'zip' && ext !== 'rar' && ext !== '7z') {
+        showInfo('只支持 ZIP、RAR、7z 格式或文件夹');
         return;
       }
       setMode('archive');
@@ -232,7 +232,7 @@ export default function UploadPage() {
   const handleCancelConfirm = async () => {
     setCancelConfirm('closing');
     if (mode === 'archive') {
-      cancelArchive();
+      await cancelArchive();
     } else if (mode === 'folder') {
       await cancelFolder();
     }
@@ -277,7 +277,8 @@ export default function UploadPage() {
   // --- Derived states ---
 
   const isArchiveActive = archiveStatus === 'uploading' || archiveStatus === 'paused';
-  const isFolderActive = folderPhase === 'uploading' || folderPhase === 'paused';
+  const isFolderActive =
+    folderPhase === 'uploading' || folderPhase === 'paused' || folderPhase === 'error';
   const isArchiveDone = archiveStatus === 'done';
   const isFolderDone = folderPhase === 'done';
   const isAnyDone = isArchiveDone || isFolderDone;
@@ -318,11 +319,11 @@ export default function UploadPage() {
               选择文件夹
             </button>
           </div>
-          <p className="text-xs text-gray-600 mt-3">支持 ZIP、RAR 格式，或直接上传文件夹</p>
+          <p className="text-xs text-gray-600 mt-3">支持 ZIP、RAR、7z 格式，或直接上传文件夹</p>
           <input
             ref={fileInputRef}
             type="file"
-            accept={isIOS ? undefined : '.zip,.rar'}
+            accept={isIOS ? undefined : '.zip,.rar,.7z'}
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -407,11 +408,15 @@ export default function UploadPage() {
           </div>
 
           {/* Progress */}
-          {(archiveStatus === 'uploading' || archiveStatus === 'paused') && (
+          {(archiveStatus === 'uploading' || archiveStatus === 'paused' || archiveStatus === 'confirming') && (
             <div className="mb-4">
               <div className="flex items-center justify-between text-sm mb-2">
                 <span className="text-gray-400">
-                  {archiveStatus === 'paused' ? '已暂停' : '上传中...'}
+                  {archiveStatus === 'paused'
+                    ? '已暂停'
+                    : archiveStatus === 'confirming'
+                      ? '正在确认上传...'
+                      : '上传中...'}
                 </span>
                 <span className="text-white font-medium">{archiveProgress}%</span>
               </div>

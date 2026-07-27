@@ -1,34 +1,71 @@
-import { saveDb } from '../db/connection.js';
-import { getNextPendingJob, updateJobStatus, getJob } from '../db/repositories.js';
-import type { Job, JobProgress } from '../types.js';
-import type { CompressionOptions } from '../types.js';
 import { EventEmitter } from 'node:events';
+import {
+  claimNextPendingJob,
+  createJob,
+  createJobIfIdle,
+  getJob,
+  updateJobProgress,
+  updateJobStatus,
+} from '../db/repositories.js';
+import type { CompressionOptions, Job, JobProgress } from '../types.js';
 
 export type JobEventType = 'progress';
 
 class JobQueue extends EventEmitter {
-  private running = false;
+  private currentTask: Promise<void> | null = null;
   private currentJobId: string | null = null;
+  private stopping = false;
+
+  start(): void {
+    this.scheduleNext();
+  }
 
   async enqueue(packId: string, type: Job['type'], options?: CompressionOptions): Promise<Job> {
-    const { createJob } = await import('../db/repositories.js');
+    if (this.stopping) {
+      throw new Error('Server is shutting down and is not accepting new jobs');
+    }
     const job = createJob(packId, type, options);
-    this.processNext();
+    this.scheduleNext();
     return job;
   }
 
-  private async processNext(): Promise<void> {
-    if (this.running) return;
+  async enqueueUnique(
+    packId: string,
+    type: Job['type'],
+    options?: CompressionOptions
+  ): Promise<Job> {
+    if (this.stopping) {
+      throw new Error('Server is shutting down and is not accepting new jobs');
+    }
+    const job = createJobIfIdle(packId, type, options);
+    if (!job) {
+      throw new Error(`An active ${type} job already exists for this pack`);
+    }
+    this.scheduleNext();
+    return job;
+  }
 
-    const job = getNextPendingJob();
+  private scheduleNext(): void {
+    if (this.stopping || this.currentTask) return;
+
+    const job = claimNextPendingJob();
     if (!job) return;
 
-    this.running = true;
     this.currentJobId = job.id;
+    const task = this.runJob(job);
+    this.currentTask = task;
 
+    void task.finally(() => {
+      this.currentTask = null;
+      this.currentJobId = null;
+      if (!this.stopping) {
+        setTimeout(() => this.scheduleNext(), 100);
+      }
+    });
+  }
+
+  private async runJob(job: Job): Promise<void> {
     try {
-      updateJobStatus(job.id, 'running', 0);
-
       switch (job.type) {
         case 'extract':
           await this.runExtractJob(job);
@@ -42,53 +79,73 @@ class JobQueue extends EventEmitter {
       }
 
       updateJobStatus(job.id, 'completed', 100);
+      const completed = this.getProgress(job.id);
+      if (completed) {
+        this.emit('progress', { ...completed, status: 'completed', percentage: 100 });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       updateJobStatus(job.id, 'failed', 0, message);
       console.error(`Job ${job.id} failed:`, message);
-      // Update pack status to reflect the failure
+
       try {
         const { getPack, updatePackStatus } = await import('../db/repositories.js');
         const pack = getPack(job.packId);
-        if (pack && pack.status !== 'failed') {
+        if (pack && job.type === 'compress') {
+          const { existsSync } = await import('node:fs');
+          const { getGeneratedPath } = await import('./storage.js');
+          updatePackStatus(
+            job.packId,
+            existsSync(getGeneratedPath(job.packId)) ? 'generated' : 'extracted',
+            `压缩任务失败：${message}`
+          );
+        } else if (pack && pack.status !== 'failed') {
           updatePackStatus(job.packId, 'failed', message);
         }
       } catch (dbErr) {
         console.error('Failed to update pack status after job failure:', dbErr);
       }
-    } finally {
-      this.running = false;
-      this.currentJobId = null;
-      // Process next job after a short delay
-      setTimeout(() => this.processNext(), 100);
+
+      const failed = this.getProgress(job.id);
+      if (failed) {
+        this.emit('progress', { ...failed, status: 'failed', error: message });
+      }
     }
   }
 
   private async runExtractJob(job: Job): Promise<void> {
     const { archiveExtractor } = await import('./archive-extractor.js');
-    const { updatePackStatus, updatePackStats, getPack, listPacks } = await import('../db/repositories.js');
+    const {
+      clearPackArchivePassword,
+      updatePackStatus,
+      getPack,
+    } = await import('../db/repositories.js');
     const pack = getPack(job.packId);
     if (!pack) {
-      console.error(`[job-queue] Pack not found for id=${job.packId}`);
-      throw new Error('Pack not found');
+      throw new Error(`Pack not found: ${job.packId}`);
     }
 
     updatePackStatus(pack.id, 'extracting');
     await archiveExtractor.extract(pack, pack.archivePassword ?? undefined);
-    // Set to 'thumbnailing' — not 'extracted' yet, thumbnails still pending
     updatePackStatus(pack.id, 'thumbnailing');
+    clearPackArchivePassword(pack.id);
 
-    // Enqueue thumbnail generation
-    this.enqueue(pack.id, 'thumbnail');
+    // Persist the follow-up job even during shutdown; it will resume next start.
+    createJob(pack.id, 'thumbnail');
   }
 
   private async runThumbnailJob(job: Job): Promise<void> {
     const { thumbnailGenerator } = await import('./thumbnail-generator.js');
-    const { updatePackStatus, updatePackBlurhashes } = await import('../db/repositories.js');
+    const {
+      getPack,
+      updatePackStatus,
+      updatePackBlurhashes,
+    } = await import('../db/repositories.js');
+    const { getGeneratedPath } = await import('./storage.js');
+    const { existsSync } = await import('node:fs');
 
     updatePackStatus(job.packId, 'thumbnailing');
-
-    const blurhashes = await thumbnailGenerator.generateAll(job.packId, (progress) => {
+    const blurhashes = await thumbnailGenerator.generateAll(job.packId, progress => {
       this.emitProgress(job.id, {
         jobId: job.id,
         status: 'running',
@@ -100,24 +157,13 @@ class JobQueue extends EventEmitter {
       });
     });
 
-    // Batch-write all blurhashes to DB
     if (Object.keys(blurhashes).length > 0) {
       updatePackBlurhashes(job.packId, blurhashes);
     }
-
-    this.emitProgress(job.id, {
-      jobId: job.id,
-      status: 'completed',
-      phase: 'thumbnails',
-      completed: 1,
-      total: 1,
-      percentage: 100,
-      totalOriginalSize: 0,
-      totalCompressedSize: 0,
-      error: null,
-    });
-
-    updatePackStatus(job.packId, 'extracted');
+    const refreshedPack = getPack(job.packId);
+    const hasGeneratedArchive =
+      Boolean(refreshedPack?.compressedSize) && existsSync(getGeneratedPath(job.packId));
+    updatePackStatus(job.packId, hasGeneratedArchive ? 'generated' : 'extracted');
   }
 
   private async runCompressJob(job: Job): Promise<void> {
@@ -125,7 +171,7 @@ class JobQueue extends EventEmitter {
     const { archiveGenerator } = await import('./archive-generator.js');
     const { updatePackStatus, getPack } = await import('../db/repositories.js');
     const pack = getPack(job.packId);
-    if (!pack) throw new Error('Pack not found');
+    if (!pack) throw new Error(`Pack not found: ${job.packId}`);
 
     const parsed: any = job.options ? JSON.parse(job.options) : {};
     const options: CompressionOptions = {
@@ -138,7 +184,7 @@ class JobQueue extends EventEmitter {
     const fileSelection = parsed.fileSelection as import('../types.js').FileSelection | undefined;
     updatePackStatus(pack.id, 'generating');
 
-    await imageCompressor.compressPack(job.packId, options, (progress) => {
+    await imageCompressor.compressPack(job.packId, options, progress => {
       this.emitProgress(job.id, {
         jobId: job.id,
         status: 'running',
@@ -160,7 +206,7 @@ class JobQueue extends EventEmitter {
       error: null,
     });
 
-    await archiveGenerator.generate(pack.id, options, (progress) => {
+    await archiveGenerator.generate(pack.id, options, progress => {
       this.emitProgress(job.id, {
         jobId: job.id,
         status: 'running',
@@ -173,23 +219,10 @@ class JobQueue extends EventEmitter {
     }, fileSelection);
 
     updatePackStatus(pack.id, 'generated');
-
-    this.emitProgress(job.id, {
-      jobId: job.id,
-      status: 'completed',
-      phase: 'archiving',
-      completed: 1,
-      total: 1,
-      percentage: 100,
-      totalOriginalSize: 0,
-      totalCompressedSize: 0,
-      error: null,
-    });
   }
 
   private emitProgress(jobId: string, progress: JobProgress): void {
-    updateJobStatus(jobId, 'running', progress.percentage);
-    saveDb();
+    updateJobProgress(jobId, progress.percentage, progress);
     this.emit('progress', progress);
   }
 
@@ -200,7 +233,7 @@ class JobQueue extends EventEmitter {
     return {
       jobId: job.id,
       status: job.status,
-      phase: result?.phase ?? 'unknown',
+      phase: result?.phase ?? 'queued',
       completed: result?.completed ?? 0,
       total: result?.total ?? 0,
       percentage: job.progress,
@@ -208,6 +241,32 @@ class JobQueue extends EventEmitter {
       totalCompressedSize: result?.totalCompressedSize ?? 0,
       error: job.error,
     };
+  }
+
+  async shutdown(timeoutMs: number): Promise<boolean> {
+    this.stopping = true;
+    if (!this.currentTask) return true;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    });
+    const completed = this.currentTask.then(() => true);
+    const drained = await Promise.race([completed, timedOut]);
+    if (timer) clearTimeout(timer);
+    return drained;
+  }
+
+  getCurrentJobId(): string | null {
+    return this.currentJobId;
+  }
+
+  requeueJob(jobId: string | null): void {
+    if (!jobId) return;
+    const job = getJob(jobId);
+    if (job && job.status !== 'completed') {
+      updateJobStatus(jobId, 'pending', 0);
+    }
   }
 }
 

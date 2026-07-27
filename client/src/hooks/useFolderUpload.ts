@@ -19,6 +19,7 @@ interface FolderUploadState {
 }
 
 const MAX_CONCURRENT = 3;
+const UPLOAD_CHUNK_SIZE = 5 * 1024 * 1024;
 
 export function useFolderUpload() {
   const [state, setState] = useState<FolderUploadState>({
@@ -62,7 +63,7 @@ export function useFolderUpload() {
 
     const upload = new tus.Upload(file, {
       endpoint: '/api/upload/files',
-      chunkSize: Infinity,
+      chunkSize: UPLOAD_CHUNK_SIZE,
       retryDelays: [0, 1000, 3000, 5000],
       metadata: {
         filename: file.name,
@@ -84,6 +85,11 @@ export function useFolderUpload() {
             ...prev,
             files: newFiles,
             overallProgress: calculateOverallProgress(newFiles),
+            phase:
+              activeCountRef.current === 0 && fileQueueRef.current.length === 0
+                ? 'error'
+                : prev.phase,
+            error: `文件 ${file.name} 上传失败`,
           };
         });
         // Try next in queue
@@ -124,6 +130,10 @@ export function useFolderUpload() {
               ...prev,
               files: newFiles,
               overallProgress: calculateOverallProgress(newFiles),
+              phase:
+                activeCountRef.current === 0 && fileQueueRef.current.length === 0
+                  ? 'error'
+                  : prev.phase,
               error: `文件 ${file.name} 确认失败: ${err instanceof Error ? err.message : String(err)}`,
             };
           });
@@ -211,9 +221,18 @@ export function useFolderUpload() {
       packIdRef.current = result.id;
 
       // Map packFileIds to file objects
+      const sourceFiles = new Map(
+        scanResult.scanFiles.map((descriptor, index) => [
+          descriptor.relativePath,
+          scanResult.fileObjects[index],
+        ])
+      );
       const fileMap = new Map<string, { file: File; packFileId: string }>();
-      const newFiles: FolderUploadFile[] = result.packFiles.map((pf, i) => {
-        const fileObj = scanResult.fileObjects[i];
+      const newFiles: FolderUploadFile[] = result.packFiles.map((pf) => {
+        const fileObj = sourceFiles.get(pf.relativePath);
+        if (!fileObj) {
+          throw new Error(`Server returned an unknown folder path: ${pf.relativePath}`);
+        }
         fileMap.set(pf.id, { file: fileObj, packFileId: pf.id });
         return {
           packFileId: pf.id,
@@ -238,7 +257,8 @@ export function useFolderUpload() {
       }));
 
       // Start initial batch
-      for (let i = 0; i < Math.min(MAX_CONCURRENT, fileQueueRef.current.length); i++) {
+      const initialCount = Math.min(MAX_CONCURRENT, fileQueueRef.current.length);
+      for (let i = 0; i < initialCount; i++) {
         startNextInQueue();
       }
     } catch (err) {
@@ -250,13 +270,14 @@ export function useFolderUpload() {
     }
   }, [startNextInQueue]);
 
-  const pause = useCallback(() => {
+  const pause = useCallback(async () => {
     // Abort all active uploads and save their info for resume
     pausedUploadsRef.current.clear();
     abortedPfIdsRef.current.clear();
+    const aborts: Promise<void>[] = [];
     for (const [pfId, upload] of uploadsRef.current) {
       abortedPfIdsRef.current.add(pfId);
-      upload.abort();
+      aborts.push(upload.abort());
       const mapping = fileMapRef.current.get(pfId);
       if (mapping) {
         pausedUploadsRef.current.set(pfId, mapping);
@@ -265,6 +286,7 @@ export function useFolderUpload() {
     uploadsRef.current.clear();
     activeCountRef.current = 0;
 
+    await Promise.allSettled(aborts);
     setState(prev => ({ ...prev, phase: 'paused' }));
   }, []);
 
@@ -279,7 +301,8 @@ export function useFolderUpload() {
     pausedUploadsRef.current.clear();
 
     // Restart uploads
-    for (let i = 0; i < Math.min(MAX_CONCURRENT, fileQueueRef.current.length); i++) {
+    const restartCount = Math.min(MAX_CONCURRENT, fileQueueRef.current.length);
+    for (let i = 0; i < restartCount; i++) {
       startNextInQueue();
     }
   }, [startNextInQueue]);
@@ -287,13 +310,16 @@ export function useFolderUpload() {
   const cancel = useCallback(async () => {
     // Abort all active tus uploads
     abortedPfIdsRef.current.clear();
-    for (const upload of uploadsRef.current.values()) {
-      upload.abort();
+    const aborts: Promise<void>[] = [];
+    for (const [pfId, upload] of uploadsRef.current) {
+      abortedPfIdsRef.current.add(pfId);
+      aborts.push(upload.abort());
     }
     uploadsRef.current.clear();
     activeCountRef.current = 0;
     fileQueueRef.current = [];
     pausedUploadsRef.current.clear();
+    await Promise.allSettled(aborts);
 
     const pid = packIdRef.current;
     if (pid) {

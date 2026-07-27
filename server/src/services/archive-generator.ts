@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import {
   getExtractedVideosDir,
   getGeneratedDir,
@@ -32,21 +32,22 @@ export const archiveGenerator = {
     fileSelection?: FileSelection
   ): Promise<string> {
     const tempDir = path.join(getGeneratedDir(packId), 'temp');
-    const outputPath = getGeneratedPath(packId);
+    const finalOutputPath = getGeneratedPath(packId);
+    const outputPath = `${finalOutputPath}.tmp`;
     ensureDir(getGeneratedDir(packId));
+    fs.rmSync(outputPath, { force: true });
 
     if (!fs.existsSync(tempDir)) {
       throw new Error('No compressed images found. Run image compression first.');
     }
 
+    const selectedVideos = fileSelection?.videos
+      ? new Set(fileSelection.videos)
+      : undefined;
     const compressedImages = walkFiles(tempDir).filter(f => {
-      if (!f.relativePath.endsWith('.jpg')) return false;
-      if (fileSelection?.images) {
-        // Compressed images have .jpg extension; match by stem
-        const stem = f.relativePath.replace(/\.jpg$/, '');
-        return fileSelection.images.some((img: string) => img.replace(/\.[^.]+$/, '') === stem);
-      }
-      return true;
+      // The compressor recreates tempDir for every job, so it contains exactly
+      // the selected images and no additional filtering is necessary here.
+      return f.relativePath.endsWith('.jpg');
     });
 
     // Collect all files to archive
@@ -57,12 +58,30 @@ export const archiveGenerator = {
 
     if (options.keepVideos) {
       const videosDir = getExtractedVideosDir(packId);
+      if (selectedVideos?.size && !fs.existsSync(videosDir)) {
+        throw new Error('Selected video files no longer exist');
+      }
       if (fs.existsSync(videosDir)) {
         const videos = walkFiles(videosDir);
+        const videosByRelativePath = new Map(
+          videos.map(video => [
+            video.relativePath.split(path.sep).join('/'),
+            video,
+          ])
+        );
+        if (selectedVideos) {
+          const missing = [...selectedVideos]
+            .filter(relativePath => !videosByRelativePath.has(relativePath));
+          if (missing.length > 0) {
+            throw new Error(
+              `Selected video files no longer exist: ${missing.slice(0, 5).join(', ')}`
+            );
+          }
+        }
         for (const v of videos) {
-          if (fileSelection?.videos) {
+          if (selectedVideos) {
             const normalized = v.relativePath.split(path.sep).join('/');
-            if (!fileSelection.videos.includes(normalized)) continue;
+            if (!selectedVideos.has(normalized)) continue;
           }
           filesToArchive.push({
             path: v.fullPath,
@@ -72,12 +91,18 @@ export const archiveGenerator = {
       }
     }
 
+    if (filesToArchive.length === 0) {
+      throw new Error(
+        'No source files remain for the generated archive; the previous archive was preserved.'
+      );
+    }
+
     return new Promise((resolve, reject) => {
-      const archive = archiver('zip', {
+      const archive = new ZipArchive({
         zlib: { level: 0 }, // JPEGs are already compressed
       });
-
       const output = fs.createWriteStream(outputPath);
+      let settled = false;
 
       archive.pipe(output);
 
@@ -92,37 +117,52 @@ export const archiveGenerator = {
         });
       }
 
-      output.on('close', async () => {
-        // Clean up temp directory
-        fs.rmSync(tempDir, { recursive: true, force: true });
-
-        // Write manifest & update compressed size
-        const stat = fs.statSync(outputPath);
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
         try {
-          const { updatePackCompressedSize } = await import('../db/repositories.js');
-          updatePackCompressedSize(packId, stat.size);
-        } catch (err) {
-          console.error('Failed to update compressed size:', err);
+          archive.abort();
+          output.destroy();
+        } catch {
+          // Preserve the original archive error.
         }
-        const manifest = {
-          packId,
-          options,
-          fileCount: filesToArchive.length,
-          archiveSize: stat.size,
-          generatedAt: new Date().toISOString(),
-        };
-        fs.writeFileSync(
-          path.join(getGeneratedDir(packId), 'manifest.json'),
-          JSON.stringify(manifest, null, 2)
-        );
+        fs.rmSync(outputPath, { force: true });
+        reject(error);
+      };
 
-        resolve(outputPath);
+      output.once('close', () => {
+        if (settled) return;
+        void (async () => {
+          try {
+            fs.renameSync(outputPath, finalOutputPath);
+            fs.rmSync(tempDir, { recursive: true, force: true });
+
+            const stat = fs.statSync(finalOutputPath);
+            const { updatePackCompressedSize } = await import('../db/repositories.js');
+            updatePackCompressedSize(packId, stat.size);
+            const manifest = {
+              packId,
+              options,
+              fileCount: filesToArchive.length,
+              archiveSize: stat.size,
+              generatedAt: new Date().toISOString(),
+            };
+            fs.writeFileSync(
+              path.join(getGeneratedDir(packId), 'manifest.json'),
+              JSON.stringify(manifest, null, 2)
+            );
+
+            settled = true;
+            resolve(finalOutputPath);
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)));
+          }
+        })();
       });
 
-      output.on('error', reject);
-      archive.on('error', reject);
-
-      archive.finalize();
+      output.once('error', fail);
+      archive.once('error', fail);
+      void archive.finalize().catch(fail);
     });
   },
 };
