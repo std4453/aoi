@@ -14,14 +14,17 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import getpass
 import json
 import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -409,6 +412,241 @@ def choose_archive(archive_dir: Path) -> Path | None:
     )
 
 
+def find_7z() -> str | None:
+    for command in ("7z", "7zz", "7za"):
+        executable = shutil.which(command)
+        if executable:
+            return executable
+    return None
+
+
+def test_with_7z(
+    executable: str,
+    archive: Path,
+    password: str | None,
+) -> tuple[str, str]:
+    arguments = [executable, "t"]
+    if password is not None:
+        arguments.append(f"-p{password}")
+    arguments.append(str(archive))
+    try:
+        result = subprocess.run(
+            arguments,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            timeout=30 * 60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "error", "7z verification timed out"
+    except OSError as error:
+        return "error", f"failed to run 7z: {error}"
+
+    if result.returncode == 0:
+        return "valid", "7z tested the archive successfully"
+    output = result.stdout.lower()
+    password_markers = (
+        "wrong password",
+        "password is incorrect",
+        "can not open encrypted archive",
+        "data error in encrypted file",
+        "encrypted",
+        "enter password",
+    )
+    if any(marker in output for marker in password_markers):
+        return "password-required" if password is None else "invalid", "archive rejected the password"
+    return "error", "archive test failed; the archive may be damaged or unsupported"
+
+
+def zip_password_requirement(archive: Path) -> tuple[str, str]:
+    try:
+        with zipfile.ZipFile(archive) as zip_file:
+            encrypted = [
+                entry
+                for entry in zip_file.infolist()
+                if not entry.is_dir() and entry.flag_bits & 0x1
+            ]
+            if not encrypted:
+                return "not-required", "ZIP has no encrypted file entries"
+            return "password-required", "ZIP contains encrypted file entries"
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as error:
+        return "error", f"cannot inspect ZIP: {error}"
+
+
+def verify_zip_password(archive: Path, password: str) -> tuple[str, str]:
+    try:
+        with zipfile.ZipFile(archive) as zip_file:
+            encrypted = [
+                entry
+                for entry in zip_file.infolist()
+                if not entry.is_dir() and entry.flag_bits & 0x1
+            ]
+            if not encrypted:
+                return "not-required", "ZIP has no encrypted file entries"
+            # Reading the smallest encrypted entry through EOF verifies both the
+            # password header and CRC, avoiding a false positive from a header-only test.
+            target = min(encrypted, key=lambda entry: entry.file_size)
+            with zip_file.open(target, "r", pwd=password.encode("utf-8")) as source:
+                while source.read(1024 * 1024):
+                    pass
+        return "valid", "ZIP password and CRC were verified"
+    except NotImplementedError:
+        return "unsupported", "ZIP encryption method requires 7z verification"
+    except RuntimeError as error:
+        if "password" in str(error).lower():
+            return "invalid", "ZIP rejected the password"
+        return "error", f"ZIP verification failed: {error}"
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as error:
+        return "error", f"ZIP verification failed: {error}"
+
+
+def password_requirement(archive: Path, seven_zip: str | None) -> tuple[str, str]:
+    if archive.suffix.lower() == ".zip":
+        return zip_password_requirement(archive)
+    if not seven_zip:
+        return "unavailable", "7z/7zz/7za is required to inspect this archive format"
+    status, message = test_with_7z(seven_zip, archive, None)
+    if status == "valid":
+        return "not-required", message
+    return status, message
+
+
+def verify_archive_password(
+    archive: Path,
+    password: str,
+    seven_zip: str | None,
+) -> tuple[str, str]:
+    if archive.suffix.lower() == ".zip":
+        status, message = verify_zip_password(archive, password)
+        if status != "unsupported":
+            return status, message
+    if not seven_zip:
+        return "unavailable", "7z/7zz/7za is required to verify this encryption method"
+    return test_with_7z(seven_zip, archive, password)
+
+
+def collect_interactive_passwords(
+    data_dir: Path,
+    packs: dict[str, dict[str, Any]],
+    details: list[dict[str, Any]],
+    enabled: bool,
+) -> None:
+    details_by_id = {detail["id"]: detail for detail in details}
+    seven_zip = find_7z()
+
+    for pack_id, pack in packs.items():
+        detail = details_by_id[pack_id]
+        if pack["status"] not in {"uploading", "failed"} or pack["source_type"] != "archive":
+            pack["archive_password"] = None
+            detail["passwordRecovery"] = {
+                "status": "not-needed",
+                "message": "retained extracted/generated data does not require re-extraction",
+            }
+            continue
+
+        archive = choose_archive(data_dir / "archives" / pack_id)
+        if not archive:
+            pack["archive_password"] = None
+            detail["passwordRecovery"] = {
+                "status": "not-applicable",
+                "message": "no retained source archive was found",
+            }
+            continue
+
+        requirement, requirement_message = password_requirement(archive, seven_zip)
+        if requirement == "not-required":
+            pack["archive_password"] = None
+            detail["passwordRecovery"] = {
+                "status": "not-required",
+                "message": requirement_message,
+            }
+            continue
+        if requirement == "error":
+            pack["archive_password"] = None
+            detail["passwordRecovery"] = {
+                "status": "verification-error",
+                "message": requirement_message,
+            }
+            continue
+        if requirement == "unavailable":
+            pack["archive_password"] = None
+            detail["passwordRecovery"] = {
+                "status": "verification-unavailable",
+                "message": requirement_message,
+            }
+            if enabled:
+                print(
+                    f"\n[{pack_id}] {pack['name']}\n"
+                    f"  Archive: {relative_display(archive, data_dir)}\n"
+                    f"  Cannot verify a password: {requirement_message}\n"
+                    "  Skipped; install 7z and run the recovery script again."
+                )
+            continue
+
+        existing_password = pack.get("archive_password")
+        if isinstance(existing_password, str) and existing_password:
+            status, message = verify_archive_password(
+                archive, existing_password, seven_zip
+            )
+            if status == "valid":
+                detail["passwordRecovery"] = {
+                    "status": "database-password-verified",
+                    "message": message,
+                }
+                continue
+            pack["archive_password"] = None
+
+        if not enabled:
+            detail["passwordRecovery"] = {
+                "status": "password-required-not-entered",
+                "message": "rerun with --ask-passwords to verify and store a password",
+            }
+            continue
+
+        print(
+            f"\n[{pack_id}] {pack['name']}\n"
+            f"  Archive: {relative_display(archive, data_dir)}\n"
+            "  This retained archive needs a password for re-extraction."
+        )
+        while True:
+            try:
+                password = getpass.getpass(
+                    "  Password (press Enter to skip this archive): "
+                )
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Password entry cancelled; archive skipped.")
+                password = ""
+            if not password:
+                pack["archive_password"] = None
+                detail["passwordRecovery"] = {
+                    "status": "skipped",
+                    "message": "password entry was skipped",
+                }
+                break
+
+            status, message = verify_archive_password(archive, password, seven_zip)
+            if status == "valid":
+                pack["archive_password"] = password
+                detail["passwordRecovery"] = {
+                    "status": "verified",
+                    "message": message,
+                }
+                print("  Password verified successfully.")
+                break
+            if status in {"unavailable", "error"}:
+                pack["archive_password"] = None
+                detail["passwordRecovery"] = {
+                    "status": "verification-error",
+                    "message": message,
+                }
+                print(f"  Password was not stored: {message}")
+                break
+            print("  Password is incorrect. Try again, or press Enter to skip.")
+
+
 def load_manifest(path: Path) -> dict[str, Any] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -562,9 +800,13 @@ def build_pack(
         "total_images_size": total_images_size,
         "total_videos_size": total_videos_size,
         "error_message": error_message,
-        "archive_password": donor.get("archive_password")
-        if isinstance(donor.get("archive_password"), str)
-        else None,
+        "archive_password": (
+            donor.get("archive_password")
+            if status == "uploading"
+            and source_type == "archive"
+            and isinstance(donor.get("archive_password"), str)
+            else None
+        ),
         "compressed_size": generated.stat().st_size if generated_exists else 0,
         "created_at": created_at,
         "updated_at": updated_at,
@@ -858,6 +1100,9 @@ This script did not overwrite or delete any source file.
 Review recovery-report.json before installing the database. Names beginning
 with "恢复-" were inferred because no usable database metadata was found.
 Tags and other database-only metadata cannot be reconstructed from image files.
+If --ask-passwords was used, verified passwords exist as plaintext SQLite
+fields only for archives that still require extraction. AoI clears each field
+after a successful extraction.
 
 To install after review:
 
@@ -905,6 +1150,14 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="new, empty output directory; defaults to DATA_DIR/aoi-recovery-<time>",
     )
+    parser.add_argument(
+        "--ask-passwords",
+        action="store_true",
+        help=(
+            "interactively request and verify passwords only for retained archives "
+            "that must be re-extracted; Enter skips an archive"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -946,6 +1199,9 @@ def main() -> int:
         packs[pack_id] = pack
         pack_details.append(detail)
 
+    collect_interactive_passwords(
+        data_dir, packs, pack_details, args.ask_passwords
+    )
     pack_files = reconcile_pack_files(
         data_dir, packs, metadata["pack_files"]
     )
@@ -965,7 +1221,8 @@ def main() -> int:
         "unconfirmedUploads": scan_unconfirmed_uploads(data_dir),
         "skipped": skipped,
         "limitations": [
-            "filesystem-only recovery cannot reconstruct original names, tags, passwords or exact timestamps",
+            "filesystem-only recovery cannot reconstruct original names, tags or exact timestamps",
+            "archive passwords are stored only after successful archive verification with --ask-passwords",
             "unconfirmed files in uploads/ are reported but never moved automatically",
             "archive contents and image decodability are not exhaustively verified by this catalog rebuild",
         ],

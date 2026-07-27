@@ -121,6 +121,16 @@ python3 recover-aoi-data.py
 
 脚本仅依赖 Python 3 标准库，会从可读数据库/备份合并元数据，再以留存文件重算图包状态和文件统计。结果写入新的 `aoi-recovery-<时间>/` 目录，不会覆盖数据库或移动源文件。替换正式数据库前必须停止全部 AoI、PM2 或 Docker 实例，并先检查生成的 `recovery-report.json` 和 `README.txt`。
 
+若只有加密原包、没有已解压文件，可启用交互式密码恢复：
+
+```bash
+python3 recover-aoi-data.py --ask-passwords
+```
+
+脚本只对必须重新解压的条目询问密码，直接回车可跳过。密码通过压缩包实际测试后才写入权限为 `0600` 的恢复库，报告不包含明文密码；已有 `extracted/` 或 `generated/` 数据的条目不会询问或保存密码。
+
+传统加密 ZIP 可由 Python 直接校验；AES ZIP、RAR 和 7z 需要系统提供 `7z`、`7zz` 或 `7za`。这些命令只能通过命令参数接收密码，同机其他进程可能在极短时间内从进程列表看到参数，因此只应在可信的离线主机上执行。恢复库中的 `archive_password` 也是明文 SQLite 字段，仅用于下一次解压并会在成功后清除。
+
 ## 使用 pm2 部署
 
 项目包含 `ecosystem.config.cjs`，可直接用 pm2 管理：
