@@ -109,6 +109,18 @@ data/
 
 同一 `DATA_DIR` 只允许一个 AoI 进程运行；第二个进程会因 SQLite 原生排他锁拒绝启动。服务收到 `SIGINT`/`SIGTERM` 后停止接收请求、等待当前任务、备份并关闭数据库。若数据库文件为空、损坏，或已初始化的数据目录中数据库意外消失，服务会拒绝创建空库，避免静默覆盖。恢复时先停止服务，将 `backups/` 中确认可用的备份复制为 `db/packdb.sqlite`，并保留原故障文件用于排查。
 
+### 从留存文件重建目录
+
+如果数据库已经丢失，但 `archives/`、`extracted/` 或 `generated/` 仍然存在，可使用独立恢复脚本重建部分目录：
+
+```bash
+cp scripts/recover-aoi-data.py /path/to/data/
+cd /path/to/data
+python3 recover-aoi-data.py
+```
+
+脚本仅依赖 Python 3 标准库，会从可读数据库/备份合并元数据，再以留存文件重算图包状态和文件统计。结果写入新的 `aoi-recovery-<时间>/` 目录，不会覆盖数据库或移动源文件。替换正式数据库前必须停止全部 AoI、PM2 或 Docker 实例，并先检查生成的 `recovery-report.json` 和 `README.txt`。
+
 ## 使用 pm2 部署
 
 项目包含 `ecosystem.config.cjs`，可直接用 pm2 管理：

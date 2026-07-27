@@ -8,6 +8,7 @@ AoI 是基于 Node.js 22 的 TypeScript 项目，主要分为三部分：
 - `server/src/`：Fastify 服务端。接口路由放在 `routes/`，文件处理与队列放在 `services/`，better-sqlite3 连接、仓储和迁移放在 `db/`。
 - `server/test/`：Node test runner + tsx 回归测试，覆盖数据库持久性、单实例锁、仓储事务与安全路径。
 - `shared/types.ts`：前后端共用的数据类型与接口契约。
+- `scripts/`：离线维护工具；恢复脚本必须保持默认只读源数据、输出到新目录。
 
 运行数据位于已忽略的 `data/`。不要提交构建产物 `server/public/`、`server/dist/` 或运行时数据。
 
