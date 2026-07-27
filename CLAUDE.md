@@ -362,7 +362,7 @@ ImageViewer 切换图片时，从对象池直接取出已加载的 `HTMLImageEle
 - 退场通过 `exiting` 状态标记触发，150ms 后从 DOM 移除
 
 **使用场景**：
-- 上传格式错误 → `showInfo('只支持 ZIP、RAR、7z 格式或文件夹')`
+- 上传格式错误 → `showInfo('只支持 ZIP、RAR 格式或文件夹')`
 - 图包详情页处理中 → `showLoading('处理中')`（`loading` 为 false 且状态非 available 时显示）
 - 其他操作反馈（成功/失败/警告）
 
