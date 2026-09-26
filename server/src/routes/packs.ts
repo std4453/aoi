@@ -23,33 +23,102 @@ import {
   updatePackFileUploadId,
   completePackFile,
   getPendingPackFileCount,
+  hasAnyActiveJob,
+  toPublicPack,
 } from '../db/repositories.js';
-import { removePackFiles, ensureDir, getArchivePath, getThumbnailsDir, getExtractedImagesDir, getExtractedVideosDir, getFolderStagingDir, getUploadPath } from '../services/storage.js';
+import { removePackFiles, ensureDir, getArchivePath, getThumbnailsDir, getExtractedImagesDir, getExtractedVideosDir, getFolderStagingDir, getUploadPath, getPath } from '../services/storage.js';
 import { config } from '../config.js';
 import { jobQueue } from '../services/job-queue.js';
+import { normalizeRelativePath, resolveWithin } from '../services/safe-path.js';
+import { buildJpegOutputPaths } from '../services/jpeg-output-path.js';
+import { folderProcessor } from '../services/folder-processor.js';
+
+const MAX_NAME_LENGTH = 200;
+const MAX_FILENAME_LENGTH = 255;
+const MAX_PASSWORD_LENGTH = 1_024;
+const MAX_TAGS_PER_PACK = 1_000;
+
+function parsePositiveInteger(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) throw new Error(`${label} must be a positive integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function validateName(value: unknown, label: string): string {
+  if (typeof value !== 'string') throw new Error(`${label} is required`);
+  const name = value.trim();
+  if (!name || name.length > MAX_NAME_LENGTH || /[\0\r\n]/.test(name)) {
+    throw new Error(`${label} must contain 1-${MAX_NAME_LENGTH} safe characters`);
+  }
+  return name;
+}
+
+function validateTagIds(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_TAGS_PER_PACK) {
+    throw new Error('Invalid tag list');
+  }
+  if (value.some(id => typeof id !== 'string')) {
+    throw new Error('Invalid tag list');
+  }
+  const uniqueIds = [...new Set(value)];
+  const existingIds = new Set(listTagsFromDb().map(tag => tag.id));
+  if (uniqueIds.some(id => !existingIds.has(id))) {
+    throw new Error('One or more tags do not exist');
+  }
+  return uniqueIds;
+}
+
+function encodeRelativePathForUrl(value: string): string {
+  return value.split('/').map(segment => encodeURIComponent(segment)).join('/');
+}
+
+async function finishFolderPackIfReady(packId: string): Promise<boolean> {
+  if (getPendingPackFileCount(packId) !== 0) return false;
+
+  const result = folderProcessor.processUploadedFolder(packId);
+  updatePackStats(packId, result);
+  updatePackStructureType(packId, result.structureType);
+  updatePackStatus(packId, 'thumbnailing');
+  await jobQueue.enqueue(packId, 'thumbnail');
+  return true;
+}
 
 export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   // List packs (paginated, with search)
   fastify.get<{
     Querystring: { page?: string; pageSize?: string; search?: string };
-  }>('/api/packs', async (request) => {
-    const { page, pageSize, search } = request.query;
-    return listPacksPaginated({
-      page: page ? parseInt(page, 10) : undefined,
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
-      search: search || undefined,
-    });
+  }>('/api/packs', async (request, reply) => {
+    try {
+      const { page, pageSize, search } = request.query;
+      if (search && search.length > 200) {
+        throw new Error('Search query is too long');
+      }
+      const result = listPacksPaginated({
+        page: parsePositiveInteger(page, 'page'),
+        pageSize: parsePositiveInteger(pageSize, 'pageSize'),
+        search: search || undefined,
+      });
+      return { ...result, items: result.items.map(toPublicPack) };
+    } catch (error) {
+      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Get single pack (with tags)
   fastify.get<{
     Params: { id: string };
-  }>('/api/packs/:id', async (request) => {
+  }>('/api/packs/:id', async (request, reply) => {
     const pack = getPack(request.params.id);
     if (!pack) {
-      return { error: 'Pack not found' };
+      reply.code(404).send({ error: 'Pack not found' });
+      return;
     }
-    return pack;
+    return toPublicPack(pack);
   });
 
   // List all tags (with usage count and sample covers)
@@ -78,15 +147,15 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   // Create a tag
   fastify.post<{
     Body: { name: string };
-  }>('/api/tags', async (request) => {
-    const name = request.body.name?.trim();
-    if (!name) {
-      return { error: 'Name is required' };
-    }
+  }>('/api/tags', async (request, reply) => {
     try {
+      const name = validateName(request.body?.name, 'Tag name');
       return createTagInDb(name);
-    } catch (err) {
-      return { error: 'Tag already exists' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      reply.code(message.includes('UNIQUE') ? 409 : 400).send({
+        error: message.includes('UNIQUE') ? 'Tag already exists' : message,
+      });
     }
   });
 
@@ -100,15 +169,18 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       reply.code(404).send({ error: 'Tag not found' });
       return;
     }
-    const newName = request.body.name?.trim();
-    if (!newName) {
-      reply.code(400).send({ error: 'Name is required' });
+    let newName: string;
+    try {
+      newName = validateName(request.body?.name, 'Tag name');
+    } catch (error) {
+      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
       return;
     }
     try {
       return renameTagInDb(tag.id, newName);
     } catch (err) {
-      return { error: 'Tag name already exists' };
+      reply.code(409).send({ error: 'Tag name already exists' });
+      return;
     }
   });
 
@@ -122,7 +194,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       return;
     }
     const allPacks = listPacks();
-    return allPacks.filter(p => p.tags.some(t => t.id === tag.id));
+    return allPacks.filter(p => p.tags.some(t => t.id === tag.id)).map(toPublicPack);
   });
 
   // Delete a tag
@@ -148,8 +220,16 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       reply.code(404).send({ error: 'Pack not found' });
       return;
     }
-    setPackTagsInDb(pack.id, request.body.tagIds || []);
-    return getPack(pack.id);
+    try {
+      if (!request.body || !Object.hasOwn(request.body, 'tagIds')) {
+        throw new Error('tagIds is required');
+      }
+      const tagIds = validateTagIds(request.body.tagIds);
+      setPackTagsInDb(pack.id, tagIds);
+      return toPublicPack(getPack(pack.id)!);
+    } catch (error) {
+      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Delete a pack
@@ -159,6 +239,10 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     const pack = getPack(request.params.id);
     if (!pack) {
       reply.code(404).send({ error: 'Pack not found' });
+      return;
+    }
+    if (hasAnyActiveJob(pack.id)) {
+      reply.code(409).send({ error: 'Pack is currently being processed and cannot be deleted' });
       return;
     }
     removePackFiles(pack.id);
@@ -176,13 +260,15 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       reply.code(404).send({ error: 'Pack not found' });
       return;
     }
-    const newName = request.body.name?.trim();
-    if (!newName) {
-      reply.code(400).send({ error: 'Name is required' });
+    let newName: string;
+    try {
+      newName = validateName(request.body.name, 'Pack name');
+    } catch (error) {
+      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
       return;
     }
     const updated = renamePackInDb(pack.id, newName);
-    return updated;
+    return toPublicPack(updated!);
   });
 
   // Confirm upload completion and start processing
@@ -196,10 +282,47 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       tagIds?: string[];
     };
   }>('/api/packs/upload-complete', async (request, reply) => {
-    const { uploadId, filename, fileSize, packName, archivePassword, tagIds } = request.body;
+    const {
+      uploadId,
+      filename,
+      fileSize: _fileSize,
+      packName,
+      archivePassword,
+      tagIds,
+    } = request.body ?? {};
 
-    // Find the uploaded file in tus file store
-    const uploadPath = path.join(config.dirs.uploads, uploadId);
+    let safeFilename: string;
+    let packNameToUse: string;
+    let safeTagIds: string[];
+    try {
+      if (typeof filename !== 'string' || path.basename(filename) !== filename) {
+        throw new Error('Invalid filename');
+      }
+      safeFilename = validateName(filename, 'Filename');
+      if (safeFilename.length > MAX_FILENAME_LENGTH) throw new Error('Filename is too long');
+      packNameToUse = validateName(
+        packName ?? path.basename(safeFilename, path.extname(safeFilename)),
+        'Pack name'
+      );
+      if (
+        archivePassword !== undefined &&
+        (typeof archivePassword !== 'string' || archivePassword.length > MAX_PASSWORD_LENGTH)
+      ) {
+        throw new Error('Archive password is too long');
+      }
+      safeTagIds = validateTagIds(tagIds);
+    } catch (error) {
+      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+
+    let uploadPath: string;
+    try {
+      uploadPath = getUploadPath(uploadId);
+    } catch {
+      reply.code(400).send({ error: 'Invalid upload id' });
+      return;
+    }
 
     if (!fs.existsSync(uploadPath)) {
       reply.code(404).send({ error: 'Upload file not found' });
@@ -207,26 +330,29 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     }
 
     const actualSize = fs.statSync(uploadPath).size;
+    if (actualSize <= 0 || actualSize > config.maxUploadSize) {
+      reply.code(400).send({ error: 'Uploaded file size is invalid' });
+      return;
+    }
 
-    const ext = path.extname(filename).toLowerCase().replace('.', '');
-    if (!['zip', 'rar'].includes(ext)) {
-      reply.code(400).send({ error: 'Unsupported format. Only ZIP and RAR are supported.' });
+    const ext = path.extname(safeFilename).toLowerCase().replace('.', '');
+    if (!['zip', 'rar', '7z'].includes(ext)) {
+      reply.code(400).send({ error: 'Unsupported format. Only ZIP, RAR and 7z are supported.' });
       return;
     }
 
     try {
-      const packNameToUse = packName || path.basename(filename, path.extname(filename));
       const pack = createPack({
         name: packNameToUse,
-        originalFilename: filename,
-        originalSize: fileSize,
+        originalFilename: safeFilename,
+        originalSize: actualSize,
         originalFormat: ext,
         archivePassword,
       });
 
       // Set tags if provided
-      if (tagIds && tagIds.length > 0) {
-        setPackTagsInDb(pack.id, tagIds);
+      if (safeTagIds.length > 0) {
+        setPackTagsInDb(pack.id, safeTagIds);
       }
 
       // Move uploaded file to archives directory
@@ -235,17 +361,16 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       const archivePath = getArchivePath(pack.id, `original.${ext}`);
       fs.renameSync(uploadPath, archivePath);
 
-      // Remove tus upload directory if it exists
-      const uploadDir = path.dirname(uploadPath);
-      if (uploadDir !== config.dirs.uploads) {
-        fs.rmSync(uploadDir, { recursive: true, force: true });
+      const infoPath = `${uploadPath}.info`;
+      if (fs.existsSync(infoPath)) {
+        fs.unlinkSync(infoPath);
       }
 
       // Start extraction job
       await jobQueue.enqueue(pack.id, 'extract');
 
       // Return pack with tags
-      return getPack(pack.id);
+      return toPublicPack(getPack(pack.id)!);
     } catch (err) {
       console.error('[upload-complete] Error:', err);
       reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
@@ -260,31 +385,59 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       tagIds?: string[];
     };
   }>('/api/packs/folder-create', async (request, reply) => {
-    const { packName, files, tagIds } = request.body;
+    const { packName, files, tagIds } = request.body ?? {};
 
-    if (!packName?.trim()) {
-      reply.code(400).send({ error: 'Pack name is required' });
+    if (!Array.isArray(files) || files.length === 0) {
+      reply.code(400).send({ error: 'Files list cannot be empty' });
       return;
     }
-    if (!files || files.length === 0) {
-      reply.code(400).send({ error: 'Files list cannot be empty' });
+    if (files.length > config.maxArchiveEntries) {
+      reply.code(400).send({ error: `Too many files (maximum ${config.maxArchiveEntries})` });
+      return;
+    }
+
+    let safePackName: string;
+    let normalizedFiles: { relativePath: string; fileSize: number }[];
+    let safeTagIds: string[];
+    try {
+      safePackName = validateName(packName, 'Pack name');
+      const validatedFiles = files.map(file => {
+        if (!Number.isSafeInteger(file.fileSize) || file.fileSize < 0) {
+          throw new Error('Invalid file size');
+        }
+        return {
+          relativePath: normalizeRelativePath(file.relativePath, 'folder file path'),
+          fileSize: file.fileSize,
+        };
+      });
+      const uniquePaths = new Set(validatedFiles.map(file => file.relativePath));
+      if (uniquePaths.size !== validatedFiles.length) {
+        throw new Error('Folder contains duplicate file paths');
+      }
+      const totalSize = validatedFiles.reduce((sum, file) => sum + file.fileSize, 0);
+      if (!Number.isSafeInteger(totalSize) || totalSize > config.maxExtractedSize) {
+        throw new Error('Folder exceeds the configured size limit');
+      }
+      safeTagIds = validateTagIds(tagIds);
+      normalizedFiles = validatedFiles;
+    } catch (err) {
+      reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
       return;
     }
 
     try {
-      const totalSize = files.reduce((sum: number, f: { fileSize: number }) => sum + f.fileSize, 0);
       const pack = createPack({
-        name: packName.trim(),
-        originalFilename: packName.trim(),
-        originalSize: totalSize,
+        name: safePackName,
+        originalFilename: safePackName,
+        originalSize: normalizedFiles.reduce((sum, file) => sum + file.fileSize, 0),
         originalFormat: 'folder',
         sourceType: 'folder',
       });
 
-      createPackFiles(pack.id, files);
+      createPackFiles(pack.id, normalizedFiles);
 
-      if (tagIds && tagIds.length > 0) {
-        setPackTagsInDb(pack.id, tagIds);
+      if (safeTagIds.length > 0) {
+        setPackTagsInDb(pack.id, safeTagIds);
       }
 
       // Create staging directory
@@ -308,7 +461,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     };
   }>('/api/packs/:id/folder-file-complete', async (request, reply) => {
     const { id } = request.params;
-    const { packFileId, uploadId } = request.body;
+    const { packFileId, uploadId } = request.body ?? {};
 
     const pack = getPack(id);
     if (!pack) {
@@ -328,49 +481,52 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
 
     try {
       // Move uploaded file from tus uploads dir to staging dir
-      const uploadPath = getUploadPath(uploadId);
-      if (!fs.existsSync(uploadPath)) {
-        reply.code(404).send({ error: 'Upload file not found' });
+      let uploadPath: string;
+      try {
+        uploadPath = getUploadPath(uploadId);
+      } catch {
+        reply.code(400).send({ error: 'Invalid upload id' });
         return;
       }
-
       const stagingDir = getFolderStagingDir(id);
       const destRelativePath = packFile.relativePath;
-      const destPath = path.join(stagingDir, destRelativePath);
-      ensureDir(path.dirname(destPath));
-      fs.renameSync(uploadPath, destPath);
+      const destPath = resolveWithin(stagingDir, destRelativePath, 'folder file path');
+      if (fs.existsSync(destPath)) {
+        const destinationStat = fs.statSync(destPath);
+        if (!destinationStat.isFile() || destinationStat.size !== packFile.fileSize) {
+          reply.code(409).send({ error: 'Destination file conflicts with the uploaded file' });
+          return;
+        }
+        // A previous request may have moved the file before the process stopped.
+        // Treat a size-matching staged file as an idempotent completion.
+        completePackFile(packFileId);
+      } else {
+        if (!fs.existsSync(uploadPath)) {
+          reply.code(404).send({ error: 'Upload file not found' });
+          return;
+        }
+        const actualSize = fs.statSync(uploadPath).size;
+        if (actualSize !== packFile.fileSize) {
+          reply.code(400).send({ error: 'Uploaded file size does not match the declared size' });
+          return;
+        }
+        ensureDir(path.dirname(destPath));
+        // Persist the tus id before the rename so startup recovery can complete
+        // either side of the filesystem/database crash window.
+        updatePackFileUploadId(packFileId, uploadId);
+        fs.renameSync(uploadPath, destPath);
+        completePackFile(packFileId);
+      }
 
       // Clean up tus .info metadata file
       const infoPath = uploadPath + '.info';
-      if (fs.existsSync(infoPath)) {
-        fs.unlinkSync(infoPath);
+      try {
+        fs.rmSync(infoPath, { force: true });
+      } catch (error) {
+        console.warn('[folder-file-complete] Failed to remove tus metadata:', error);
       }
 
-      // Update pack file status
-      updatePackFileUploadId(packFileId, uploadId);
-      completePackFile(packFileId);
-
-      // Check if all files are uploaded
-      const pendingCount = getPendingPackFileCount(id);
-      if (pendingCount === 0) {
-        // Process the staging directory — classify files into images/videos
-        const { folderProcessor } = await import('../services/folder-processor.js');
-        const result = folderProcessor.processUploadedFolder(id);
-
-        updatePackStats(id, {
-          imageCount: result.imageCount,
-          videoCount: result.videoCount,
-          totalImagesSize: result.totalImagesSize,
-          totalVideosSize: result.totalVideosSize,
-        });
-        updatePackStructureType(id, result.structureType);
-        updatePackStatus(id, 'thumbnailing');
-
-        // Enqueue thumbnail generation
-        await jobQueue.enqueue(id, 'thumbnail');
-      }
-
-      return { allComplete: pendingCount === 0 };
+      return { allComplete: await finishFolderPackIfReady(id) };
     } catch (err) {
       console.error('[folder-file-complete] Error:', err);
       reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
@@ -426,14 +582,20 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string; '*': string };
   }>('/api/packs/:id/images/*', async (request, reply) => {
+    if (!getPack(request.params.id)) {
+      reply.code(404).send({ error: 'Pack not found' });
+      return;
+    }
     const imagesDir = getExtractedImagesDir(request.params.id);
     const relPath = request.params['*'];
-    const resolved = path.resolve(imagesDir, relPath);
-    if (!resolved.startsWith(imagesDir)) {
+    let resolved: string;
+    try {
+      resolved = resolveWithin(imagesDir, relPath, 'image path');
+    } catch {
       reply.code(403).send({ error: 'Forbidden' });
       return;
     }
-    if (!fs.existsSync(resolved)) {
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
       reply.code(404).send({ error: 'Image not found' });
       return;
     }
@@ -444,14 +606,20 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string; '*': string };
   }>('/api/packs/:id/thumbnails/*', async (request, reply) => {
+    if (!getPack(request.params.id)) {
+      reply.code(404).send({ error: 'Pack not found' });
+      return;
+    }
     const thumbDir = getThumbnailsDir(request.params.id);
     const relPath = request.params['*'];
-    const resolved = path.resolve(thumbDir, relPath);
-    if (!resolved.startsWith(thumbDir)) {
+    let resolved: string;
+    try {
+      resolved = resolveWithin(thumbDir, relPath, 'thumbnail path');
+    } catch {
       reply.code(403).send({ error: 'Forbidden' });
       return;
     }
-    if (!fs.existsSync(resolved)) {
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
       reply.code(404).send({ error: 'Thumbnail not found' });
       return;
     }
@@ -462,6 +630,17 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string };
   }>('/api/packs/:id/cover', async (request, reply) => {
+    if (!getPack(request.params.id)) {
+      reply.code(404).send({ error: 'Pack not found' });
+      return;
+    }
+    const coverDir = getPath('thumbnails', request.params.id);
+    const coverPath = path.join(coverDir, '_cover.jpg');
+    if (fs.existsSync(coverPath)) {
+      return reply.sendFile('_cover.jpg', coverDir);
+    }
+
+    // Backward-compatible fallback for packs created before dedicated covers.
     const thumbDir = getThumbnailsDir(request.params.id);
     if (!fs.existsSync(thumbDir)) {
       reply.code(404).send({ error: 'No thumbnails' });
@@ -482,24 +661,33 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string };
   }>('/api/packs/:id/thumbnails', async (request, reply) => {
+    if (!getPack(request.params.id)) {
+      reply.code(404).send({ error: 'Pack not found' });
+      return;
+    }
     const thumbDir = getThumbnailsDir(request.params.id);
     const imagesDir = getExtractedImagesDir(request.params.id);
     if (!fs.existsSync(thumbDir)) {
       return [];
     }
-    const imageExts = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif']);
-
     // Load blurhashes from DB
     const blurhashMap = getPackBlurhashes(request.params.id);
 
     // Build lookup from relative stem → original relative file
     let originalFiles: Map<string, string> | null = null;
+    let originalByThumbnail: Map<string, string> | null = null;
     if (fs.existsSync(imagesDir)) {
       originalFiles = new Map();
       const allImages = walkDirForExt(imagesDir, null);
+      originalByThumbnail = new Map(
+        [...buildJpegOutputPaths(allImages)].map(([original, thumbnail]) => [
+          thumbnail,
+          original,
+        ])
+      );
       for (const rel of allImages) {
         const stem = rel.replace(/\.[^.]+$/, '');
-        originalFiles.set(stem, rel);
+        if (!originalFiles.has(stem)) originalFiles.set(stem, rel);
       }
     }
 
@@ -518,12 +706,13 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
 
     return thumbFiles.map(relPath => {
       const stem = relPath.replace(/\.jpg$/, '');
-      const originalFile = originalFiles?.get(stem) ?? relPath;
+      const originalFile =
+        originalByThumbnail?.get(relPath) ?? originalFiles?.get(stem) ?? relPath;
       const bh = blurhashMap[relPath];
       return {
         name: relPath,
-        thumbUrl: `/api/packs/${request.params.id}/thumbnails/${relPath}`,
-        imageUrl: `/api/packs/${request.params.id}/images/${originalFile}`,
+        thumbUrl: `/api/packs/${request.params.id}/thumbnails/${encodeRelativePathForUrl(relPath)}`,
+        imageUrl: `/api/packs/${request.params.id}/images/${encodeRelativePathForUrl(originalFile)}`,
         blurhash: bh?.hash ?? null,
         width: bh?.width ?? null,
         height: bh?.height ?? null,
@@ -547,9 +736,9 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
 
     const imageFiles = fs.existsSync(imagesDir) ? walkDirWithSize(imagesDir) : [];
     const videoFiles = fs.existsSync(videosDir) ? walkDirWithSize(videosDir) : [];
-    const hasThumbnails = fs.existsSync(thumbDir);
+    const thumbnailDir = fs.existsSync(thumbDir) ? thumbDir : null;
 
-    return buildFileTree(request.params.id, imageFiles, videoFiles, hasThumbnails);
+    return buildFileTree(request.params.id, imageFiles, videoFiles, thumbnailDir);
   });
 
 };
@@ -595,12 +784,15 @@ function buildFileTree(
   packId: string,
   imageFiles: { relPath: string; size: number }[],
   videoFiles: { relPath: string; size: number }[],
-  hasThumbnails: boolean
+  thumbnailDir: string | null
 ): import('../types.js').FileTreeNode[] {
   type NodeMap = Map<string, import('../types.js').FileTreeNode>;
   const rootChildren: NodeMap = new Map();
   const allNodes: Map<string, NodeMap> = new Map();
   allNodes.set('', rootChildren);
+  const thumbnailPaths = buildJpegOutputPaths(
+    imageFiles.map(file => file.relPath.split(path.sep).join('/'))
+  );
 
   // Ensure all ancestor folders exist
   function ensureFolder(folderPath: string): NodeMap {
@@ -635,9 +827,15 @@ function buildFileTree(
 
     ensureFolder(folderPath);
 
-    const stem = normalized.replace(/\.[^.]+$/, '');
-    const thumbUrl = hasThumbnails ? `/api/packs/${packId}/thumbnails/${stem}.jpg` : undefined;
-    const imageUrl = `/api/packs/${packId}/images/${normalized}`;
+    const legacyThumbPath = normalized.replace(/\.[^.]+$/, '.jpg');
+    const collisionSafeThumbPath = thumbnailPaths.get(normalized) ?? legacyThumbPath;
+    const thumbPath = thumbnailDir && fs.existsSync(path.join(thumbnailDir, ...collisionSafeThumbPath.split('/')))
+      ? collisionSafeThumbPath
+      : legacyThumbPath;
+    const thumbUrl = thumbnailDir
+      ? `/api/packs/${packId}/thumbnails/${encodeRelativePathForUrl(thumbPath)}`
+      : undefined;
+    const imageUrl = `/api/packs/${packId}/images/${encodeRelativePathForUrl(normalized)}`;
 
     const folder = allNodes.get(folderPath)!;
     folder.set(name, {

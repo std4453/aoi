@@ -12,14 +12,25 @@ export function useJobProgress(jobId: string | null) {
       return;
     }
 
+    let cancelled = false;
     // Fetch initial state
-    fetchJobProgress(jobId).then(setProgress).catch(console.error);
+    fetchJobProgress(jobId)
+      .then(value => {
+        if (!cancelled) setProgress(value);
+      })
+      .catch(error => {
+        if (!cancelled) console.error(error);
+      });
 
     // Subscribe to SSE
-    unsubRef.current = subscribeJobProgress(jobId, setProgress);
+    unsubRef.current = subscribeJobProgress(jobId, value => {
+      if (!cancelled) setProgress(value);
+    });
 
     return () => {
+      cancelled = true;
       unsubRef.current?.();
+      unsubRef.current = null;
     };
   }, [jobId]);
 

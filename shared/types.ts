@@ -27,7 +27,6 @@ export interface Pack {
   totalImagesSize: number;
   totalVideosSize: number;
   errorMessage: string | null;
-  archivePassword: string | null;
   compressedSize: number;
   tags: Tag[];
   createdAt: string;

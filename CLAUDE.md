@@ -8,13 +8,13 @@
 
 - **Runtime**: Node.js 22 (ESM, `.js` 扩展名导入)
 - **Server**: Fastify 5 + TypeScript
-- **Database**: sql.js (WASM SQLite，内存运行，定时落盘)
+- **Database**: better-sqlite3（原生 SQLite，WAL + FULL synchronous）
 - **Upload**: tus 协议 (可恢复上传) + `@tus/file-store`
 - **Client**: React 19 + TypeScript + Vite 6 + Tailwind CSS 4
 - **HTTP Client**: 原生 fetch 封装 (`client/src/api/client.ts`)
 - **图片处理**: Sharp (缩略图、压缩、blurhash 计算)
 - **Blurhash**: `blurhash` npm 包 (编码服务端 + 解码客户端，图片加载占位)
-- **压缩包处理**: Archiver (生成 ZIP)、7z-bin / unrar (解压)
+- **压缩包处理**: Archiver（生成 ZIP）、yauzl / 系统 `7z`（解压）
 - **图标**: Lucide React (统一 16px)
 - **图片缩放**: react-zoom-pan-pinch v4 (双击/双指缩放、拖动平移)
 
@@ -44,14 +44,15 @@ pack-server/
 │       ├── config.ts            # Zod 校验的配置，默认端口 3000
 │       ├── types.ts             # 重导出 shared/types.ts
 │       ├── db/
-│       │   ├── connection.ts    # sql.js 初始化，5s 定时落盘
+│       │   ├── connection.ts    # 原生 SQLite、单实例锁、完整性检查与在线备份
 │       │   ├── migrations.ts    # 迁移运行器（类型定义 + runMigrations + 导入列表）
 │       │   ├── migrations/      # 独立迁移脚本（每个文件一个 migration）
 │       │   │   ├── 001_add_compressed_size.ts
 │       │   │   ├── 002_add_structure_type.ts
 │       │   │   ├── 003_add_blurhashes_and_backfill.ts
 │       │   │   ├── 004_add_source_type.ts
-│       │   │   └── 005_add_pack_files.ts
+│       │   │   ├── 005_add_pack_files.ts
+│       │   │   └── 006_cleanup_orphaned_relations.ts
 │       │   ├── repositories.ts  # 所有 CRUD 操作
 │       │   └── schema.sql       # 初始建表 (packs, presets, jobs, uploads, tags, pack_tags)
 │       ├── plugins/tus.ts       # tus 上传插件
@@ -85,8 +86,7 @@ pack-server/
 │       │   ├── PackDetailPage.tsx  # 图包详情 + 压缩配置
 │       │   ├── PresetsPage.tsx     # 压缩预设管理
 │       │   ├── TagManagerPage.tsx  # 标签管理
-│       │   ├── SettingsPage.tsx    # 系统设置
-│       │   └── DBNavigatorPage.tsx # DB 调试工具
+│       │   └── SettingsPage.tsx    # 系统设置
 │       ├── components/
 │       │   ├── layout/AppShell.tsx # 侧边栏布局
 │       │   ├── ImageViewer.tsx     # 全屏图片浏览 (ImagePool + Blurhash)
@@ -138,8 +138,10 @@ pack-server/
 ## 开发注意事项
 
 ### 数据库
-- sql.js 运行在内存中，每 5 秒 `saveDb()` 写入磁盘。**内存中的 DB 是权威来源，磁盘文件可能过期**。
-- 不要直接修改磁盘上的 `.sqlite` 文件——必须先停止服务，否则定时保存会覆盖。
+- better-sqlite3 直接操作磁盘数据库，启用 WAL、`synchronous=FULL`、外键和忙等待；每条已提交事务由 SQLite 负责持久化。
+- `db/instance-lock.sqlite` 持有 SQLite 排他事务，保证一个 `DATA_DIR` 只能运行一个实例。不要使用 PM2 cluster/reload。
+- 启动既有数据库前执行 `quick_check` 并生成在线备份；优雅退出再次备份，默认保留最近 5 份。
+- 空数据库、损坏数据库或已初始化目录中数据库缺失都会拒绝启动，禁止以删除数据库方式“修复”启动失败。
 - 所有数据库结构变更和数据回填必须通过 migration 系统执行，不要在 `connection.ts` 或其他地方直接写 `ALTER TABLE`。
 
 ### Migration 系统
@@ -324,7 +326,7 @@ ImageViewer 切换图片时，从对象池直接取出已加载的 `HTMLImageEle
 - `POST /api/packs/:id/folder-file-complete`：单个文件上传完成后调用，将文件从 tus 临时目录移动到 staging 目录，标记 pack_file 为 uploaded；所有文件完成后调用 `folder-processor.ts` 整理文件（分类图片/视频、检测目录结构）→ 入队缩略图任务
 - `DELETE /api/packs/:id/cancel-upload`：取消上传，清理 tus 文件 + 删除图包
 - `folder-processor.ts`：复用 `file-classifier.ts` 的 `moveFilesFromTemp()` 和 `analyzeStructure()`，将 staging 目录中的文件分类移动到 images/ 和 videos/ 目录
-- 服务启动恢复：文件夹图包卡在 `uploading` 状态 → 标记为 `failed`（不支持断点续传）
+- 服务启动恢复：已完成文件落盘的归档/文件夹任务会自动续接；仍需浏览器继续提供文件的文件夹上传会标记失败并保留暂存数据。
 
 **客户端流程** (`useFolderUpload.ts`)：
 - **扫描**：通过 `<input webkitdirectory>` 选择文件夹，遍历 FileList 读取 `webkitRelativePath` 和 `size`
@@ -372,7 +374,7 @@ ImageViewer 切换图片时，从对象池直接取出已加载的 `HTMLImageEle
 
 ### 生产部署 (pm2)
 - **进程管理**：pm2 守护，配置文件 `ecosystem.config.cjs`
-- **数据目录**：`~/srv/pack-service/`（archives、extracted、generated、uploads、db）
+- **数据目录**：仓库绝对路径下的 `data/`（archives、extracted、generated、uploads、backups、db）
 - **端口**：Fastify 直接监听 `0.0.0.0:8555`，无需 nginx 反代
 - **环境变量**：通过 ecosystem.config.cjs 中的 `env` 设置（PORT、HOST、DATA_DIR）
 
@@ -388,3 +390,5 @@ pm2 restart pack-server                # 重启
 pm2 stop pack-server                   # 停止
 pm2 save                               # 保存进程列表（配合 pm2 startup 实现开机自启）
 ```
+
+只使用 `pm2 restart pack-server`；不要使用 cluster mode 或 reload，因为 SQLite 单实例锁会主动拒绝第二个并发进程。

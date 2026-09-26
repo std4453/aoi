@@ -7,6 +7,7 @@ export function fetchJobProgress(jobId: string): Promise<JobProgress> {
 
 export function subscribeJobProgress(jobId: string, onProgress: (progress: JobProgress) => void): () => void {
   const eventSource = new EventSource(`/api/jobs/${jobId}/events`);
+  let poll: ReturnType<typeof setInterval> | null = null;
 
   eventSource.onmessage = (event) => {
     const data: JobProgress = JSON.parse(event.data);
@@ -19,18 +20,25 @@ export function subscribeJobProgress(jobId: string, onProgress: (progress: JobPr
   eventSource.onerror = () => {
     eventSource.close();
     // Fall back to polling
-    const poll = setInterval(async () => {
+    if (poll) return;
+    poll = setInterval(async () => {
       try {
         const data = await fetchJobProgress(jobId);
         onProgress(data);
         if (data.status === 'completed' || data.status === 'failed') {
-          clearInterval(poll);
+          if (poll) clearInterval(poll);
+          poll = null;
         }
       } catch {
-        clearInterval(poll);
+        if (poll) clearInterval(poll);
+        poll = null;
       }
     }, 2000);
   };
 
-  return () => eventSource.close();
+  return () => {
+    eventSource.close();
+    if (poll) clearInterval(poll);
+    poll = null;
+  };
 }

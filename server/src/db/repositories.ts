@@ -1,52 +1,38 @@
 import { v4 as uuidv4 } from 'uuid';
-import { getDb, saveDb } from './connection.js';
+import type Database from 'better-sqlite3';
+import { getDb } from './connection.js';
 import type { Pack, PackStatus, Preset, Job, CompressionOptions, Tag, PaginatedResponse, PackListParams, PackFile } from '../types.js';
+
+export type StoredPack = Pack & { archivePassword: string | null };
 
 function queryOne(sql: string, params?: any[]): any | null {
   const db = getDb();
   const stmt = db.prepare(sql);
   const safeParams = params?.map(p => (p === undefined ? null : p));
-  if (safeParams) stmt.bind(safeParams);
-  if (stmt.step()) {
-    const row = stmt.getAsObject();
-    stmt.free();
-    return row;
-  }
-  stmt.free();
-  return null;
+  return (safeParams ? stmt.get(...safeParams) : stmt.get()) ?? null;
 }
 
 function queryAll(sql: string, params?: any[]): any[] {
   const db = getDb();
   const stmt = db.prepare(sql);
   const safeParams = params?.map(p => (p === undefined ? null : p));
-  if (safeParams) stmt.bind(safeParams);
-  const rows: any[] = [];
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return rows;
+  return safeParams ? stmt.all(...safeParams) : stmt.all();
 }
 
-function run(sql: string, params?: any[]): void {
+function run(sql: string, params?: any[]): Database.RunResult {
   const db = getDb();
-  // sql.js rejects undefined bind values — replace with null
   const safeParams = params?.map(p => (p === undefined ? null : p));
-  if (safeParams) {
-    db.run(sql, safeParams);
-  } else {
-    db.run(sql);
-  }
-  // Trigger async save (debounced)
-  if (typeof saveDb === 'function') {
-    setTimeout(saveDb, 1000);
-  }
+  const stmt = db.prepare(sql);
+  return safeParams ? stmt.run(...safeParams) : stmt.run();
+}
+
+function inTransaction<T>(operation: () => T): T {
+  return getDb().transaction(operation)();
 }
 
 // --- Packs ---
 
-function rowToPack(row: any, tags?: Tag[]): Pack {
+function rowToPack(row: any, tags?: Tag[]): StoredPack {
   return {
     id: row.id,
     name: row.name,
@@ -66,6 +52,11 @@ function rowToPack(row: any, tags?: Tag[]): Pack {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+export function toPublicPack(pack: StoredPack): Pack {
+  const { archivePassword: _archivePassword, ...publicPack } = pack;
+  return publicPack;
 }
 
 // --- Tags ---
@@ -95,15 +86,30 @@ export function renameTag(id: string, newName: string): Tag | undefined {
 }
 
 export function deleteTag(id: string): void {
-  run('DELETE FROM pack_tags WHERE tag_id = ?', [id]);
-  run('DELETE FROM tags WHERE id = ?', [id]);
+  inTransaction(() => {
+    run('DELETE FROM pack_tags WHERE tag_id = ?', [id]);
+    run('DELETE FROM tags WHERE id = ?', [id]);
+  });
 }
 
 export function setPackTags(packId: string, tagIds: string[]): void {
-  run('DELETE FROM pack_tags WHERE pack_id = ?', [packId]);
-  for (const tagId of tagIds) {
-    run('INSERT OR IGNORE INTO pack_tags (pack_id, tag_id) VALUES (?, ?)', [packId, tagId]);
-  }
+  inTransaction(() => {
+    const uniqueTagIds = [...new Set(tagIds)];
+    if (uniqueTagIds.length > 0) {
+      const placeholders = uniqueTagIds.map(() => '?').join(',');
+      const row = queryOne(
+        `SELECT COUNT(*) AS count FROM tags WHERE id IN (${placeholders})`,
+        uniqueTagIds
+      );
+      if (row?.count !== uniqueTagIds.length) {
+        throw new Error('One or more tags do not exist');
+      }
+    }
+    run('DELETE FROM pack_tags WHERE pack_id = ?', [packId]);
+    for (const tagId of uniqueTagIds) {
+      run('INSERT OR IGNORE INTO pack_tags (pack_id, tag_id) VALUES (?, ?)', [packId, tagId]);
+    }
+  });
 }
 
 export function getPackTags(packId: string): Tag[] {
@@ -121,26 +127,26 @@ export function createPack(data: {
   originalFormat: string;
   archivePassword?: string;
   sourceType?: 'archive' | 'folder';
-}): Pack {
+}): StoredPack {
   const id = uuidv4();
   const sourceType = data.sourceType ?? 'archive';
   // Folder packs start in 'uploading', archive packs default to 'uploading' (schema default)
   // and transition to 'extracting' when the extract job starts
   run(
     'INSERT INTO packs (id, name, original_filename, original_size, original_format, archive_password, source_type, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, data.name, data.originalFilename, data.originalSize, data.originalFormat, data.archivePassword ?? null, sourceType, sourceType === 'folder' ? 'uploading' : 'uploading']
+    [id, data.name, data.originalFilename, data.originalSize, data.originalFormat, data.archivePassword ?? null, sourceType, 'uploading']
   );
   return getPack(id)!;
 }
 
-export function getPack(id: string): Pack | undefined {
+export function getPack(id: string): StoredPack | undefined {
   const row = queryOne('SELECT * FROM packs WHERE id = ?', [id]);
   if (!row) return undefined;
   const tags = getPackTags(id);
   return rowToPack(row, tags);
 }
 
-export function listPacks(): Pack[] {
+export function listPacks(): StoredPack[] {
   const rows = queryAll('SELECT * FROM packs ORDER BY created_at DESC');
   // Batch load all tags for efficiency
   const allTags = rows.length > 0
@@ -154,7 +160,7 @@ export function listPacks(): Pack[] {
   return rows.map(row => rowToPack(row, tagMap.get(row.id) ?? []));
 }
 
-export function listPacksPaginated(params: PackListParams): PaginatedResponse<Pack> {
+export function listPacksPaginated(params: PackListParams): PaginatedResponse<StoredPack> {
   const page = Math.max(1, params.page ?? 1);
   const pageSize = Math.max(1, Math.min(100, params.pageSize ?? 20));
   const search = params.search?.trim() ?? '';
@@ -234,6 +240,13 @@ export function updatePackCompressedSize(id: string, size: number): void {
   );
 }
 
+export function clearPackArchivePassword(id: string): void {
+  run(
+    "UPDATE packs SET archive_password = NULL, updated_at = datetime('now') WHERE id = ?",
+    [id]
+  );
+}
+
 export type BlurhashEntry = { hash: string; width: number; height: number };
 
 export function updatePackBlurhashes(id: string, blurhashes: Record<string, BlurhashEntry>): void {
@@ -251,11 +264,15 @@ export function getPackBlurhashes(id: string): Record<string, BlurhashEntry> {
 }
 
 export function deletePack(id: string): void {
-  run('DELETE FROM jobs WHERE pack_id = ?', [id]);
-  run('DELETE FROM packs WHERE id = ?', [id]);
+  inTransaction(() => {
+    run('DELETE FROM jobs WHERE pack_id = ?', [id]);
+    run('DELETE FROM pack_tags WHERE pack_id = ?', [id]);
+    run('DELETE FROM pack_files WHERE pack_id = ?', [id]);
+    run('DELETE FROM packs WHERE id = ?', [id]);
+  });
 }
 
-export function renamePack(id: string, newName: string): Pack | undefined {
+export function renamePack(id: string, newName: string): StoredPack | undefined {
   run("UPDATE packs SET name = ?, updated_at = datetime('now') WHERE id = ?", [newName, id]);
   return getPack(id);
 }
@@ -264,35 +281,46 @@ export function renamePack(id: string, newName: string): Pack | undefined {
 
 export function createPreset(name: string, options: CompressionOptions, isDefault = false): Preset {
   const id = uuidv4();
-  if (isDefault) {
-    run('UPDATE presets SET is_default = 0 WHERE is_default = 1');
-  }
-  run('INSERT INTO presets (id, name, is_default, options) VALUES (?, ?, ?, ?)', [
-    id,
-    name,
-    isDefault ? 1 : 0,
-    JSON.stringify(options),
-  ]);
+  inTransaction(() => {
+    if (isDefault) {
+      run('UPDATE presets SET is_default = 0 WHERE is_default = 1');
+    }
+    run('INSERT INTO presets (id, name, is_default, options) VALUES (?, ?, ?, ?)', [
+      id,
+      name,
+      isDefault ? 1 : 0,
+      JSON.stringify(options),
+    ]);
+  });
   return getPreset(id)!;
 }
 
 export function getPreset(id: string): Preset | undefined {
   const row = queryOne('SELECT * FROM presets WHERE id = ?', [id]);
   if (!row) return undefined;
-  return { ...row, options: JSON.parse(row.options), isDefault: row.is_default === 1 };
+  return {
+    id: row.id,
+    name: row.name,
+    options: JSON.parse(row.options),
+    isDefault: row.is_default === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 export function listPresets(): Preset[] {
   return queryAll('SELECT * FROM presets ORDER BY is_default DESC, created_at ASC').map((row) => ({
-    ...row,
+    id: row.id,
+    name: row.name,
     options: JSON.parse(row.options),
     isDefault: row.is_default === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }));
 }
 
 export function updatePreset(id: string, name: string, options: CompressionOptions): Preset | undefined {
   run("UPDATE presets SET name = ?, options = ?, updated_at = datetime('now') WHERE id = ?", [
-    id,
     name,
     JSON.stringify(options),
     id,
@@ -305,14 +333,23 @@ export function deletePreset(id: string): void {
 }
 
 export function setDefaultPreset(id: string): void {
-  run('UPDATE presets SET is_default = 0 WHERE is_default = 1');
-  run("UPDATE presets SET is_default = 1, updated_at = datetime('now') WHERE id = ?", [id]);
+  inTransaction(() => {
+    run('UPDATE presets SET is_default = 0 WHERE is_default = 1');
+    run("UPDATE presets SET is_default = 1, updated_at = datetime('now') WHERE id = ?", [id]);
+  });
 }
 
 export function getDefaultPreset(): Preset | undefined {
   const row = queryOne('SELECT * FROM presets WHERE is_default = 1 LIMIT 1');
   if (!row) return undefined;
-  return { ...row, options: JSON.parse(row.options), isDefault: row.is_default === 1 };
+  return {
+    id: row.id,
+    name: row.name,
+    options: JSON.parse(row.options),
+    isDefault: row.is_default === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 // --- Jobs ---
@@ -328,6 +365,17 @@ export function createJob(packId: string, type: Job['type'], options?: Compressi
   return getJob(id)!;
 }
 
+export function createJobIfIdle(
+  packId: string,
+  type: Job['type'],
+  options?: CompressionOptions
+): Job | undefined {
+  return inTransaction(() => {
+    if (hasActiveJob(packId, type)) return undefined;
+    return createJob(packId, type, options);
+  });
+}
+
 export function getJob(id: string): Job | undefined {
   const row = queryOne('SELECT * FROM jobs WHERE id = ?', [id]);
   if (!row) return undefined;
@@ -336,7 +384,7 @@ export function getJob(id: string): Job | undefined {
 
 export function updateJobStatus(id: string, status: Job['status'], progress?: number, error?: string): void {
   if (status === 'running') {
-    run("UPDATE jobs SET status = ?, progress = ?, started_at = datetime('now') WHERE id = ?", [
+    run("UPDATE jobs SET status = ?, progress = ?, started_at = COALESCE(started_at, datetime('now')) WHERE id = ?", [
       status,
       progress ?? 0,
       id,
@@ -347,7 +395,10 @@ export function updateJobStatus(id: string, status: Job['status'], progress?: nu
       [status, progress ?? 0, error ?? null, id]
     );
   } else {
-    run('UPDATE jobs SET status = ?, progress = ? WHERE id = ?', [status, progress ?? 0, id]);
+    run(
+      'UPDATE jobs SET status = ?, progress = ?, started_at = NULL, completed_at = NULL, error = NULL WHERE id = ?',
+      [status, progress ?? 0, id]
+    );
   }
 }
 
@@ -355,10 +406,54 @@ export function updateJobResult(id: string, result: object): void {
   run('UPDATE jobs SET result = ? WHERE id = ?', [JSON.stringify(result), id]);
 }
 
-export function getNextPendingJob(): Job | undefined {
-  const row = queryOne("SELECT * FROM jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1");
-  if (!row) return undefined;
-  return rowToJob(row);
+export function updateJobProgress(id: string, progress: number, result: object): void {
+  run(
+    "UPDATE jobs SET status = 'running', progress = ?, result = ?, started_at = COALESCE(started_at, datetime('now')) WHERE id = ?",
+    [progress, JSON.stringify(result), id]
+  );
+}
+
+export function claimNextPendingJob(): Job | undefined {
+  return inTransaction(() => {
+    const row = queryOne("SELECT id FROM jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1");
+    if (!row) return undefined;
+
+    const claimed = run(
+      "UPDATE jobs SET status = 'running', progress = 0, started_at = COALESCE(started_at, datetime('now')) WHERE id = ? AND status = 'pending'",
+      [row.id]
+    );
+    if (claimed.changes !== 1) return undefined;
+    return getJob(row.id);
+  });
+}
+
+export function recoverInterruptedJobs(): number {
+  const result = run(
+    "UPDATE jobs SET status = 'pending', progress = 0, started_at = NULL WHERE status = 'running'"
+  );
+  return result.changes;
+}
+
+export function hasActiveJob(packId: string, type: Job['type']): boolean {
+  return Boolean(queryOne(
+    "SELECT 1 FROM jobs WHERE pack_id = ? AND type = ? AND status IN ('pending', 'running') LIMIT 1",
+    [packId, type]
+  ));
+}
+
+export function hasAnyActiveJob(packId: string): boolean {
+  return Boolean(queryOne(
+    "SELECT 1 FROM jobs WHERE pack_id = ? AND status IN ('pending', 'running') LIMIT 1",
+    [packId]
+  ));
+}
+
+export function getLatestJob(packId: string, type: Job['type']): Job | undefined {
+  const row = queryOne(
+    'SELECT * FROM jobs WHERE pack_id = ? AND type = ? ORDER BY created_at DESC LIMIT 1',
+    [packId, type]
+  );
+  return row ? rowToJob(row) : undefined;
 }
 
 // --- Uploads ---
@@ -400,17 +495,19 @@ function rowToPackFile(row: any): PackFile {
 }
 
 export function createPackFiles(packId: string, files: { relativePath: string; fileSize: number }[]): void {
-  for (const file of files) {
-    const id = uuidv4();
-    run(
-      'INSERT INTO pack_files (id, pack_id, relative_path, file_size, status) VALUES (?, ?, ?, ?, ?)',
-      [id, packId, file.relativePath, file.fileSize, 'pending']
-    );
-  }
+  inTransaction(() => {
+    for (const file of files) {
+      const id = uuidv4();
+      run(
+        'INSERT INTO pack_files (id, pack_id, relative_path, file_size, status) VALUES (?, ?, ?, ?, ?)',
+        [id, packId, file.relativePath, file.fileSize, 'pending']
+      );
+    }
+  });
 }
 
 export function getPackFiles(packId: string): PackFile[] {
-  return queryAll('SELECT * FROM pack_files WHERE pack_id = ? ORDER BY created_at', [packId]).map(rowToPackFile);
+  return queryAll('SELECT * FROM pack_files WHERE pack_id = ? ORDER BY rowid', [packId]).map(rowToPackFile);
 }
 
 export function getPackFile(id: string): PackFile | undefined {

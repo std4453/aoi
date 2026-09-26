@@ -1,11 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { moveFilesFromTemp, analyzeStructure } from './file-classifier.js';
+import { moveFilesFromTemp, walkDir } from './file-classifier.js';
 import type { ExtractStats } from './file-classifier.js';
 import { getFolderStagingDir, getExtractedImagesDir, getExtractedVideosDir } from './storage.js';
 
 interface FolderProcessResult extends ExtractStats {
   structureType: string;
+}
+
+function measureFiles(dir: string): { count: number; size: number; structured: boolean } {
+  if (!fs.existsSync(dir)) return { count: 0, size: 0, structured: false };
+  const files = walkDir(dir);
+  return {
+    count: files.length,
+    size: files.reduce((sum, file) => sum + fs.statSync(file).size, 0),
+    structured: files.some(file => path.relative(dir, file).includes(path.sep)),
+  };
 }
 
 export const folderProcessor = {
@@ -19,27 +29,30 @@ export const folderProcessor = {
     const imagesDir = getExtractedImagesDir(packId);
     const videosDir = getExtractedVideosDir(packId);
 
-    if (!fs.existsSync(stagingDir)) {
+    if (
+      !fs.existsSync(stagingDir) &&
+      !fs.existsSync(imagesDir) &&
+      !fs.existsSync(videosDir)
+    ) {
       throw new Error('Staging directory not found');
     }
 
-    // analyzeStructure handles wrapper directory stripping automatically
-    // (webkitRelativePath includes root folder name, which gets stripped as a single wrapper dir)
-    const basePath = analyzeStructure(stagingDir);
-
-    // Determine structure_type from the analyzed directory
-    const innerEntries = fs.readdirSync(basePath, { withFileTypes: true });
-    const innerDirs = innerEntries.filter(e => e.isDirectory());
-    const structureType = innerDirs.length > 0 ? 'structured' : 'flat';
-
-    // Move files to images/ and videos/ directories
-    const stats = moveFilesFromTemp(stagingDir, imagesDir, videosDir);
-
-    // Clean up staging directory (moveFilesFromTemp may leave empty dirs)
     if (fs.existsSync(stagingDir)) {
+      // Moving within DATA_DIR is atomic per file. If the process stops midway,
+      // a retry moves only the files still in staging and then recomputes totals
+      // from the complete destination trees.
+      moveFilesFromTemp(stagingDir, imagesDir, videosDir);
       fs.rmSync(stagingDir, { recursive: true, force: true });
     }
 
-    return { ...stats, structureType };
+    const images = measureFiles(imagesDir);
+    const videos = measureFiles(videosDir);
+    return {
+      imageCount: images.count,
+      videoCount: videos.count,
+      totalImagesSize: images.size,
+      totalVideosSize: videos.size,
+      structureType: images.structured || videos.structured ? 'structured' : 'flat',
+    };
   },
 };

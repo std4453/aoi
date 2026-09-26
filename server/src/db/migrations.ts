@@ -1,12 +1,14 @@
+import type Database from 'better-sqlite3';
 import m001 from './migrations/001_add_compressed_size.js';
 import m002 from './migrations/002_add_structure_type.js';
 import m003 from './migrations/003_add_blurhashes_and_backfill.js';
 import m004 from './migrations/004_add_source_type.js';
 import m005 from './migrations/005_add_pack_files.js';
+import m006 from './migrations/006_cleanup_orphaned_relations.js';
 
 export interface Migration {
   name: string;
-  up: (db: any) => void;
+  up: (db: Database.Database) => void;
 }
 
 const migrations: Migration[] = [
@@ -15,27 +17,25 @@ const migrations: Migration[] = [
   m003,
   m004,
   m005,
+  m006,
 ];
 
-export function runMigrations(db: any): void {
-  db.run(`CREATE TABLE IF NOT EXISTS migrations (
+export function runMigrations(db: Database.Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS migrations (
     name TEXT PRIMARY KEY,
     executed_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
-  const executed: Set<string> = new Set();
-  const result = db.exec('SELECT name FROM migrations');
-  if (result.length > 0) {
-    for (const row of result[0].values) {
-      executed.add(row[0] as string);
-    }
-  }
+  const executed = new Set(
+    (db.prepare('SELECT name FROM migrations').all() as Array<{ name: string }>).map(row => row.name)
+  );
+  const record = db.prepare('INSERT INTO migrations (name) VALUES (?)');
 
   for (const migration of migrations) {
     if (executed.has(migration.name)) continue;
     console.log(`[migration] Running: ${migration.name}`);
     migration.up(db);
-    db.run('INSERT INTO migrations (name) VALUES (?)', [migration.name]);
+    record.run(migration.name);
     console.log(`[migration] Completed: ${migration.name}`);
   }
 }

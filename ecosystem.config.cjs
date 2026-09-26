@@ -1,13 +1,23 @@
+const path = require('node:path');
+
+const repositoryRoot = __dirname;
+
 module.exports = {
   apps: [
     {
       name: 'pack-server',
-      cwd: './server',
+      cwd: path.join(repositoryRoot, 'server'),
       script: 'dist/server/src/index.js',
+      exec_mode: 'fork',
+      instances: 1,
+      wait_ready: true,
+      listen_timeout: 15_000,
+      kill_timeout: 45_000,
+      restart_delay: 1_000,
       env: {
-        PORT: 8555,
-        HOST: '0.0.0.0',
-        DATA_DIR: './data',
+        PORT: Number(process.env.PORT || 8555),
+        HOST: process.env.HOST || '0.0.0.0',
+        DATA_DIR: path.resolve(process.env.DATA_DIR || path.join(repositoryRoot, 'data')),
         NODE_ENV: 'production',
       },
     },

@@ -33,3 +33,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Local end-to-end test artifacts
+test-artifacts/

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import yauzl from 'yauzl';
 import iconv from 'iconv-lite';
@@ -10,12 +10,60 @@ import {
   ensureDir,
   getExtractedImagesDir,
   getExtractedVideosDir,
+  getPath,
 } from './storage.js';
 import {
   getFileCategory,
   moveFilesFromTemp,
   type ExtractStats,
 } from './file-classifier.js';
+import { config } from '../config.js';
+import { normalizeRelativePath, resolveWithin } from './safe-path.js';
+
+class ArchiveSafetyError extends Error {
+  override name = 'ArchiveSafetyError';
+}
+
+const activeArchiveProcesses = new Set<ChildProcess>();
+
+function trackArchiveProcess(child: ChildProcess): void {
+  activeArchiveProcesses.add(child);
+  child.once('exit', () => activeArchiveProcesses.delete(child));
+}
+
+async function waitForProcesses(
+  processes: ChildProcess[],
+  timeoutMs: number
+): Promise<boolean> {
+  if (processes.every(child => child.exitCode !== null || child.signalCode !== null)) {
+    return true;
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const exited = Promise.all(processes.map(child => {
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    return new Promise<void>(resolve => child.once('exit', () => resolve()));
+  })).then(() => true);
+  const timedOut = new Promise<boolean>(resolve => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const result = await Promise.race([exited, timedOut]);
+  if (timer) clearTimeout(timer);
+  return result;
+}
+
+export async function terminateArchiveProcesses(timeoutMs = 2_000): Promise<void> {
+  const processes = [...activeArchiveProcesses];
+  if (processes.length === 0) return;
+
+  for (const child of processes) child.kill('SIGTERM');
+  if (await waitForProcesses(processes, timeoutMs)) return;
+
+  for (const child of processes) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  }
+  await waitForProcesses(processes, 500);
+}
 
 /**
  * Decode a ZIP entry filename buffer.
@@ -46,13 +94,56 @@ function getArchiveFileCategory(filename: string): 'image' | 'video' | 'skip' {
   return getFileCategory(filename);
 }
 
+function prepareTempDir(tempDir: string): void {
+  fs.rmSync(tempDir, { recursive: true, force: true });
+  ensureDir(tempDir);
+}
+
+function getExtractionBudget(tempDir: string): number {
+  const stats = fs.statfsSync(tempDir);
+  const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+  const reserve = Math.min(128 * 1024 * 1024, Math.floor(freeBytes * 0.1));
+  return Math.min(config.maxExtractedSize, Math.max(0, freeBytes - reserve));
+}
+
+function safe7zMessage(stdout: string, stderr: string, password?: string): string {
+  let message = (stderr || stdout || '7z command failed or timed out').trim();
+  if (password) {
+    message = message.split(password).join('[redacted]');
+  }
+  return message.slice(-4_000);
+}
+
+function measureExtractedTree(dir: string): { entries: number; bytes: number } {
+  let entries = 0;
+  let bytes = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new ArchiveSafetyError('Archive contains a symbolic link');
+    }
+    if (entry.isDirectory()) {
+      const child = measureExtractedTree(fullPath);
+      entries += child.entries;
+      bytes += child.bytes;
+    } else if (entry.isFile()) {
+      entries++;
+      bytes += fs.statSync(fullPath).size;
+    }
+    if (entries > config.maxArchiveEntries || bytes > config.maxExtractedSize) {
+      throw new ArchiveSafetyError('Extracted archive exceeds the configured resource limits');
+    }
+  }
+  return { entries, bytes };
+}
+
 // Check if 7z is available
 let _7zChecked = false;
 let _7zAvailable = false;
 function is7zAvailable(): boolean {
   if (_7zChecked) return _7zAvailable;
   try {
-    execFileSync('which', ['7z'], { stdio: 'pipe' });
+    execFileSync('7z', ['i'], { stdio: 'ignore', timeout: 5_000 });
     _7zAvailable = true;
   } catch {
     _7zAvailable = false;
@@ -61,21 +152,97 @@ function is7zAvailable(): boolean {
   return _7zAvailable;
 }
 
-// Extract using 7z — supports ZIP, RAR, 7z with password
-function extract7z(archivePath: string, imagesDir: string, videosDir: string, password?: string): Promise<ExtractStats> {
+function inspect7zArchive(
+  archivePath: string,
+  extractionBudget: number,
+  password?: string
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const tempDir = path.join(path.dirname(imagesDir), '_temp_extract');
-    ensureDir(tempDir);
+    const args = ['l', '-slt', '-ba'];
+    if (password) args.push(`-p${password}`);
+    args.push(archivePath);
 
+    const child = execFile('7z', args, {
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: config.archiveCommandTimeout,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error(`无法检查压缩包内容: ${safe7zMessage(stdout, stderr, password)}`));
+        return;
+      }
+
+      let entries = 0;
+      let totalSize = 0;
+      const listedPaths = new Set<string>();
+      for (const line of stdout.split(/\r?\n/)) {
+        if (line.startsWith('Path = ')) {
+          const listedPath = line.slice('Path = '.length).replace(/[\\/]+$/, '');
+          if (listedPath && listedPath !== '.') {
+            try {
+              const normalized = normalizeRelativePath(listedPath, 'archive entry path');
+              if (listedPaths.has(normalized)) {
+                reject(new ArchiveSafetyError('Archive contains duplicate entry paths'));
+                return;
+              }
+              listedPaths.add(normalized);
+            } catch (error) {
+              reject(new ArchiveSafetyError(
+                error instanceof Error ? error.message : String(error)
+              ));
+              return;
+            }
+          }
+          entries++;
+        }
+        if (line.startsWith('Symbolic Link = ') || /^Attributes = .*l/.test(line)) {
+          reject(new ArchiveSafetyError('Archive contains a symbolic link'));
+          return;
+        }
+        if (line.startsWith('Size = ')) {
+          const size = Number(line.slice('Size = '.length));
+          if (Number.isFinite(size) && size > 0) totalSize += size;
+        }
+      }
+
+      const archiveSize = fs.statSync(archivePath).size;
+      if (
+        entries > config.maxArchiveEntries ||
+        totalSize > extractionBudget ||
+        (archiveSize > 0 && totalSize / archiveSize > config.maxCompressionRatio)
+      ) {
+        reject(new ArchiveSafetyError('压缩包超过允许的文件数量、解压大小或压缩比限制'));
+        return;
+      }
+      resolve();
+    });
+    trackArchiveProcess(child);
+  });
+}
+
+// Extract using 7z — supports ZIP, RAR, 7z with password
+async function extract7z(archivePath: string, imagesDir: string, videosDir: string, password?: string): Promise<ExtractStats> {
+  const tempDir = path.join(path.dirname(imagesDir), '_temp_extract');
+  prepareTempDir(tempDir);
+  try {
+    await inspect7zArchive(archivePath, getExtractionBudget(tempDir), password);
+  } catch (error) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  return new Promise((resolve, reject) => {
     const args = ['x', '-y', '-o' + tempDir + '/'];
     if (password) {
       args.push(`-p${password}`);
     }
     args.push(archivePath);
 
-    execFile('7z', args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile('7z', args, {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: config.archiveCommandTimeout,
+    }, (err, stdout, stderr) => {
       if (err && err.code !== 0) {
-        const msg = stderr || stdout || err.message;
+        const msg = safe7zMessage(stdout, stderr, password);
         fs.rmSync(tempDir, { recursive: true, force: true });
         if (msg.includes('Wrong password') || (password && !err.code)) {
           return reject(new Error('密码错误或压缩包已损坏'));
@@ -84,6 +251,7 @@ function extract7z(archivePath: string, imagesDir: string, videosDir: string, pa
       }
 
       try {
+        measureExtractedTree(tempDir);
         const stats = moveFilesFromTemp(tempDir, imagesDir, videosDir);
         fs.rmSync(tempDir, { recursive: true, force: true });
         resolve(stats);
@@ -92,6 +260,7 @@ function extract7z(archivePath: string, imagesDir: string, videosDir: string, pa
         reject(e);
       }
     });
+    trackArchiveProcess(child);
   });
 }
 
@@ -100,88 +269,130 @@ function extractZip(archivePath: string, imagesDir: string, videosDir: string): 
   const tempDir = path.join(path.dirname(imagesDir), '_temp_extract');
 
   return new Promise((resolve, reject) => {
-    ensureDir(tempDir);
+    prepareTempDir(tempDir);
+    const extractionBudget = getExtractionBudget(tempDir);
+    let entryCount = 0;
+    let totalUncompressedSize = 0;
+    let settled = false;
 
-    yauzl.open(archivePath, { lazyEntries: true, decodeStrings: false }, (err, zipfile) => {
+    const fail = (zipfile: yauzl.ZipFile | undefined, error: unknown) => {
+      if (settled) return;
+      settled = true;
+      try {
+        zipfile?.close();
+      } catch {
+        // Ignore close errors while preserving the original failure.
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
+    yauzl.open(archivePath, {
+      lazyEntries: true,
+      decodeStrings: false,
+      validateEntrySizes: true,
+    }, (err, zipfile) => {
       if (err) {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-        return reject(err);
+        fail(zipfile, err);
+        return;
       }
       if (!zipfile) {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-        return reject(new Error('Failed to open ZIP'));
+        fail(zipfile, new Error('Failed to open ZIP'));
+        return;
       }
 
       zipfile.readEntry();
 
       zipfile.on('entry', (entry) => {
-        // Decode filename with proper encoding detection
-        const isUTF8 = (entry.flags & 0x800) !== 0;
-        const fileName = decodeEntryFileName(entry.fileName as unknown as Buffer, isUTF8);
+        try {
+          entryCount++;
+          totalUncompressedSize += entry.uncompressedSize;
+          if (
+            entryCount > config.maxArchiveEntries ||
+            totalUncompressedSize > extractionBudget
+          ) {
+            throw new ArchiveSafetyError('ZIP exceeds the configured extraction limits');
+          }
+          if (
+            entry.uncompressedSize > 0 &&
+            (entry.compressedSize === 0 ||
+              entry.uncompressedSize / entry.compressedSize > config.maxCompressionRatio)
+          ) {
+            throw new ArchiveSafetyError('ZIP entry exceeds the configured compression ratio');
+          }
 
-        // Skip __MACOSX directories and their contents
-        if (fileName.includes('__MACOSX')) {
-          zipfile.readEntry();
-          return;
-        }
+          const isUTF8 = (entry.flags & 0x800) !== 0;
+          const decodedName = decodeEntryFileName(entry.fileName as unknown as Buffer, isUTF8);
+          const isDirectory = /\/$/.test(decodedName);
+          let fileName: string;
+          try {
+            fileName = normalizeRelativePath(
+              isDirectory ? decodedName.replace(/\/+$/, '') : decodedName,
+              'ZIP entry path'
+            );
+          } catch (error) {
+            throw new ArchiveSafetyError(
+              error instanceof Error ? error.message : String(error)
+            );
+          }
 
-        if (/\/$/.test(fileName)) {
-          zipfile.readEntry();
-          return;
-        }
-
-        const basename = path.basename(fileName);
-        const category = getArchiveFileCategory(basename);
-
-        if (category === 'skip') {
-          zipfile.readEntry();
-          return;
-        }
-
-        // Extract to temp dir preserving original path structure
-        const outputPath = path.join(tempDir, fileName);
-        ensureDir(path.dirname(outputPath));
-
-        zipfile.openReadStream(entry, (err, readStream) => {
-          if (err) {
-            console.error(`Failed to read ${fileName}: ${err.message}`);
+          if (fileName.split('/').includes('__MACOSX') || isDirectory) {
             zipfile.readEntry();
             return;
           }
 
-          const writeStream = fs.createWriteStream(outputPath);
+          const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
+          if ((unixMode & 0o170000) === 0o120000) {
+            throw new ArchiveSafetyError('ZIP contains a symbolic link');
+          }
 
-          writeStream.on('finish', () => {
+          const basename = path.posix.basename(fileName);
+          const category = getArchiveFileCategory(basename);
+
+          if (category === 'skip') {
             zipfile.readEntry();
-          });
+            return;
+          }
 
-          writeStream.on('error', (err) => {
-            console.error(`Failed to write ${basename}: ${err.message}`);
-            zipfile.readEntry();
-          });
+          const outputPath = resolveWithin(tempDir, fileName, 'ZIP entry path');
+          ensureDir(path.dirname(outputPath));
 
-          pipeline(readStream, writeStream).catch((err) => {
-            console.error(`Pipeline error for ${basename}: ${err.message}`);
-            zipfile.readEntry();
-          });
-        });
-      });
+          zipfile.openReadStream(entry, (streamError, readStream) => {
+            if (streamError || !readStream) {
+              fail(zipfile, streamError ?? new Error(`Failed to read ${fileName}`));
+              return;
+            }
 
-      zipfile.on('end', () => {
-        try {
-          const stats = moveFilesFromTemp(tempDir, imagesDir, videosDir);
-          fs.rmSync(tempDir, { recursive: true, force: true });
-          resolve(stats);
-        } catch (e) {
-          fs.rmSync(tempDir, { recursive: true, force: true });
-          reject(e);
+            void pipeline(readStream, fs.createWriteStream(outputPath, { flags: 'wx' }))
+              .then(() => zipfile.readEntry())
+              .catch(error => {
+                const nodeError = error as NodeJS.ErrnoException;
+                fail(
+                  zipfile,
+                  nodeError.code === 'EEXIST'
+                    ? new ArchiveSafetyError('ZIP contains duplicate file paths')
+                    : error
+                );
+              });
+          });
+        } catch (error) {
+          fail(zipfile, error);
         }
       });
 
-      zipfile.on('error', (err) => {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-        reject(err);
+      zipfile.on('end', () => {
+        if (settled) return;
+        try {
+          const stats = moveFilesFromTemp(tempDir, imagesDir, videosDir);
+          fs.rmSync(tempDir, { recursive: true, force: true });
+          settled = true;
+          resolve(stats);
+        } catch (e) {
+          fail(zipfile, e);
+        }
       });
+
+      zipfile.on('error', error => fail(zipfile, error));
     });
   });
 }
@@ -191,27 +402,33 @@ export const archiveExtractor = {
     const archivePath = getArchivePath(pack.id, `original.${pack.originalFormat}`);
     const imagesDir = getExtractedImagesDir(pack.id);
     const videosDir = getExtractedVideosDir(pack.id);
+    const extractedRoot = getPath('extracted', pack.id);
+
+    // Extraction is restartable: discard any partial prior attempt so a crash
+    // cannot duplicate files on the next run.
+    fs.rmSync(extractedRoot, { recursive: true, force: true });
 
     let result;
 
     if (password) {
       if (!is7zAvailable()) {
-        throw new Error('需要安装 p7zip-full 才能解压密码保护的压缩包。请运行: sudo apt-get install -y p7zip-full');
+        throw new Error('系统中未找到 7z 命令，无法解压密码保护的压缩包');
       }
       result = await extract7z(archivePath, imagesDir, videosDir, password);
     } else if (pack.originalFormat === 'zip') {
       try {
         result = await extractZip(archivePath, imagesDir, videosDir);
-      } catch {
+      } catch (error) {
+        if (error instanceof ArchiveSafetyError) throw error;
         if (!is7zAvailable()) {
-          throw new Error('需要安装 p7zip-full 才能解压此压缩包。请运行: sudo apt-get install -y p7zip-full');
+          throw new Error('系统中未找到 7z 命令，无法回退解压此压缩包');
         }
         console.error(`yauzl failed for ${pack.name}, falling back to 7z`);
         result = await extract7z(archivePath, imagesDir, videosDir);
       }
     } else {
       if (!is7zAvailable()) {
-        throw new Error('需要安装 p7zip-full 才能解压 RAR/7z 格式。请运行: sudo apt-get install -y p7zip-full');
+        throw new Error('系统中未找到 7z 命令，无法解压 RAR/7z 格式');
       }
       result = await extract7z(archivePath, imagesDir, videosDir);
     }
