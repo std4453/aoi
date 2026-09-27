@@ -24,6 +24,12 @@ class ArchiveSafetyError extends Error {
   override name = 'ArchiveSafetyError';
 }
 
+class ArchivePasswordRequiredError extends Error {
+  constructor() {
+    super('此 ZIP 压缩包需要密码，请填写密码后重新上传');
+  }
+}
+
 const activeArchiveProcesses = new Set<ChildProcess>();
 
 function trackArchiveProcess(child: ChildProcess): void {
@@ -107,7 +113,7 @@ function getExtractionBudget(tempDir: string): number {
 }
 
 function safe7zMessage(stdout: string, stderr: string, password?: string): string {
-  let message = (stderr || stdout || '7z command failed or timed out').trim();
+  let message = `${stderr}\n${stdout}`.trim() || '7z command failed or timed out';
   if (password) {
     message = message.split(password).join('[redacted]');
   }
@@ -167,6 +173,12 @@ function inspect7zArchive(
       timeout: config.archiveCommandTimeout,
     }, (err, stdout, stderr) => {
       if (err) {
+        if (/password|encrypted/i.test(`${stderr}\n${stdout}`)) {
+          reject(new Error(password
+            ? '密码错误或压缩包已损坏'
+            : '此压缩包需要密码，请填写密码后重新上传'));
+          return;
+        }
         reject(new Error(`无法检查压缩包内容: ${safe7zMessage(stdout, stderr, password)}`));
         return;
       }
@@ -216,6 +228,8 @@ function inspect7zArchive(
       resolve();
     });
     trackArchiveProcess(child);
+    // Background jobs must not wait for an interactive password prompt.
+    child.stdin?.end();
   });
 }
 
@@ -244,8 +258,10 @@ async function extract7z(archivePath: string, imagesDir: string, videosDir: stri
       if (err && err.code !== 0) {
         const msg = safe7zMessage(stdout, stderr, password);
         fs.rmSync(tempDir, { recursive: true, force: true });
-        if (msg.includes('Wrong password') || (password && !err.code)) {
-          return reject(new Error('密码错误或压缩包已损坏'));
+        if (/password|encrypted/i.test(`${stderr}\n${stdout}`)) {
+          return reject(new Error(password
+            ? '密码错误或压缩包已损坏'
+            : '此压缩包需要密码，请填写密码后重新上传'));
         }
         return reject(new Error(`7z 解压失败: ${msg}`));
       }
@@ -261,6 +277,7 @@ async function extract7z(archivePath: string, imagesDir: string, videosDir: stri
       }
     });
     trackArchiveProcess(child);
+    child.stdin?.end();
   });
 }
 
@@ -301,10 +318,10 @@ function extractZip(archivePath: string, imagesDir: string, videosDir: string): 
         return;
       }
 
-      zipfile.readEntry();
-
       zipfile.on('entry', (entry) => {
+        if (settled) return;
         try {
+          if (entry.isEncrypted()) throw new ArchivePasswordRequiredError();
           entryCount++;
           totalUncompressedSize += entry.uncompressedSize;
           if (
@@ -321,7 +338,7 @@ function extractZip(archivePath: string, imagesDir: string, videosDir: string): 
             throw new ArchiveSafetyError('ZIP entry exceeds the configured compression ratio');
           }
 
-          const isUTF8 = (entry.flags & 0x800) !== 0;
+          const isUTF8 = (entry.generalPurposeBitFlag & 0x800) !== 0;
           const decodedName = decodeEntryFileName(entry.fileName as unknown as Buffer, isUTF8);
           const isDirectory = /\/$/.test(decodedName);
           let fileName: string;
@@ -364,7 +381,9 @@ function extractZip(archivePath: string, imagesDir: string, videosDir: string): 
             }
 
             void pipeline(readStream, fs.createWriteStream(outputPath, { flags: 'wx' }))
-              .then(() => zipfile.readEntry())
+              .then(() => {
+                if (!settled) zipfile.readEntry();
+              })
               .catch(error => {
                 const nodeError = error as NodeJS.ErrnoException;
                 fail(
@@ -393,6 +412,7 @@ function extractZip(archivePath: string, imagesDir: string, videosDir: string): 
       });
 
       zipfile.on('error', error => fail(zipfile, error));
+      zipfile.readEntry();
     });
   });
 }
@@ -419,7 +439,7 @@ export const archiveExtractor = {
       try {
         result = await extractZip(archivePath, imagesDir, videosDir);
       } catch (error) {
-        if (error instanceof ArchiveSafetyError) throw error;
+        if (error instanceof ArchiveSafetyError || error instanceof ArchivePasswordRequiredError) throw error;
         if (!is7zAvailable()) {
           throw new Error('系统中未找到 7z 命令，无法回退解压此压缩包');
         }

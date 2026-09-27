@@ -140,12 +140,13 @@ export default function PackDetailPage() {
     return closeLoading;
   }, [loading, isAvailable]);
 
-  // Auto-refresh pack status while extracting/thumbnailing
+  // Archive packs can be waiting in the extraction queue after upload finishes.
   useEffect(() => {
-    if (pack?.status !== 'extracting' && pack?.status !== 'thumbnailing') return;
+    const queuedArchive = pack?.status === 'uploading' && pack.sourceType === 'archive';
+    if (!queuedArchive && pack?.status !== 'extracting' && pack?.status !== 'thumbnailing') return;
     const timer = setInterval(refreshPackStatus, 1000);
     return () => clearInterval(timer);
-  }, [pack?.status, refreshPackStatus]);
+  }, [pack?.status, pack?.sourceType, refreshPackStatus]);
 
   // Initial load
   useEffect(() => {
