@@ -7,6 +7,7 @@ import { formatBytes } from '../lib/utils';
 import { Upload, Pause, Play, X, CheckCircle, AlertCircle, FileArchive, FolderOpen, Lock, Eye, EyeOff, Tag, ChevronDown, ChevronUp } from 'lucide-react';
 import TagSelector from '../components/TagSelector';
 import Modal from '../components/Modal';
+import DuplicateUploadModal from '../components/DuplicateUploadModal';
 import { showInfo } from '../components/Toast';
 
 type UploadMode = 'archive' | 'folder' | null;
@@ -17,7 +18,7 @@ export default function UploadPage() {
   const navigate = useNavigate();
 
   // Archive upload
-  const { progress: archiveProgress, status: archiveStatus, error: archiveError, packId: archivePackId, startUpload: startArchiveUpload, pause: pauseArchive, resume: resumeArchive, cancel: cancelArchive, reset: resetArchive } = useUpload();
+  const { matches: duplicateMatches, continueUpload: continueArchive, progress: archiveProgress, status: archiveStatus, error: archiveError, packId: archivePackId, startUpload: startArchiveUpload, pause: pauseArchive, resume: resumeArchive, cancel: cancelArchive, reset: resetArchive } = useUpload();
 
   // Folder upload
   const { phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
@@ -232,7 +233,10 @@ export default function UploadPage() {
   const handleCancelConfirm = async () => {
     setCancelConfirm('closing');
     if (mode === 'archive') {
-      cancelArchive();
+      if (!await cancelArchive()) {
+        setCancelConfirm(null);
+        return;
+      }
     } else if (mode === 'folder') {
       await cancelFolder();
     }
@@ -253,6 +257,12 @@ export default function UploadPage() {
     setSelectedTagIds([]);
     resetArchive();
     resetFolder();
+  };
+
+  const handleDuplicateCancel = async (targetPackId?: string) => {
+    if (!await cancelArchive()) return;
+    resetToIdle();
+    if (targetPackId) navigate(`/packs/${targetPackId}`);
   };
 
   const handleDone = () => {
@@ -285,6 +295,15 @@ export default function UploadPage() {
   return (
     <div className="max-w-lg mx-auto">
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">上传图包</h2>
+
+      <DuplicateUploadModal
+        matches={duplicateMatches}
+        busy={['checking', 'confirming', 'cancelling'].includes(archiveStatus)}
+        error={archiveError}
+        onCancel={() => { void handleDuplicateCancel(); }}
+        onContinue={() => { void continueArchive(); }}
+        onSelect={id => { void handleDuplicateCancel(id); }}
+      />
 
       {/* Initial: no file/folder selected */}
       {!mode && (
@@ -422,6 +441,12 @@ export default function UploadPage() {
                 />
               </div>
             </div>
+          )}
+
+          {['checking', 'confirming', 'cancelling'].includes(archiveStatus) && (
+            <p role="status" className="text-sm text-gray-400 my-3">
+              {archiveStatus === 'checking' ? '正在检查是否重复…' : archiveStatus === 'cancelling' ? '正在取消上传…' : '正在创建图包…'}
+            </p>
           )}
 
           {/* Actions */}

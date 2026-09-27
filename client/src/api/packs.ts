@@ -1,3 +1,4 @@
+import type { ArchiveUploadRequest, DuplicateArchiveResponse } from '../../../shared/types.js';
 import { get, post, patch, del, put } from './client';
 import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams, PackFile } from '../../../shared/types.js';
 
@@ -27,15 +28,16 @@ export function renamePack(id: string, name: string): Promise<Pack> {
   return patch<Pack>(`/packs/${id}`, { name });
 }
 
-export function confirmUpload(data: {
-  uploadId: string;
-  filename: string;
-  fileSize: number;
-  packName?: string;
-  archivePassword?: string;
-  tagIds?: string[];
-}): Promise<Pack> {
-  return post<Pack>('/packs/upload-complete', data);
+export async function confirmUpload(data: ArchiveUploadRequest): Promise<Pack | DuplicateArchiveResponse> {
+  const response = await fetch('/api/packs/upload-complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  const body = await response.json();
+  if (response.status === 409 && body.code === 'DUPLICATE_ARCHIVE') return body;
+  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  return body;
 }
 
 export function fetchTags(): Promise<TagWithStats[]> {

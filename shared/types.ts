@@ -126,3 +126,20 @@ export interface PackListParams {
   pageSize?: number;
   search?: string;
 }
+
+export interface ArchiveUploadRequest {
+  uploadId: string;
+  filename: string;
+  fileSize: number;
+  packName?: string;
+  archivePassword?: string;
+  tagIds?: string[];
+  allowDuplicate?: boolean;
+}
+
+export type DuplicatePack = Pick<Pack, 'id' | 'name' | 'status'>;
+
+export interface DuplicateArchiveResponse {
+  code: 'DUPLICATE_ARCHIVE';
+  matches: DuplicatePack[];
+}

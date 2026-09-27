@@ -1,8 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
+import type { ArchiveUploadRequest } from '../../../shared/types.js';
+import { hashArchive, backfillArchiveHashes, withUploadLock } from '../services/archive-deduplication.js';
 import path from 'node:path';
 import {
   listPacks,
+  findArchiveDuplicates,
   listPacksPaginated,
   getPack,
   deletePack as deletePackFromDb,
@@ -273,14 +276,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
 
   // Confirm upload completion and start processing
   fastify.post<{
-    Body: {
-      uploadId: string;
-      filename: string;
-      fileSize: number;
-      packName?: string;
-      archivePassword?: string;
-      tagIds?: string[];
-    };
+    Body: ArchiveUploadRequest;
   }>('/api/packs/upload-complete', async (request, reply) => {
     const {
       uploadId,
@@ -289,92 +285,103 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       packName,
       archivePassword,
       tagIds,
+      allowDuplicate,
     } = request.body ?? {};
 
-    let safeFilename: string;
-    let packNameToUse: string;
-    let safeTagIds: string[];
-    try {
-      if (typeof filename !== 'string' || path.basename(filename) !== filename) {
-        throw new Error('Invalid filename');
-      }
-      safeFilename = validateName(filename, 'Filename');
-      if (safeFilename.length > MAX_FILENAME_LENGTH) throw new Error('Filename is too long');
-      packNameToUse = validateName(
-        packName ?? path.basename(safeFilename, path.extname(safeFilename)),
-        'Pack name'
-      );
-      if (
-        archivePassword !== undefined &&
-        (typeof archivePassword !== 'string' || archivePassword.length > MAX_PASSWORD_LENGTH)
-      ) {
-        throw new Error('Archive password is too long');
-      }
-      safeTagIds = validateTagIds(tagIds);
-    } catch (error) {
-      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
-      return;
-    }
-
-    let uploadPath: string;
-    try {
-      uploadPath = getUploadPath(uploadId);
-    } catch {
-      reply.code(400).send({ error: 'Invalid upload id' });
-      return;
-    }
-
-    if (!fs.existsSync(uploadPath)) {
-      reply.code(404).send({ error: 'Upload file not found' });
-      return;
-    }
-
-    const actualSize = fs.statSync(uploadPath).size;
-    if (actualSize <= 0 || actualSize > config.maxUploadSize) {
-      reply.code(400).send({ error: 'Uploaded file size is invalid' });
-      return;
-    }
-
-    const ext = path.extname(safeFilename).toLowerCase().replace('.', '');
-    if (!['zip', 'rar', '7z'].includes(ext)) {
-      reply.code(400).send({ error: 'Unsupported format. Only ZIP, RAR and 7z are supported.' });
-      return;
-    }
-
-    try {
-      const pack = createPack({
-        name: packNameToUse,
-        originalFilename: safeFilename,
-        originalSize: actualSize,
-        originalFormat: ext,
-        archivePassword,
-      });
-
-      // Set tags if provided
-      if (safeTagIds.length > 0) {
-        setPackTagsInDb(pack.id, safeTagIds);
+    return withUploadLock(uploadId, async () => {
+      let safeFilename: string;
+      let packNameToUse: string;
+      let safeTagIds: string[];
+      try {
+        if (allowDuplicate !== undefined && typeof allowDuplicate !== 'boolean') throw new Error('Invalid duplicate confirmation');
+        if (typeof filename !== 'string' || path.basename(filename) !== filename) {
+          throw new Error('Invalid filename');
+        }
+        safeFilename = validateName(filename, 'Filename');
+        if (safeFilename.length > MAX_FILENAME_LENGTH) throw new Error('Filename is too long');
+        packNameToUse = validateName(
+          packName ?? path.basename(safeFilename, path.extname(safeFilename)),
+          'Pack name'
+        );
+        if (
+          archivePassword !== undefined &&
+          (typeof archivePassword !== 'string' || archivePassword.length > MAX_PASSWORD_LENGTH)
+        ) {
+          throw new Error('Archive password is too long');
+        }
+        safeTagIds = validateTagIds(tagIds);
+      } catch (error) {
+        reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+        return;
       }
 
-      // Move uploaded file to archives directory
-      const archiveDir = path.join(config.dirs.archives, pack.id);
-      ensureDir(archiveDir);
-      const archivePath = getArchivePath(pack.id, `original.${ext}`);
-      fs.renameSync(uploadPath, archivePath);
-
-      const infoPath = `${uploadPath}.info`;
-      if (fs.existsSync(infoPath)) {
-        fs.unlinkSync(infoPath);
+      let uploadPath: string;
+      try {
+        uploadPath = getUploadPath(uploadId);
+      } catch {
+        reply.code(400).send({ error: 'Invalid upload id' });
+        return;
       }
 
-      // Start extraction job
-      await jobQueue.enqueue(pack.id, 'extract');
+      if (!fs.existsSync(uploadPath)) {
+        reply.code(404).send({ error: 'Upload file not found' });
+        return;
+      }
 
-      // Return pack with tags
-      return toPublicPack(getPack(pack.id)!);
-    } catch (err) {
-      console.error('[upload-complete] Error:', err);
-      reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
-    }
+      const actualSize = fs.statSync(uploadPath).size;
+      if (actualSize <= 0 || actualSize > config.maxUploadSize) {
+        reply.code(400).send({ error: 'Uploaded file size is invalid' });
+        return;
+      }
+
+      const ext = path.extname(safeFilename).toLowerCase().replace('.', '');
+      if (!['zip', 'rar', '7z'].includes(ext)) {
+        reply.code(400).send({ error: 'Unsupported format. Only ZIP, RAR and 7z are supported.' });
+        return;
+      }
+
+      try {
+        const archiveMd5 = await hashArchive(uploadPath);
+        await backfillArchiveHashes(actualSize);
+        const matches = findArchiveDuplicates(archiveMd5);
+        if (matches.length > 0 && !allowDuplicate) {
+          return reply.code(409).send({ code: 'DUPLICATE_ARCHIVE', matches });
+        }
+        const pack = createPack({
+          name: packNameToUse,
+          originalFilename: safeFilename,
+          originalSize: actualSize,
+          originalFormat: ext,
+          archivePassword,
+          archiveMd5,
+        });
+
+        // Set tags if provided
+        if (safeTagIds.length > 0) {
+          setPackTagsInDb(pack.id, safeTagIds);
+        }
+
+        // Move uploaded file to archives directory
+        const archiveDir = path.join(config.dirs.archives, pack.id);
+        ensureDir(archiveDir);
+        const archivePath = getArchivePath(pack.id, `original.${ext}`);
+        fs.renameSync(uploadPath, archivePath);
+
+        const infoPath = `${uploadPath}.info`;
+        if (fs.existsSync(infoPath)) {
+          fs.unlinkSync(infoPath);
+        }
+
+        // Start extraction job
+        await jobQueue.enqueue(pack.id, 'extract');
+
+        // Return pack with tags
+        return toPublicPack(getPack(pack.id)!);
+      } catch (err) {
+        console.error('[upload-complete] Error:', err);
+        reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
   });
 
   // Create a folder-type pack (before uploading individual files)

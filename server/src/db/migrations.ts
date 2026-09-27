@@ -5,6 +5,7 @@ import m003 from './migrations/003_add_blurhashes_and_backfill.js';
 import m004 from './migrations/004_add_source_type.js';
 import m005 from './migrations/005_add_pack_files.js';
 import m006 from './migrations/006_cleanup_orphaned_relations.js';
+import m007 from './migrations/007_add_archive_md5.js';
 
 export interface Migration {
   name: string;
@@ -18,6 +19,7 @@ const migrations: Migration[] = [
   m004,
   m005,
   m006,
+  m007,
 ];
 
 export function runMigrations(db: Database.Database): void {

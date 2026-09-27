@@ -127,14 +127,15 @@ export function createPack(data: {
   originalFormat: string;
   archivePassword?: string;
   sourceType?: 'archive' | 'folder';
+  archiveMd5?: string;
 }): StoredPack {
   const id = uuidv4();
   const sourceType = data.sourceType ?? 'archive';
   // Folder packs start in 'uploading', archive packs default to 'uploading' (schema default)
   // and transition to 'extracting' when the extract job starts
   run(
-    'INSERT INTO packs (id, name, original_filename, original_size, original_format, archive_password, source_type, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, data.name, data.originalFilename, data.originalSize, data.originalFormat, data.archivePassword ?? null, sourceType, 'uploading']
+    'INSERT INTO packs (id, name, original_filename, original_size, original_format, archive_password, source_type, status, archive_md5) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, data.name, data.originalFilename, data.originalSize, data.originalFormat, data.archivePassword ?? null, sourceType, 'uploading', data.archiveMd5 ?? null]
   );
   return getPack(id)!;
 }
@@ -540,4 +541,16 @@ export function getPendingPackFileCount(packId: string): number {
 
 export function updatePackStructureType(id: string, structureType: string): void {
   run("UPDATE packs SET structure_type = ?, updated_at = datetime('now') WHERE id = ?", [structureType, id]);
+}
+
+export function findArchiveDuplicates(md5: string): Array<Pick<StoredPack, 'id' | 'name' | 'status'>> {
+  return queryAll("SELECT id, name, status FROM packs WHERE source_type = 'archive' AND archive_md5 = ? ORDER BY created_at DESC, id", [md5]);
+}
+
+export function findUnhashedArchives(size: number): StoredPack[] {
+  return queryAll("SELECT * FROM packs WHERE source_type = 'archive' AND archive_md5 IS NULL AND original_size = ?", [size]).map(row => rowToPack(row));
+}
+
+export function setArchiveMd5(id: string, md5: string): void {
+  run('UPDATE packs SET archive_md5 = ? WHERE id = ? AND archive_md5 IS NULL', [md5, id]);
 }
