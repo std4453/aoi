@@ -76,18 +76,13 @@ export default function SettingsPage() {
           <span className="min-w-0 ml-auto truncate text-sm text-gray-500">{activeServer?.alias}</span>
         </button>
         {pwa && <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <div className="flex items-center gap-2 mb-3">
-            <Database size={18} className="text-gray-400" />
-            <h3 className="text-sm font-medium text-white">离线缓存</h3>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 shrink-0">
+              <Database size={18} className="text-gray-400" />
+              <h3 className="text-sm font-medium text-white">离线缓存</h3>
+            </div>
+            <span className="text-sm text-gray-500">{formatBytes(cacheBytes)} / {formatBytes(cacheLimit)}</span>
           </div>
-          <div className="flex justify-between text-xs text-gray-400 mb-1.5">
-            <span>缓存使用</span>
-            <span>{formatBytes(cacheBytes)} / {formatBytes(cacheLimit)}</span>
-          </div>
-          <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${Math.min(100, cacheBytes / cacheLimit * 100)}%` }} />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">剩余 {formatBytes(Math.max(0, cacheLimit - cacheBytes))}</p>
           <button className="text-blue-400 text-sm mt-3" onClick={async () => {
             try {
               const names = (await caches.keys()).filter(name => name.startsWith('aoi-data-'));
