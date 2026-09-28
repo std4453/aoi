@@ -1,3 +1,5 @@
+import { getDb } from '../db/connection.js';
+import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification.js';
 import { EventEmitter } from 'node:events';
 import {
   claimNextPendingJob,
@@ -15,6 +17,7 @@ class JobQueue extends EventEmitter {
   private currentTask: Promise<void> | null = null;
   private currentJobId: string | null = null;
   private stopping = false;
+  private verificationAbort: { packId: string; controller: AbortController } | null = null;
 
   start(): void {
     this.scheduleNext();
@@ -76,8 +79,34 @@ class JobQueue extends EventEmitter {
         case 'compress':
           await this.runCompressJob(job);
           break;
+        case 'verify': {
+          const controller = new AbortController();
+          this.verificationAbort = { packId: job.packId, controller };
+          let lastUpdate = 0;
+          try {
+            await verifyPack(job.packId, controller.signal, (completed, total) => {
+              if (completed !== total && Date.now() - lastUpdate < 100) return;
+              lastUpdate = Date.now();
+              this.emitProgress(job.id, {
+                jobId: job.id, status: 'running', phase: 'verifying', completed, total,
+                percentage: total ? Math.min(99, Math.floor(completed / total * 100)) : 99,
+                totalOriginalSize: 0, totalCompressedSize: 0, error: null,
+              });
+            });
+          } catch (error) {
+            if (controller.signal.aborted) {
+              updateJobStatus(job.id, 'cancelled');
+              return;
+            }
+            throw error;
+          } finally {
+            this.verificationAbort = null;
+          }
+          break;
+        }
       }
 
+      if (job.type === 'thumbnail' || job.type === 'compress') resumeHistoricalVerification(job.packId);
       updateJobStatus(job.id, 'completed', 100);
       const completed = this.getProgress(job.id);
       if (completed) {
@@ -91,7 +120,9 @@ class JobQueue extends EventEmitter {
       try {
         const { getPack, updatePackStatus } = await import('../db/repositories.js');
         const pack = getPack(job.packId);
-        if (pack && job.type === 'compress') {
+        if (pack && job.type === 'verify') {
+          failVerification(pack.id, message);
+        } else if (pack && job.type === 'compress') {
           const { existsSync } = await import('node:fs');
           const { getGeneratedPath } = await import('./storage.js');
           updatePackStatus(
@@ -102,6 +133,7 @@ class JobQueue extends EventEmitter {
         } else if (pack && pack.status !== 'failed') {
           updatePackStatus(job.packId, 'failed', message);
         }
+        if (job.type === 'thumbnail' || job.type === 'compress') resumeHistoricalVerification(job.packId);
       } catch (dbErr) {
         console.error('Failed to update pack status after job failure:', dbErr);
       }
@@ -127,11 +159,10 @@ class JobQueue extends EventEmitter {
 
     updatePackStatus(pack.id, 'extracting');
     await archiveExtractor.extract(pack, pack.archivePassword ?? undefined);
-    updatePackStatus(pack.id, 'thumbnailing');
     clearPackArchivePassword(pack.id);
 
     // Persist the follow-up job even during shutdown; it will resume next start.
-    createJob(pack.id, 'thumbnail');
+    scheduleVerification(pack.id);
   }
 
   private async runThumbnailJob(job: Job): Promise<void> {
@@ -241,6 +272,16 @@ class JobQueue extends EventEmitter {
       totalCompressedSize: result?.totalCompressedSize ?? 0,
       error: job.error,
     };
+  }
+
+  async cancelVerification(packId: string): Promise<void> {
+    const other = getDb().prepare("SELECT 1 FROM jobs WHERE pack_id = ? AND type != 'verify' AND status IN ('pending', 'running')").get(packId);
+    if (other) throw new Error('图包正在处理，请稍后重试');
+    getDb().prepare("UPDATE jobs SET status = 'cancelled' WHERE pack_id = ? AND type = 'verify' AND status = 'pending'").run(packId);
+    if (this.verificationAbort?.packId === packId) {
+      this.verificationAbort.controller.abort();
+      await this.currentTask;
+    }
   }
 
   async shutdown(timeoutMs: number): Promise<boolean> {

@@ -6,6 +6,7 @@ import m004 from './migrations/004_add_source_type.js';
 import m005 from './migrations/005_add_pack_files.js';
 import m006 from './migrations/006_cleanup_orphaned_relations.js';
 import m007 from './migrations/007_add_archive_md5.js';
+import m008 from './migrations/008_add_content_verification.js';
 
 export interface Migration {
   name: string;
@@ -20,6 +21,7 @@ const migrations: Migration[] = [
   m005,
   m006,
   m007,
+  m008,
 ];
 
 export function runMigrations(db: Database.Database): void {

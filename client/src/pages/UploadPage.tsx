@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useUpload } from '../hooks/useUpload';
 import { useFolderUpload } from '../hooks/useFolderUpload';
 import { clearPacksCache } from '../lib/homeStore';
@@ -16,12 +16,14 @@ const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 export default function UploadPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialFolderId = useRef(searchParams.get('folder'));
 
   // Archive upload
   const { matches: duplicateMatches, continueUpload: continueArchive, progress: archiveProgress, status: archiveStatus, error: archiveError, packId: archivePackId, startUpload: startArchiveUpload, pause: pauseArchive, resume: resumeArchive, cancel: cancelArchive, reset: resetArchive } = useUpload();
 
   // Folder upload
-  const { phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
+  const { matches: folderMatches, verificationProgress, restoreUpload: restoreFolder, continueUpload: continueFolder, retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
 
   const [mode, setMode] = useState<UploadMode>(null);
   const [cancelConfirm, setCancelConfirm] = useState<null | 'open' | 'closing'>(null);
@@ -46,6 +48,21 @@ export default function UploadPage() {
   const fileDetailsRef = useRef<HTMLDivElement>(null);
   const lastUserScrollRef = useRef(0);
   const prevUploadingIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const id = initialFolderId.current;
+    if (!id) return;
+    initialFolderId.current = null;
+    setMode('folder');
+    setPackName('文件夹上传');
+    restoreFolder(id);
+  }, [restoreFolder]);
+
+  useEffect(() => {
+    if (mode === 'folder' && folderPackId) {
+      setSearchParams({ folder: folderPackId }, { replace: true });
+    }
+  }, [mode, folderPackId, setSearchParams]);
 
   // Auto-scroll file details when a new file starts uploading
   useEffect(() => {
@@ -238,7 +255,10 @@ export default function UploadPage() {
         return;
       }
     } else if (mode === 'folder') {
-      await cancelFolder();
+      if (!await cancelFolder()) {
+        setCancelConfirm(null);
+        return;
+      }
     }
     setCancelConfirm(null);
     resetToIdle();
@@ -247,6 +267,8 @@ export default function UploadPage() {
   // --- Shared handlers ---
 
   const resetToIdle = () => {
+    setSearchParams({}, { replace: true });
+    clearPacksCache();
     setMode(null);
     setFile(null);
     setPackName('');
@@ -260,7 +282,8 @@ export default function UploadPage() {
   };
 
   const handleDuplicateCancel = async (targetPackId?: string) => {
-    if (!await cancelArchive()) return;
+    const cancelled = mode === 'folder' ? await cancelFolder() : await cancelArchive();
+    if (!cancelled) return;
     resetToIdle();
     if (targetPackId) navigate(`/packs/${targetPackId}`);
   };
@@ -287,7 +310,7 @@ export default function UploadPage() {
   // --- Derived states ---
 
   const isArchiveActive = archiveStatus === 'uploading' || archiveStatus === 'paused';
-  const isFolderActive = folderPhase === 'uploading' || folderPhase === 'paused';
+  const isFolderActive = ['uploading', 'paused', 'checking', 'duplicate', 'error'].includes(folderPhase) && Boolean(folderPackId);
   const isArchiveDone = archiveStatus === 'done';
   const isFolderDone = folderPhase === 'done';
   const isAnyDone = isArchiveDone || isFolderDone;
@@ -297,11 +320,11 @@ export default function UploadPage() {
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">上传图包</h2>
 
       <DuplicateUploadModal
-        matches={duplicateMatches}
-        busy={['checking', 'confirming', 'cancelling'].includes(archiveStatus)}
-        error={archiveError}
+        matches={mode === 'folder' ? folderMatches : duplicateMatches}
+        busy={mode === 'folder' ? ['confirming', 'cancelling'].includes(folderPhase) : ['checking', 'confirming', 'cancelling'].includes(archiveStatus)}
+        error={mode === 'folder' ? folderError : archiveError}
         onCancel={() => { void handleDuplicateCancel(); }}
-        onContinue={() => { void continueArchive(); }}
+        onContinue={() => { void (mode === 'folder' ? continueFolder() : continueArchive()); }}
         onSelect={id => { void handleDuplicateCancel(id); }}
       />
 
@@ -542,6 +565,13 @@ export default function UploadPage() {
             )}
           </div>
 
+          {['creating', 'checking', 'thumbnailing', 'confirming', 'cancelling'].includes(folderPhase) && (
+            <p role="status" className="mb-4 text-sm text-gray-400">
+              {folderPhase === 'creating' ? '正在创建上传…' : folderPhase === 'checking' ? `正在校验… ${verificationProgress}%`
+                : folderPhase === 'thumbnailing' ? '正在生成缩略图…' : folderPhase === 'cancelling' ? '正在取消上传…' : '正在继续处理…'}
+            </p>
+          )}
+
           {/* No password field for folder uploads */}
 
           {/* Tags */}
@@ -666,10 +696,13 @@ export default function UploadPage() {
           </div>
 
           {/* Error */}
-          {folderError && folderPhase === 'error' && (
+          {folderError && (
             <div className="mt-4 p-3 bg-red-900/30 border border-red-800 rounded-xl flex items-start gap-2">
               <AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
-              <p className="text-red-400 text-sm">{folderError}</p>
+              <div>
+                <p className="text-red-400 text-sm">{folderError}</p>
+                <button onClick={() => { void retryFolder(); }} className="mt-2 text-sm text-red-300 underline">重试</button>
+              </div>
             </div>
           )}
         </div>
@@ -681,7 +714,7 @@ export default function UploadPage() {
           <CheckCircle size={48} className="mx-auto text-green-400 mb-4" />
           <p className="text-white font-medium mb-1">上传完成</p>
           <p className="text-gray-400 text-sm mb-6">
-            图包正在后台处理中，请稍候...
+            {mode === 'folder' ? '图包已处理完成，可以预览。' : '图包正在后台处理中，请稍候…'}
           </p>
           <div className="flex gap-3">
             <button
