@@ -168,11 +168,14 @@ GitHub Actions 检查通过后，将 `linux/amd64` 镜像发布到 `ghcr.io/std4
 
 | 触发 | 检查与镜像标签 |
 | --- | --- |
-| Pull Request | `npm run check`、构建及容器冒烟检查，不发布 |
+| 同仓库且作者为 `OWNER` / `MEMBER` / `COLLABORATOR` 的真人 PR | 检查通过后发布 `pr-<编号>`、`pr-<编号>-sha-<完整哈希>` |
+| 其他 Pull Request（包括 fork 和机器人作者） | `npm run check`、构建及容器冒烟检查，不发布 |
 | `main` 更新 | `edge`、`sha-<完整提交哈希>` |
 | `vX.Y.Z` 标签 | `X.Y.Z`、`latest`、提交 SHA 标签 |
 | `vX.Y.Z-prerelease` 标签 | 预发布版本标签、提交 SHA，不更新 `latest` |
 | 手动运行 | 当前提交 SHA；在默认分支运行时也更新 `edge` |
+
+PR 发布根据作者的 `author_association` 判断，不要求查询用户权限 API；该字段表示与仓库的关系，不等同于具体写入权限。所有 PR 都执行检查，只有符合条件的同仓库 PR 才登录 GHCR 并发布；预览标签不会覆盖 `edge` 或 `latest`。PR 镜像使用 Actions 的 PR 合并提交构建，便于验证与目标分支合并后的结果。
 
 工作流使用 `GITHUB_TOKEN` 的 `packages: write` 权限，无需额外 PAT。首次发布后，在 GitHub Packages 设置中确认包可见性：若需要匿名拉取，应将包设置为 public；私有包需在部署机器登录 GHCR。工作流只发布镜像，不自动更新部署机器。发布前会检查完整服务和纯前端两种容器模式。
 
