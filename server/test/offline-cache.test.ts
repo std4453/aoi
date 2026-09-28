@@ -40,11 +40,12 @@ function worker(limit?: number) {
   return {
     stores, messages,
     network: (fn: typeof network) => { network = fn; },
-    async request(path: string, record = 'first', offline = false, method = 'GET') {
+    async request(path: string, record = 'first', offline = false, method = 'GET', pwa = true) {
       let response: Promise<Response> | undefined;
       const pending: Promise<unknown>[] = [];
       const url = new URL(path, 'https://backend.example');
       url.searchParams.set('__aoi_record', record);
+      if (pwa) url.searchParams.set('__aoi_pwa', '1');
       url.searchParams.set('access_token', 'temporary-secret');
       if (offline) url.searchParams.set('__aoi_offline', '1');
       handlers.get('fetch')!({
@@ -104,4 +105,18 @@ test('replacing the oldest cached response cannot exceed the shared byte limit',
     for (const response of store.values()) bytes += (await response.clone().arrayBuffer()).byteLength;
   }
   assert.ok(bytes <= 200, `Cached ${bytes} bytes with a 200 byte budget`);
+});
+
+
+test('ordinary browser requests bypass an existing PWA worker without reading or writing data caches', async () => {
+  const sw = worker();
+  assert.equal(await sw.request('/api/packs', 'first', false, 'GET', false), undefined);
+  assert.equal(sw.stores.size, 0);
+  await sw.request('/api/packs');
+  const before = [...sw.stores.get('aoi-data-first')!.keys()];
+  assert.equal(await sw.request('/api/packs?page=2', 'first', false, 'GET', false), undefined);
+  sw.network(async () => { throw new TypeError('Network unavailable'); });
+  assert.equal(await sw.request('/api/packs', 'first', true, 'GET', false), undefined);
+  assert.deepEqual([...sw.stores.get('aoi-data-first')!.keys()], before);
+  assert.equal((await sw.request('/api/packs', 'first', true))?.status, 200);
 });

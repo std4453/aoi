@@ -5,6 +5,7 @@ const DATA_PREFIX = 'aoi-data-';
 const LIMIT = 200 * 1024 * 1024;
 let writes = Promise.resolve();
 let inventory = null;
+const clientModes = new Map();
 async function cacheInventory() {
   if (inventory) return inventory;
   const entries = new Map();
@@ -39,6 +40,7 @@ self.addEventListener('activate', event => {
   })());
 });
 self.addEventListener('message', event => {
+  if (event.data?.type === 'pwa-mode' && event.source?.id) clientModes.set(event.source.id, event.data.enabled === true);
   if (event.data?.type === 'activate') event.waitUntil(self.skipWaiting());
   if (event.data?.type === 'clear-cache' && typeof event.data.record === 'string') {
     writes = writes.catch(() => {}).then(async () => {
@@ -88,7 +90,7 @@ async function business(event, url) {
   const record = url.searchParams.get('__aoi_record');
   const name = DATA_PREFIX + record;
   const keyUrl = new URL(url);
-  for (const parameter of ['access_token', '__aoi_record', '__aoi_offline']) keyUrl.searchParams.delete(parameter);
+  for (const parameter of ['access_token', '__aoi_record', '__aoi_offline', '__aoi_pwa']) keyUrl.searchParams.delete(parameter);
   const key = keyUrl.href;
   const eligible = cacheable(url);
   if (!url.searchParams.has('__aoi_offline')) {
@@ -130,10 +132,22 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;
   if (url.searchParams.has('__aoi_record') && url.pathname.startsWith('/api/')) {
-    event.respondWith(business(event, url));
+    // Explicit per-request mode survives worker restarts and separates PWA/browser tabs.
+    if (url.searchParams.get('__aoi_pwa') === '1') event.respondWith(business(event, url));
     return;
   }
   if (url.origin !== self.location.origin) return;
+  const pwa = url.searchParams.get('__aoi_pwa') === '1' || clientModes.get(event.clientId);
+  if (pwa === false) return;
+  // New navigations have no display-mode until the document boots. Prefer the
+  // network without writing caches; retain the installed app's offline shell.
+  if (pwa !== true) {
+    if (event.request.mode === 'navigate' || PRECACHE.includes(url.pathname) || url.pathname.startsWith('/assets/')) {
+      event.respondWith(fetch(event.request).catch(async () =>
+        (await caches.match(event.request.mode === 'navigate' ? '/index.html' : url.pathname)) || Response.error()));
+    }
+    return;
+  }
   if (url.pathname === '/runtime-config.json') {
     event.respondWith((async () => {
       const cache = await caches.open('aoi-runtime');

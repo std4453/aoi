@@ -1,3 +1,4 @@
+import { isPwa } from '../lib/pwa';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Pencil, Plus, Server, Trash2 } from 'lucide-react';
@@ -110,7 +111,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
       }
       setDraft(server);
       const unreachable = error instanceof TypeError || (error instanceof DOMException && error.name === 'TimeoutError');
-      if (server.verified && unreachable) setOfflineServer(server);
+      if (isPwa() && server.verified && unreachable) setOfflineServer(server);
       showError(unreachable
         ? '无法连接服务器，请检查地址、网络或证书。'
         : error instanceof Error ? error.message : '连接失败');

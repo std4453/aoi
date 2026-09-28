@@ -1,7 +1,8 @@
+import { isPwa } from '../lib/pwa';
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { ChevronRight, RefreshCw, Server, WifiOff, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { activeServer, CONNECTION_EVENT, connectionState, inspectServer, returnToServers, runtime, saveServer, setConnectionState } from '../lib/connection';
+import { activeServer, CONNECTION_EVENT, connectionState, inspectServer, returnToServers, runtime, refreshRecoveredHome, saveServer, setConnectionState } from '../lib/connection';
 
 export default function ConnectionStatus() {
   const [state, setState] = useState(connectionState);
@@ -45,7 +46,7 @@ export default function ConnectionStatus() {
         if (!disposed && installing.state === 'installed' && registration?.waiting) setUpdate(registration.waiting);
       });
     };
-    if ('serviceWorker' in navigator) void navigator.serviceWorker.getRegistration().then(value => {
+    if (isPwa() && 'serviceWorker' in navigator) void navigator.serviceWorker.getRegistration().then(value => {
       if (disposed) return;
       registration = value;
       if (value?.waiting) setUpdate(value.waiting);
@@ -72,7 +73,7 @@ export default function ConnectionStatus() {
           <button
             type="button"
             aria-haspopup={recovered ? undefined : 'dialog'}
-            onClick={() => recovered ? location.reload() : setDetailsOpen(true)}
+            onClick={() => recovered ? refreshRecoveredHome() : setDetailsOpen(true)}
             className={`pointer-events-auto flex items-center gap-2.5 w-max max-w-[90vw] rounded-xl border px-4 py-3 text-sm shadow-lg backdrop-blur-md ${recovered ? 'bg-blue-950/95 border-blue-700/50 text-blue-100' : 'bg-gray-800/95 border-gray-600/70 text-gray-200'}`}
           >
             {recovered ? <RefreshCw size={18} className="shrink-0 text-blue-400" /> : <WifiOff size={18} className="shrink-0 text-gray-400" />}

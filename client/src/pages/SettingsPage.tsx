@@ -1,11 +1,13 @@
-import { activeServer, clearServerCache, returnToServers, runtime } from '../lib/connection';
+import { isPwa } from '../lib/pwa';
+import { showError, showSuccess } from '../components/Toast';
+import { activeServer, clearServerCache, returnToServers } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
 import { fetchTags } from '../api/packs';
 import { fetchPresets } from '../api/presets';
 import { formatBytes } from '../lib/utils';
-import { ChevronRight, HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
+import { Database, HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
 
 interface DiskInfo {
   disk: { free: number; size: number; used: number };
@@ -15,23 +17,23 @@ interface DiskInfo {
 export default function SettingsPage() {
   const navigate = useNavigate();
   const [cacheBytes, setCacheBytes] = useState(0);
-  const [cacheMessage, setCacheMessage] = useState('');
-  const [cacheSupported, setCacheSupported] = useState(false);
-  useEffect(() => {
-    if (!('caches' in window) || !navigator.serviceWorker?.controller) return;
-    setCacheSupported(true);
-    void (async () => {
-      let total = 0;
+  const pwa = isPwa();
+  const cacheLimit = 200 * 1024 * 1024;
+  const readCacheBytes = async () => {
+    let total = 0;
+    if ('caches' in window) {
       for (const name of (await caches.keys()).filter(name => name.startsWith('aoi-data-'))) {
         const cache = await caches.open(name);
         for (const request of await cache.keys()) {
-          const response = await cache.match(request);
-          total += Number(response?.headers.get('X-AoI-Size') || 0);
+          total += Number((await cache.match(request))?.headers.get('X-AoI-Size') || 0);
         }
       }
-      setCacheBytes(total);
-    })().catch(() => setCacheMessage('无法读取缓存用量'));
-  }, []);
+    }
+    setCacheBytes(total);
+  };
+  useEffect(() => {
+    if (pwa) void readCacheBytes().catch(() => showError('无法读取缓存用量'));
+  }, [pwa]);
   const [diskInfo, setDiskInfo] = useState<DiskInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [tagCount, setTagCount] = useState(0);
@@ -67,32 +69,34 @@ export default function SettingsPage() {
           onClick={returnToServers}
           className="w-full bg-gray-900 rounded-xl p-4 border border-gray-800 flex items-center gap-3 hover:border-gray-700 transition-colors text-left"
         >
-          <Server size={22} className="shrink-0 text-blue-400" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-white">{runtime.serverSelectionEnabled ? '切换服务器' : '返回登录'}</span>
-            <span className="block text-xs text-gray-400 mt-1 truncate">{activeServer?.alias}</span>
-            <span className="block text-xs text-gray-500 mt-0.5 truncate">{activeServer?.address}</span>
-          </span>
-          <ChevronRight size={18} className="shrink-0 text-gray-500" />
+          <div className="flex items-center gap-2 shrink-0">
+            <Server size={18} className="text-gray-400" />
+            <span className="text-sm font-medium text-white">服务器</span>
+          </div>
+          <span className="min-w-0 ml-auto truncate text-sm text-gray-500">{activeServer?.alias}</span>
         </button>
-        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 space-y-3">
-          <h3 className="text-sm font-medium text-white">离线缓存</h3>
-          <p className="text-sm text-gray-400">{cacheSupported ? `所有服务器合计 ${formatBytes(cacheBytes)} / 200 MiB` : '离线缓存未启用，请通过 HTTPS 安装或访问应用。'}</p>
-          <p className="text-xs text-gray-500">仅保存请求过的列表、详情和缩略图，不缓存原图。浏览器可能自动回收缓存。</p>
-          {cacheSupported && <button className="text-blue-400 text-sm" onClick={async () => {
+        {pwa && <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div className="flex items-center gap-2 mb-3">
+            <Database size={18} className="text-gray-400" />
+            <h3 className="text-sm font-medium text-white">离线缓存</h3>
+          </div>
+          <div className="flex justify-between text-xs text-gray-400 mb-1.5">
+            <span>缓存使用</span>
+            <span>{formatBytes(cacheBytes)} / {formatBytes(cacheLimit)}</span>
+          </div>
+          <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${Math.min(100, cacheBytes / cacheLimit * 100)}%` }} />
+          </div>
+          <p className="text-xs text-gray-500 mt-1">剩余 {formatBytes(Math.max(0, cacheLimit - cacheBytes))}</p>
+          <button className="text-blue-400 text-sm mt-3" onClick={async () => {
             try {
-              if (activeServer) await clearServerCache(activeServer.id);
-              setCacheMessage('当前服务器缓存已清空，后续请求会重新缓存');
-              let total = 0;
-              for (const name of (await caches.keys()).filter(name => name.startsWith('aoi-data-'))) {
-                const cache = await caches.open(name);
-                for (const request of await cache.keys()) total += Number((await cache.match(request))?.headers.get('X-AoI-Size') || 0);
-              }
-              setCacheBytes(total);
-            } catch { setCacheMessage('清理失败，请重试'); }
-          }}>清空当前服务器缓存</button>}
-          {cacheMessage && <p role="status" className="text-sm text-gray-400">{cacheMessage}</p>}
-        </div>
+              const names = (await caches.keys()).filter(name => name.startsWith('aoi-data-'));
+              for (const name of names) await clearServerCache(name.slice('aoi-data-'.length));
+              await readCacheBytes();
+              showSuccess('缓存已清除');
+            } catch { showError('清理失败，请重试'); }
+          }}>清除缓存</button>
+        </div>}
         {/* System info */}
         <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
           <div className="flex items-center gap-2 mb-3">

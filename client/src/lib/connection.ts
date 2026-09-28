@@ -1,3 +1,5 @@
+import { isPwa } from './pwa';
+import { getLastHomeSearch } from './homeStore';
 import type { LoginResponse, RuntimeConfig, ServerConnection, ServerHealth } from '../../../shared/types';
 
 const STORAGE_KEY = 'aoi.servers.v1';
@@ -47,7 +49,7 @@ export function normalizeAddress(value: string): string {
   return url.origin;
 }
 export async function loadRuntime(): Promise<void> {
-  const res = await fetch('/runtime-config.json', { cache: 'no-store' });
+  const res = await fetch(isPwa() ? '/runtime-config.json?__aoi_pwa=1' : '/runtime-config.json', { cache: 'no-store' });
   if (!res.ok) throw new Error('无法读取部署配置，请重试');
   runtime = await res.json();
 }
@@ -89,6 +91,7 @@ export function authHeaders(): Record<string, string> {
 export function apiUrl(path: string, resource = false): string {
   const url = new URL(path, activeServer?.address || location.origin);
   if (activeServer) url.searchParams.set('__aoi_record', activeServer.id);
+  if (isPwa()) url.searchParams.set('__aoi_pwa', '1');
   if (connectionState !== 'online') url.searchParams.set('__aoi_offline', '1');
   if (resource && token) url.searchParams.set('access_token', token);
   return url.href;
@@ -114,4 +117,12 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     setConnectionState('offline');
     throw error;
   }
+}
+
+// A full navigation renews credentials as well as data after offline browsing.
+export function refreshRecoveredHome(): boolean {
+  if (connectionState !== 'recovered') return false;
+  const search = location.pathname === '/' ? location.search : getLastHomeSearch();
+  location.assign(`/${search}`);
+  return true;
 }

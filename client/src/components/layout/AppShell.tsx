@@ -1,3 +1,4 @@
+import { refreshRecoveredHome } from '../../lib/connection';
 import ConnectionStatus from '../ConnectionStatus';
 import { useRef, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -40,6 +41,10 @@ export default function AppShell() {
                 to={to}
                 onClick={(e) => {
                   if (to === '/') {
+                    if (refreshRecoveredHome()) {
+                      e.preventDefault();
+                      return;
+                    }
                     if (location.pathname === '/') {
                       e.preventDefault();
                       const now = Date.now();
