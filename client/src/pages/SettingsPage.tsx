@@ -1,11 +1,11 @@
-import { activeServer, clearServerCache } from '../lib/connection';
+import { activeServer, clearServerCache, returnToServers, runtime } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
 import { fetchTags } from '../api/packs';
 import { fetchPresets } from '../api/presets';
 import { formatBytes } from '../lib/utils';
-import { HardDrive, Tag, SlidersHorizontal } from 'lucide-react';
+import { ChevronRight, HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
 
 interface DiskInfo {
   disk: { free: number; size: number; used: number };
@@ -62,6 +62,19 @@ export default function SettingsPage() {
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">设置</h2>
 
       <div className="space-y-3">
+        <button
+          type="button"
+          onClick={returnToServers}
+          className="w-full bg-gray-900 rounded-xl p-4 border border-gray-800 flex items-center gap-3 hover:border-gray-700 transition-colors text-left"
+        >
+          <Server size={22} className="shrink-0 text-blue-400" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-white">{runtime.serverSelectionEnabled ? '切换服务器' : '返回登录'}</span>
+            <span className="block text-xs text-gray-400 mt-1 truncate">{activeServer?.alias}</span>
+            <span className="block text-xs text-gray-500 mt-0.5 truncate">{activeServer?.address}</span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-gray-500" />
+        </button>
         <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 space-y-3">
           <h3 className="text-sm font-medium text-white">离线缓存</h3>
           <p className="text-sm text-gray-400">{cacheSupported ? `所有服务器合计 ${formatBytes(cacheBytes)} / 200 MiB` : '离线缓存未启用，请通过 HTTPS 安装或访问应用。'}</p>

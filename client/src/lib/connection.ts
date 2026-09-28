@@ -97,7 +97,7 @@ export const resourceUrl = (path: string): string => apiUrl(path, true);
 export function returnToServers(): void {
   sessionStorage.setItem('aoi.chooseServer', '1');
   // Reload also disposes uploads, streams, image pools and in-memory page caches.
-  location.assign('/');
+  location.assign('/servers');
 }
 export function handleUnauthorized(): void {
   window.dispatchEvent(new Event('aoi:unauthorized'));

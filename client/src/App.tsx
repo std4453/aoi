@@ -1,3 +1,4 @@
+import Toast from './components/Toast';
 import ConnectionGate from './components/ConnectionGate';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
@@ -20,20 +21,23 @@ function LoadingSpinner() {
 
 export default function App() {
   return (
-    <ConnectionGate>
-    <Suspense fallback={<LoadingSpinner />}>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route index element={<HomePage />} />
-          <Route path="upload" element={<UploadPage />} />
-          <Route path="packs/:id" element={<PackDetailPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="settings/tags" element={<TagManagerPage />} />
-          <Route path="settings/presets" element={<PresetsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </Suspense>
-    </ConnectionGate>
+    <>
+      <Toast />
+      <ConnectionGate>
+        <Suspense fallback={<LoadingSpinner />}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route index element={<HomePage />} />
+              <Route path="upload" element={<UploadPage />} />
+              <Route path="packs/:id" element={<PackDetailPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="settings/tags" element={<TagManagerPage />} />
+              <Route path="settings/presets" element={<PresetsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </ConnectionGate>
+    </>
   );
 }

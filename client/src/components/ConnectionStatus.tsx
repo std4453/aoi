@@ -8,9 +8,13 @@ export default function ConnectionStatus() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [update, setUpdate] = useState<ServiceWorker | null>(null);
   useEffect(() => {
-    const changed = () => setState(connectionState);
+    const changed = () => {
+      setState(connectionState);
+      if (connectionState !== 'offline') setDetailsOpen(false);
+    };
     const unauthorized = () => {
       if (activeServer) saveServer({ ...activeServer, verified: false });
+      sessionStorage.setItem('aoi.loginError', '登录已失效，请重新连接服务器');
       returnToServers();
     };
     const message = (event: MessageEvent) => {
@@ -63,49 +67,45 @@ export default function ConnectionStatus() {
 
   return (
     <>
-      <div className="border-b border-gray-800 bg-gray-900 px-4 py-2 text-sm">
-        <div className="max-w-4xl mx-auto flex flex-wrap items-center gap-3">
-          <span className="text-gray-400 flex-1 truncate">{activeServer?.alias}</span>
-          <button className="text-blue-400" onClick={returnToServers}>
-            {runtime.serverSelectionEnabled ? '切换服务器' : '返回登录'}
-          </button>
-        </div>
-        {update && <div className="max-w-4xl mx-auto mt-2 text-blue-300">新版本已就绪。<button className="underline" onClick={() => {
-          navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
-          update.postMessage({ type: 'activate' });
-        }}>更新并刷新</button></div>}
-      </div>
-
       {offline && (
         <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-40 pointer-events-none" role="status" aria-live="polite">
           <button
             type="button"
-            aria-haspopup="dialog"
-            onClick={() => setDetailsOpen(true)}
-            className={`pointer-events-auto flex items-center gap-2.5 w-max max-w-[90vw] rounded-xl border px-4 py-3 text-sm shadow-lg backdrop-blur-md ${recovered ? 'bg-blue-950/95 border-blue-700/50 text-blue-100' : 'bg-yellow-950/95 border-yellow-700/50 text-yellow-100'}`}
+            aria-haspopup={recovered ? undefined : 'dialog'}
+            onClick={() => recovered ? location.reload() : setDetailsOpen(true)}
+            className={`pointer-events-auto flex items-center gap-2.5 w-max max-w-[90vw] rounded-xl border px-4 py-3 text-sm shadow-lg backdrop-blur-md ${recovered ? 'bg-blue-950/95 border-blue-700/50 text-blue-100' : 'bg-gray-800/95 border-gray-600/70 text-gray-200'}`}
           >
-            {recovered ? <RefreshCw size={18} className="shrink-0 text-blue-400" /> : <WifiOff size={18} className="shrink-0 text-yellow-400" />}
-            <span>{recovered ? '连接已恢复，点击查看' : '正在离线浏览，点击查看'}</span>
-            <ChevronRight size={16} className="shrink-0 opacity-60" />
+            {recovered ? <RefreshCw size={18} className="shrink-0 text-blue-400" /> : <WifiOff size={18} className="shrink-0 text-gray-400" />}
+            <span>{recovered ? '连接已恢复' : '离线浏览中'}</span>
+            {!recovered && <ChevronRight size={16} className="shrink-0 opacity-60" />}
           </button>
         </div>
       )}
 
-      <Dialog open={detailsOpen && offline} onClose={() => setDetailsOpen(false)} className="fixed inset-0 z-50">
+      {update && (
+        <div className={`fixed ${offline ? 'bottom-[calc(9rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(5rem+env(safe-area-inset-bottom))]'} left-1/2 -translate-x-1/2 z-40`}>
+          <button type="button" className="w-max max-w-[90vw] rounded-xl border border-blue-700/50 bg-blue-950/95 px-4 py-3 text-sm text-blue-100 shadow-lg" onClick={() => {
+            navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+            update.postMessage({ type: 'activate' });
+          }}>新版本已就绪，更新并刷新</button>
+        </div>
+      )}
+
+      <Dialog open={detailsOpen && state === 'offline'} onClose={() => setDetailsOpen(false)} className="fixed inset-0 z-50">
         <div className="fixed inset-0 bg-black/60" aria-hidden="true" />
         <div className="fixed inset-0 flex items-center justify-center p-4">
           <DialogPanel className="w-full max-w-sm rounded-2xl border border-gray-800 bg-gray-900 p-5 shadow-xl">
             <div className="flex items-center gap-3 mb-4">
-              {recovered ? <RefreshCw size={22} className="text-blue-400" /> : <WifiOff size={22} className="text-yellow-400" />}
+              <WifiOff size={22} className="text-gray-400" />
               <DialogTitle className="flex-1 text-lg font-semibold text-white">
-                {recovered ? '服务器已恢复连接' : '暂时无法连接服务器'}
+                暂时无法连接服务器
               </DialogTitle>
               <button type="button" aria-label="关闭连接提示" onClick={() => setDetailsOpen(false)} className="rounded-lg p-2 text-gray-400 hover:bg-gray-800 hover:text-white">
                 <X size={18} />
               </button>
             </div>
             <p className="text-sm text-gray-300 leading-relaxed">
-              {recovered ? '当前浏览内容保持不变。你可以刷新以加载最新内容，或切换到其他服务器。' : '正在显示此前缓存的内容，未缓存的图片无法查看。上传、生成和删除等操作暂不可用。你可以尝试重新连接，或切换到其他服务器。'}
+              正在显示此前缓存的内容，未缓存的图片无法查看。上传、生成和删除等操作暂不可用。你可以尝试重新连接，或切换到其他服务器。
             </p>
             <p className="mt-3 text-xs text-gray-500 break-all">当前服务器：{activeServer?.alias}</p>
             <div className="mt-6 space-y-3">
