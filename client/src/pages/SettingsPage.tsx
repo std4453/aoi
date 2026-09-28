@@ -70,7 +70,7 @@ export default function SettingsPage() {
           className="w-full bg-gray-900 rounded-xl p-4 border border-gray-800 flex items-center gap-3 hover:border-gray-700 transition-colors text-left"
         >
           <div className="flex items-center gap-2 shrink-0">
-            <Server size={18} className="text-gray-400" />
+            <Server size={18} className="text-blue-400" />
             <span className="text-sm font-medium text-white">服务器</span>
           </div>
           <span className="min-w-0 ml-auto truncate text-sm text-gray-500">{activeServer?.alias}</span>
