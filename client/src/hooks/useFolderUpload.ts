@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from 'react';
+import type { DuplicatePack } from '../../../shared/types.js';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import * as tus from 'tus-js-client';
-import { createFolderPack, confirmFolderFileComplete, cancelFolderUpload } from '../api/packs';
+import { createFolderPack, confirmFolderFileComplete, cancelFolderUpload, fetchFolderUploadStatus, continueFolderUpload, retryVerification } from '../api/packs';
 
 export interface FolderUploadFile {
   packFileId: string;
@@ -11,7 +12,7 @@ export interface FolderUploadFile {
 }
 
 interface FolderUploadState {
-  phase: 'idle' | 'scanning' | 'ready' | 'uploading' | 'paused' | 'done' | 'error' | 'cancelled';
+  phase: 'idle' | 'scanning' | 'ready' | 'uploading' | 'paused' | 'done' | 'error' | 'cancelled' | 'creating' | 'checking' | 'duplicate' | 'thumbnailing' | 'confirming' | 'cancelling';
   packId: string | null;
   files: FolderUploadFile[];
   overallProgress: number;
@@ -29,6 +30,13 @@ export function useFolderUpload() {
     error: null,
   });
 
+  const [matches, setMatches] = useState<DuplicatePack[]>([]);
+  const [verificationProgress, setVerificationProgress] = useState(0);
+  const generation = useRef(0);
+  const busy = useRef(false);
+  const verificationFailed = useRef(false);
+  const allUploadsRef = useRef(new Map<string, tus.Upload>());
+  const failedIdsRef = useRef(new Set<string>());
   const uploadsRef = useRef<Map<string, tus.Upload>>(new Map());
   const fileQueueRef = useRef<string[]>([]); // packFileIds waiting to upload
   const activeCountRef = useRef(0);
@@ -55,6 +63,7 @@ export function useFolderUpload() {
     if (!mapping) return;
 
     const { file, packFileId: pfId } = mapping;
+    const attempt = generation.current;
     const pid = packIdRef.current;
     if (!pid) return;
 
@@ -69,6 +78,8 @@ export function useFolderUpload() {
         filetype: file.type || 'application/octet-stream',
       },
       onError: (_err) => {
+        if (attempt !== generation.current) return;
+        failedIdsRef.current.add(pfId);
         // If this upload was aborted due to pause, ignore the callback
         if (abortedPfIdsRef.current.has(pfId)) {
           abortedPfIdsRef.current.delete(pfId);
@@ -90,6 +101,7 @@ export function useFolderUpload() {
         startNextInQueue();
       },
       onSuccess: async () => {
+        if (attempt !== generation.current) return;
         // If this upload was aborted due to pause, ignore the callback
         if (abortedPfIdsRef.current.has(pfId)) {
           abortedPfIdsRef.current.delete(pfId);
@@ -101,7 +113,9 @@ export function useFolderUpload() {
         try {
           const uploadId = upload.url?.split('/').pop() || '';
           const result = await confirmFolderFileComplete(pid, { packFileId: pfId, uploadId });
-          void result;
+          if (attempt !== generation.current) return;
+          allUploadsRef.current.delete(pfId);
+          failedIdsRef.current.delete(pfId);
 
           setState(prev => {
             const newFiles = prev.files.map(f =>
@@ -112,10 +126,12 @@ export function useFolderUpload() {
               ...prev,
               files: newFiles,
               overallProgress: calculateOverallProgress(newFiles),
-              phase: allComplete ? 'done' : prev.phase,
+              phase: (allComplete || result.allComplete) ? 'checking' : prev.phase,
             };
           });
         } catch (err) {
+          if (attempt !== generation.current) return;
+          failedIdsRef.current.add(pfId);
           setState(prev => {
             const newFiles = prev.files.map(f =>
               f.packFileId === pfId ? { ...f, status: 'failed' as const } : f
@@ -133,6 +149,7 @@ export function useFolderUpload() {
         startNextInQueue();
       },
       onProgress: (bytesUploaded, bytesTotal) => {
+        if (attempt !== generation.current) return;
         const pct = bytesTotal > 0 ? Math.round((bytesUploaded / bytesTotal) * 100) : 0;
         setState(prev => {
           const newFiles = prev.files.map(f =>
@@ -148,6 +165,7 @@ export function useFolderUpload() {
     });
 
     uploadsRef.current.set(pfId, upload);
+    allUploadsRef.current.set(pfId, upload);
     upload.start();
 
     setState(prev => ({
@@ -201,6 +219,14 @@ export function useFolderUpload() {
     scanResult: { scanFiles: { relativePath: string; fileSize: number }[]; fileObjects: File[] },
     tagIds?: string[]
   ) => {
+    if (busy.current) return;
+    busy.current = true;
+    const attempt = ++generation.current;
+    setState(previous => ({ ...previous, phase: 'creating', error: null }));
+    setMatches([]);
+    verificationFailed.current = false;
+    failedIdsRef.current.clear();
+    allUploadsRef.current.clear();
     try {
       const result = await createFolderPack({
         packName,
@@ -208,6 +234,10 @@ export function useFolderUpload() {
         tagIds,
       });
 
+      if (attempt !== generation.current) {
+        await cancelFolderUpload(result.id);
+        return;
+      }
       packIdRef.current = result.id;
 
       // Map packFileIds to file objects
@@ -242,11 +272,13 @@ export function useFolderUpload() {
         startNextInQueue();
       }
     } catch (err) {
-      setState(prev => ({
+      if (attempt === generation.current) setState(prev => ({
         ...prev,
         phase: 'error',
         error: err instanceof Error ? err.message : String(err),
       }));
+    } finally {
+      if (attempt === generation.current) busy.current = false;
     }
   }, [startNextInQueue]);
 
@@ -284,61 +316,128 @@ export function useFolderUpload() {
     }
   }, [startNextInQueue]);
 
-  const cancel = useCallback(async () => {
-    // Abort all active tus uploads
-    abortedPfIdsRef.current.clear();
-    for (const upload of uploadsRef.current.values()) {
-      upload.abort();
-    }
-    uploadsRef.current.clear();
-    activeCountRef.current = 0;
+  const cancel = useCallback(async (): Promise<boolean> => {
+    if (busy.current) return false;
+    busy.current = true;
+    ++generation.current;
+    setState(previous => ({ ...previous, phase: 'cancelling', error: null }));
     fileQueueRef.current = [];
     pausedUploadsRef.current.clear();
-
-    const pid = packIdRef.current;
-    if (pid) {
-      try {
-        await cancelFolderUpload(pid);
-      } catch (err) {
-        console.error('Failed to cancel folder upload on server:', err);
-      }
+    activeCountRef.current = 0;
+    try {
+      // Terminate even uploads whose completion confirmation is still in flight.
+      await Promise.all([...allUploadsRef.current.values()].map(async upload => {
+        try { await upload.abort(true); } catch (error) {
+          const response = (error as { originalResponse?: { getStatus(): number } }).originalResponse;
+          if (![404, 410].includes(response?.getStatus() ?? 0)) throw error;
+        }
+      }));
+      if (packIdRef.current) await cancelFolderUpload(packIdRef.current);
+      uploadsRef.current.clear();
+      allUploadsRef.current.clear();
+      fileMapRef.current.clear();
+      packIdRef.current = null;
+      setMatches([]);
+      setState({ phase: 'idle', packId: null, files: [], overallProgress: 0, error: null });
+      return true;
+    } catch (error) {
+      setState(previous => ({ ...previous, phase: 'error', error: `取消失败，请重试：${error instanceof Error ? error.message : String(error)}` }));
+      return false;
+    } finally {
+      busy.current = false;
     }
-
-    setState({
-      phase: 'idle',
-      packId: null,
-      files: [],
-      overallProgress: 0,
-      error: null,
-    });
-    packIdRef.current = null;
-    fileMapRef.current.clear();
   }, []);
 
   const reset = useCallback(() => {
-    setState({
-      phase: 'idle',
-      packId: null,
-      files: [],
-      overallProgress: 0,
-      error: null,
-    });
+    ++generation.current;
+    busy.current = false;
+    setState({ phase: 'idle', packId: null, files: [], overallProgress: 0, error: null });
+    setMatches([]);
+    setVerificationProgress(0);
     uploadsRef.current.clear();
-    fileQueueRef.current = [];
+    allUploadsRef.current.clear();
     activeCountRef.current = 0;
+    fileQueueRef.current = [];
     packIdRef.current = null;
     fileMapRef.current.clear();
     pausedUploadsRef.current.clear();
     abortedPfIdsRef.current.clear();
+    failedIdsRef.current.clear();
   }, []);
 
+  const restoreUpload = useCallback((id: string) => {
+    ++generation.current;
+    packIdRef.current = id;
+    setState({ phase: 'checking', packId: id, files: [], overallProgress: 100, error: null });
+  }, []);
+
+  const continueUpload = useCallback(async () => {
+    if (busy.current || !packIdRef.current) return;
+    busy.current = true;
+    const attempt = generation.current;
+    setState(previous => ({ ...previous, phase: 'confirming', error: null }));
+    try {
+      await continueFolderUpload(packIdRef.current);
+      if (attempt !== generation.current) return;
+      setMatches([]);
+      setState(previous => ({ ...previous, phase: 'checking' }));
+    } catch (error) {
+      if (attempt === generation.current) setState(previous => ({ ...previous, phase: 'error', error: String(error) }));
+    } finally {
+      if (attempt === generation.current) busy.current = false;
+    }
+  }, []);
+
+  const retry = useCallback(async () => {
+    if (verificationFailed.current && packIdRef.current) {
+      try {
+        await retryVerification(packIdRef.current);
+        verificationFailed.current = false;
+        setState(previous => ({ ...previous, phase: 'checking', error: null }));
+      } catch (error) {
+        setState(previous => ({ ...previous, error: String(error) }));
+      }
+    } else if (fileMapRef.current.size > 0) {
+      for (const id of failedIdsRef.current) if (!fileQueueRef.current.includes(id)) fileQueueRef.current.push(id);
+      failedIdsRef.current.clear();
+      resume();
+    } else if (packIdRef.current) {
+      setState(previous => ({ ...previous, phase: 'checking', error: null }));
+    }
+  }, [resume]);
+
+  useEffect(() => {
+    if (!state.packId || !['checking', 'thumbnailing', 'duplicate'].includes(state.phase)) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const attempt = generation.current;
+    const poll = async () => {
+      if (busy.current) { timer = setTimeout(poll, 500); return; }
+      try {
+        const result = await fetchFolderUploadStatus(state.packId!);
+        if (!active || attempt !== generation.current || busy.current) return;
+        const pack = result.pack;
+        setMatches(result.matches);
+        setVerificationProgress(pack.verification?.percentage ?? 0);
+        verificationFailed.current = pack.verification?.status === 'failed';
+        const phase = pack.status === 'awaiting_confirmation' ? 'duplicate'
+          : pack.status === 'thumbnailing' ? 'thumbnailing'
+          : pack.status === 'extracted' || pack.status === 'generated' ? 'done'
+          : pack.status === 'failed' || pack.status === 'uploading' ? 'error' : 'checking';
+        setState(previous => ({ ...previous, phase,
+          error: phase === 'error' ? pack.errorMessage || '上传未完成，请取消后重新选择文件夹' : null,
+        }));
+      } catch (error) {
+        if (active && attempt === generation.current) setState(previous => ({ ...previous, error: `查询处理状态失败：${String(error)}` }));
+      }
+      if (active) timer = setTimeout(poll, 1000);
+    };
+    void poll();
+    return () => { active = false; clearTimeout(timer); };
+  }, [state.packId, state.phase]);
+
   return {
-    ...state,
-    scanFiles,
-    startUpload,
-    pause,
-    resume,
-    cancel,
-    reset,
+    ...state, matches, verificationProgress, scanFiles, startUpload, pause,
+    resume, cancel, reset, restoreUpload, continueUpload, retry,
   };
 }

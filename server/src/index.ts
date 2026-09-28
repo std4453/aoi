@@ -1,3 +1,4 @@
+import { scheduleVerification, getVerification, resumeHistoricalVerification } from './services/content-verification.js';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs';
@@ -76,6 +77,7 @@ function recoverCompletedFolderFiles(packId: string): number {
     completePackFile(packFile.id);
     if (packFile.uploadId) {
       fs.rmSync(`${getUploadPath(packFile.uploadId)}.info`, { force: true });
+      fs.rmSync(`${getUploadPath(packFile.uploadId)}.json`, { force: true });
     }
     recovered++;
   }
@@ -90,6 +92,11 @@ function recoverJobs(): void {
   }
 
   for (const pack of listPacks()) {
+    const verification = getVerification(pack.id);
+    if (verification?.historical && verification.status === 'pending' && ['extracted', 'generated', 'failed'].includes(pack.status)) {
+      resumeHistoricalVerification(pack.id);
+      continue;
+    }
     if (pack.status === 'uploading' && pack.sourceType === 'archive') {
       try {
         const archivePath = getArchivePath(pack.id, `original.${pack.originalFormat}`);
@@ -107,6 +114,11 @@ function recoverJobs(): void {
       }
     } else if (pack.status === 'extracting') {
       ensureRecoveryJob(pack.id, 'extract');
+    } else if (pack.status === 'verifying') {
+      ensureRecoveryJob(pack.id, 'verify');
+    } else if (pack.status === 'awaiting_confirmation') {
+      // A browser must explicitly resume the upload confirmation.
+      continue;
     } else if (pack.status === 'thumbnailing') {
       ensureRecoveryJob(pack.id, 'thumbnail');
     } else if (pack.status === 'generating') {
@@ -121,6 +133,7 @@ function recoverJobs(): void {
             fs.existsSync(getGeneratedPath(pack.id)) ? 'generated' : 'extracted',
             `服务重启后无法恢复压缩参数：${error instanceof Error ? error.message : String(error)}`
           );
+          resumeHistoricalVerification(pack.id);
         }
       }
     } else if (pack.status === 'uploading' && pack.sourceType === 'folder') {
@@ -135,8 +148,7 @@ function recoverJobs(): void {
           const result = folderProcessor.processUploadedFolder(pack.id);
           updatePackStats(pack.id, result);
           updatePackStructureType(pack.id, result.structureType);
-          updatePackStatus(pack.id, 'thumbnailing');
-          ensureRecoveryJob(pack.id, 'thumbnail');
+          scheduleVerification(pack.id);
         } else {
           // Browser File objects cannot be reconstructed after a restart. Preserve
           // staged files for diagnosis or manual cleanup instead of deleting them.

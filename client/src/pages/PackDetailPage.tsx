@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { fetchPack, fetchThumbnails, fetchFileTree, startProcessing, removePack, renamePack, updatePackTags } from '../api/packs';
+import { fetchPack, fetchThumbnails, fetchFileTree, startProcessing, removePack, renamePack, updatePackTags, retryVerification } from '../api/packs';
 import { usePresets } from '../hooks/usePresets';
 import { useJobProgress } from '../hooks/useJobProgress';
 import { formatBytes, statusLabels, statusColors } from '../lib/utils';
@@ -48,6 +48,8 @@ export default function PackDetailPage() {
   const [renameValue, setRenameValue] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'open' | 'closing'>(null);
   const [deleting, setDeleting] = useState(false);
+  const [retryingVerification, setRetryingVerification] = useState(false);
+  const [verificationActionError, setVerificationActionError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showTagSelector, setShowTagSelector] = useState<null | 'open' | 'closing'>(null);
   const [showFileTree, setShowFileTree] = useState<'view' | 'select' | null>(null);
@@ -114,7 +116,7 @@ export default function PackDetailPage() {
   // Load thumbnails and file tree when thumbnailing finishes (must run BEFORE prevStatus update)
   const prevStatus = useRef(pack?.status);
   useEffect(() => {
-    if (prevStatus.current === 'thumbnailing' && pack?.status === 'extracted') {
+    if (['thumbnailing', 'verifying'].includes(prevStatus.current ?? '') && (pack?.status === 'extracted' || pack?.status === 'generated')) {
       loadThumbnails();
       loadFileTree();
     }
@@ -132,7 +134,7 @@ export default function PackDetailPage() {
   }, [thumbnails]);
 
   // Show loading toast after data loads, while pack is not in an available state
-  const isAvailable = pack?.status === 'extracted' || pack?.status === 'generating' || pack?.status === 'generated' || pack?.status === 'failed';
+  const isAvailable = pack?.verification?.allowsPreview || pack?.status === 'awaiting_confirmation' || pack?.status === 'extracted' || pack?.status === 'generating' || pack?.status === 'generated' || pack?.status === 'failed';
   useEffect(() => {
     if (loading) return;
     if (isAvailable) return;
@@ -143,7 +145,7 @@ export default function PackDetailPage() {
   // Archive packs can be waiting in the extraction queue after upload finishes.
   useEffect(() => {
     const queuedArchive = pack?.status === 'uploading' && pack.sourceType === 'archive';
-    if (!queuedArchive && pack?.status !== 'extracting' && pack?.status !== 'thumbnailing') return;
+    if (!queuedArchive && pack?.status !== 'extracting' && pack?.status !== 'thumbnailing' && pack?.status !== 'verifying' && pack?.status !== 'awaiting_confirmation') return;
     const timer = setInterval(refreshPackStatus, 1000);
     return () => clearInterval(timer);
   }, [pack?.status, pack?.sourceType, refreshPackStatus]);
@@ -292,7 +294,7 @@ export default function PackDetailPage() {
   }
 
   const isProcessing = progress && (progress.status === 'running');
-  const isGenerated = pack.status === 'generated';
+  const isGenerated = pack.status === 'generated' || (pack.status === 'verifying' && pack.verification?.allowsPreview && pack.compressedSize > 0);
   const canGenerate = pack.status === 'extracted' || pack.status === 'generated';
 
   return (
@@ -363,6 +365,28 @@ export default function PackDetailPage() {
           <p className="text-sm text-red-400 mt-2">错误: {pack.errorMessage}</p>
         )}
       </div>
+
+      {pack.status === 'verifying' && (
+        <p role="status" className="mb-4 text-sm text-gray-400">正在校验… {pack.verification?.percentage ?? 0}%</p>
+      )}
+      {pack.verification?.status === 'failed' && (
+        <div className="mb-4 text-sm text-red-400">
+          <p>校验失败：{pack.verification.error}</p>
+          {verificationActionError && <p role="alert">{verificationActionError}</p>}
+          <button className="underline mt-2 disabled:opacity-50" disabled={retryingVerification} onClick={async () => {
+            setRetryingVerification(true);
+            setVerificationActionError(null);
+            try { await retryVerification(pack.id); await refreshPackStatus(); }
+            catch (error) { setVerificationActionError(error instanceof Error ? error.message : String(error)); }
+            finally { setRetryingVerification(false); }
+          }}>重试校验</button>
+        </div>
+      )}
+      {pack.sourceType === 'folder' && ['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) && !pack.verification?.allowsPreview && (
+        <button className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?folder=${pack.id}`)}>
+          继续完成上传
+        </button>
+      )}
 
       {/* Thumbnails grid */}
       {pack.status === 'extracting' || pack.status === 'thumbnailing' ? (

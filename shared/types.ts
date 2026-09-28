@@ -22,6 +22,7 @@ export interface Pack {
   originalFormat: string;
   sourceType: 'archive' | 'folder';
   status: PackStatus;
+  verification?: VerificationProgress;
   imageCount: number;
   videoCount: number;
   totalImagesSize: number;
@@ -52,6 +53,8 @@ export interface Tag {
 export type PackStatus =
   | 'uploading'
   | 'extracting'
+  | 'verifying'
+  | 'awaiting_confirmation'
   | 'thumbnailing'
   | 'extracted'
   | 'generating'
@@ -70,7 +73,7 @@ export interface Preset {
 export interface Job {
   id: string;
   packId: string;
-  type: 'extract' | 'thumbnail' | 'compress';
+  type: 'extract' | 'thumbnail' | 'compress' | 'verify';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   options: string | null;
@@ -141,5 +144,17 @@ export type DuplicatePack = Pick<Pack, 'id' | 'name' | 'status'>;
 
 export interface DuplicateArchiveResponse {
   code: 'DUPLICATE_ARCHIVE';
+  matches: DuplicatePack[];
+}
+
+export interface VerificationProgress {
+  status: 'pending' | 'completed' | 'failed';
+  percentage: number;
+  error: string | null;
+  allowsPreview: boolean;
+}
+
+export interface FolderUploadStatus {
+  pack: Pack;
   matches: DuplicatePack[];
 }

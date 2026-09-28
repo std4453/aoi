@@ -56,6 +56,15 @@ function rowToPack(row: any, tags?: Tag[]): StoredPack {
 
 export function toPublicPack(pack: StoredPack): Pack {
   const { archivePassword: _archivePassword, ...publicPack } = pack;
+  const verification = queryOne('SELECT status, error, historical FROM pack_verifications WHERE pack_id = ?', [pack.id]);
+  if (verification && (pack.status === 'verifying' || verification.status === 'failed')) {
+    publicPack.verification = {
+      status: verification.status,
+      error: verification.error,
+      percentage: getLatestJob(pack.id, 'verify')?.progress ?? 0,
+      allowsPreview: verification.historical === 1,
+    };
+  }
   return publicPack;
 }
 
@@ -416,7 +425,11 @@ export function updateJobProgress(id: string, progress: number, result: object):
 
 export function claimNextPendingJob(): Job | undefined {
   return inTransaction(() => {
-    const row = queryOne("SELECT id FROM jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1");
+    const row = queryOne(`SELECT j.id FROM jobs j
+      LEFT JOIN pack_verifications v ON v.pack_id = j.pack_id
+      WHERE j.status = 'pending'
+      ORDER BY CASE WHEN j.type = 'verify' AND v.historical = 1 THEN 1 ELSE 0 END,
+        j.created_at ASC, j.rowid ASC LIMIT 1`);
     if (!row) return undefined;
 
     const claimed = run(
@@ -451,7 +464,7 @@ export function hasAnyActiveJob(packId: string): boolean {
 
 export function getLatestJob(packId: string, type: Job['type']): Job | undefined {
   const row = queryOne(
-    'SELECT * FROM jobs WHERE pack_id = ? AND type = ? ORDER BY created_at DESC LIMIT 1',
+    'SELECT * FROM jobs WHERE pack_id = ? AND type = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
     [packId, type]
   );
   return row ? rowToJob(row) : undefined;

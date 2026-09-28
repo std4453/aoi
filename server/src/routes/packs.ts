@@ -1,3 +1,4 @@
+import { scheduleVerification, getVerification, getLiveMatches, continueFolderVerification } from '../services/content-verification.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
 import type { ArchiveUploadRequest } from '../../../shared/types.js';
@@ -86,8 +87,8 @@ async function finishFolderPackIfReady(packId: string): Promise<boolean> {
   const result = folderProcessor.processUploadedFolder(packId);
   updatePackStats(packId, result);
   updatePackStructureType(packId, result.structureType);
-  updatePackStatus(packId, 'thumbnailing');
-  await jobQueue.enqueue(packId, 'thumbnail');
+  scheduleVerification(packId);
+  jobQueue.start();
   return true;
 }
 
@@ -239,18 +240,26 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.delete<{
     Params: { id: string };
   }>('/api/packs/:id', async (request, reply) => {
-    const pack = getPack(request.params.id);
-    if (!pack) {
-      reply.code(404).send({ error: 'Pack not found' });
-      return;
-    }
-    if (hasAnyActiveJob(pack.id)) {
-      reply.code(409).send({ error: 'Pack is currently being processed and cannot be deleted' });
-      return;
-    }
-    removePackFiles(pack.id);
-    deletePackFromDb(pack.id);
-    return { ok: true };
+    return withUploadLock(`folder-${request.params.id}`, async () => {
+      const pack = getPack(request.params.id);
+      if (!pack) {
+        reply.code(404).send({ error: 'Pack not found' });
+        return;
+      }
+      try {
+        await jobQueue.cancelVerification(pack.id);
+      } catch {
+        reply.code(409).send({ error: 'Pack is currently being processed and cannot be deleted' });
+        return;
+      }
+      if (hasAnyActiveJob(pack.id)) {
+        reply.code(409).send({ error: 'Pack is currently being processed and cannot be deleted' });
+        return;
+      }
+      removePackFiles(pack.id);
+      deletePackFromDb(pack.id);
+      return { ok: true };
+    });
   });
 
   // Rename a pack
@@ -470,74 +479,122 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     const { id } = request.params;
     const { packFileId, uploadId } = request.body ?? {};
 
-    const pack = getPack(id);
-    if (!pack) {
-      reply.code(404).send({ error: 'Pack not found' });
-      return;
-    }
-    if (pack.sourceType !== 'folder' || pack.status !== 'uploading') {
-      reply.code(400).send({ error: 'Pack is not a folder upload in uploading state' });
-      return;
-    }
-
-    const packFile = getPackFile(packFileId);
-    if (!packFile || packFile.packId !== id) {
-      reply.code(400).send({ error: 'Pack file does not belong to this pack' });
-      return;
-    }
-
-    try {
-      // Move uploaded file from tus uploads dir to staging dir
-      let uploadPath: string;
-      try {
-        uploadPath = getUploadPath(uploadId);
-      } catch {
-        reply.code(400).send({ error: 'Invalid upload id' });
+    return withUploadLock(`folder-${id}`, async () => {
+      const pack = getPack(id);
+      if (!pack) {
+        reply.code(404).send({ error: 'Pack not found' });
         return;
       }
-      const stagingDir = getFolderStagingDir(id);
-      const destRelativePath = packFile.relativePath;
-      const destPath = resolveWithin(stagingDir, destRelativePath, 'folder file path');
-      if (fs.existsSync(destPath)) {
-        const destinationStat = fs.statSync(destPath);
-        if (!destinationStat.isFile() || destinationStat.size !== packFile.fileSize) {
-          reply.code(409).send({ error: 'Destination file conflicts with the uploaded file' });
-          return;
-        }
-        // A previous request may have moved the file before the process stopped.
-        // Treat a size-matching staged file as an idempotent completion.
-        completePackFile(packFileId);
-      } else {
-        if (!fs.existsSync(uploadPath)) {
-          reply.code(404).send({ error: 'Upload file not found' });
-          return;
-        }
-        const actualSize = fs.statSync(uploadPath).size;
-        if (actualSize !== packFile.fileSize) {
-          reply.code(400).send({ error: 'Uploaded file size does not match the declared size' });
-          return;
-        }
-        ensureDir(path.dirname(destPath));
-        // Persist the tus id before the rename so startup recovery can complete
-        // either side of the filesystem/database crash window.
-        updatePackFileUploadId(packFileId, uploadId);
-        fs.renameSync(uploadPath, destPath);
-        completePackFile(packFileId);
+      const existingFile = getPackFile(packFileId);
+      if (pack.sourceType === 'folder' && existingFile?.packId === id && existingFile.status === 'uploaded' && pack.status !== 'uploading') {
+        return { allComplete: true };
+      }
+      if (pack.sourceType !== 'folder' || pack.status !== 'uploading') {
+        reply.code(400).send({ error: 'Pack is not a folder upload in uploading state' });
+        return;
       }
 
-      // Clean up tus .info metadata file
-      const infoPath = uploadPath + '.info';
+      const packFile = getPackFile(packFileId);
+      if (!packFile || packFile.packId !== id) {
+        reply.code(400).send({ error: 'Pack file does not belong to this pack' });
+        return;
+      }
+
       try {
-        fs.rmSync(infoPath, { force: true });
-      } catch (error) {
-        console.warn('[folder-file-complete] Failed to remove tus metadata:', error);
-      }
+        // Move uploaded file from tus uploads dir to staging dir
+        let uploadPath: string;
+        try {
+          uploadPath = getUploadPath(uploadId);
+        } catch {
+          reply.code(400).send({ error: 'Invalid upload id' });
+          return;
+        }
+        const stagingDir = getFolderStagingDir(id);
+        const destRelativePath = packFile.relativePath;
+        const destPath = resolveWithin(stagingDir, destRelativePath, 'folder file path');
+        if (fs.existsSync(destPath)) {
+          const destinationStat = fs.statSync(destPath);
+          if (!destinationStat.isFile() || destinationStat.size !== packFile.fileSize) {
+            reply.code(409).send({ error: 'Destination file conflicts with the uploaded file' });
+            return;
+          }
+          // A previous request may have moved the file before the process stopped.
+          // Treat a size-matching staged file as an idempotent completion.
+          completePackFile(packFileId);
+        } else {
+          if (!fs.existsSync(uploadPath)) {
+            reply.code(404).send({ error: 'Upload file not found' });
+            return;
+          }
+          const actualSize = fs.statSync(uploadPath).size;
+          if (actualSize !== packFile.fileSize) {
+            reply.code(400).send({ error: 'Uploaded file size does not match the declared size' });
+            return;
+          }
+          ensureDir(path.dirname(destPath));
+          // Persist the tus id before the rename for crash recovery and cleanup.
+          updatePackFileUploadId(packFileId, uploadId);
+          fs.renameSync(uploadPath, destPath);
+          completePackFile(packFileId);
+        }
 
-      return { allComplete: await finishFolderPackIfReady(id) };
-    } catch (err) {
-      console.error('[folder-file-complete] Error:', err);
-      reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
-    }
+        // Clean up current and legacy tus metadata files
+        try {
+          fs.rmSync(uploadPath + '.info', { force: true });
+          fs.rmSync(uploadPath + '.json', { force: true });
+        } catch (error) {
+          console.warn('[folder-file-complete] Failed to remove tus metadata:', error);
+        }
+
+        return { allComplete: await finishFolderPackIfReady(id) };
+      } catch (err) {
+        console.error('[folder-file-complete] Error:', err);
+        reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  });
+
+  fastify.get<{ Params: { id: string } }>('/api/packs/:id/folder-upload-status', async (request, reply) => {
+    const { id } = request.params;
+    return withUploadLock(`folder-${id}`, async () => {
+      let pack = getPack(id);
+      if (!pack || pack.sourceType !== 'folder') return reply.code(404).send({ error: 'Folder pack not found' });
+      const matches = pack.status === 'awaiting_confirmation' ? getLiveMatches(id) : [];
+      if (pack.status === 'awaiting_confirmation' && matches.length === 0) {
+        continueFolderVerification(id);
+        jobQueue.start();
+        pack = getPack(id)!;
+      }
+      return { pack: toPublicPack(pack), matches };
+    });
+  });
+
+  fastify.post<{ Params: { id: string } }>('/api/packs/:id/folder-continue', async (request, reply) => {
+    const { id } = request.params;
+    return withUploadLock(`folder-${id}`, async () => {
+      const pack = getPack(id);
+      if (!pack || pack.sourceType !== 'folder') return reply.code(404).send({ error: 'Folder pack not found' });
+      try {
+        continueFolderVerification(id);
+        jobQueue.start();
+        return { ok: true };
+      } catch (error) {
+        return reply.code(409).send({ error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+  });
+
+  fastify.post<{ Params: { id: string } }>('/api/packs/:id/retry-verification', async (request, reply) => {
+    const { id } = request.params;
+    return withUploadLock(`folder-${id}`, async () => {
+      const record = getVerification(id);
+      if (!record || !getPack(id)) return reply.code(404).send({ error: 'Verification not found' });
+      if (hasAnyActiveJob(id)) return reply.code(409).send({ error: 'Pack is currently being processed' });
+      if (record.status !== 'failed') return reply.code(409).send({ error: 'Verification has not failed' });
+      scheduleVerification(id);
+      jobQueue.start();
+      return { ok: true };
+    });
   });
 
   // Cancel a folder upload — clean up pack and uploaded files
@@ -545,44 +602,48 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     Params: { id: string };
   }>('/api/packs/:id/cancel-upload', async (request, reply) => {
     const { id } = request.params;
-    const pack = getPack(id);
+    return withUploadLock(`folder-${id}`, async () => {
+      const pack = getPack(id);
 
-    if (!pack) {
-      reply.code(404).send({ error: 'Pack not found' });
-      return;
-    }
-    if (pack.sourceType !== 'folder' || pack.status !== 'uploading') {
-      reply.code(400).send({ error: 'Pack is not a folder upload in uploading state' });
-      return;
-    }
-
-    try {
-      // Clean up tus upload files for any uploaded/in-progress files
-      const packFiles = getPackFiles(id);
-      for (const pf of packFiles) {
-        if (pf.uploadId) {
-          const uploadPath = getUploadPath(pf.uploadId);
-          if (fs.existsSync(uploadPath)) {
-            fs.unlinkSync(uploadPath);
-          }
-          const infoPath = uploadPath + '.info';
-          if (fs.existsSync(infoPath)) {
-            fs.unlinkSync(infoPath);
-          }
-        }
+      if (!pack) {
+        return { ok: true };
+      }
+      const verification = getVerification(id);
+      if (pack.sourceType !== 'folder' || (pack.status !== 'uploading' && !(pack.status === 'failed' && !verification) && (!verification || verification.historical || verification.approved))) {
+        reply.code(400).send({ error: 'Pack is not a folder upload in uploading state' });
+        return;
       }
 
-      // Remove extracted/staging files
-      removePackFiles(id);
+      try {
+        await jobQueue.cancelVerification(id);
+        // Clean up tus upload files for any uploaded/in-progress files
+        const packFiles = getPackFiles(id);
+        for (const pf of packFiles) {
+          if (pf.uploadId) {
+            const uploadPath = getUploadPath(pf.uploadId);
+            if (fs.existsSync(uploadPath)) {
+              fs.unlinkSync(uploadPath);
+            }
+            fs.rmSync(uploadPath + '.json', { force: true });
+            const infoPath = uploadPath + '.info';
+            if (fs.existsSync(infoPath)) {
+              fs.unlinkSync(infoPath);
+            }
+          }
+        }
 
-      // Delete pack from database (cascades to pack_files, jobs, pack_tags)
-      deletePackFromDb(id);
+        // Remove extracted/staging files
+        removePackFiles(id);
 
-      return { ok: true };
-    } catch (err) {
-      console.error('[cancel-upload] Error:', err);
-      reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
-    }
+        // Delete pack from database (cascades to pack_files, jobs, pack_tags)
+        deletePackFromDb(id);
+
+        return { ok: true };
+      } catch (err) {
+        console.error('[cancel-upload] Error:', err);
+        reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
   });
 
   // Serve original image for preview (supports subdirectory paths)
