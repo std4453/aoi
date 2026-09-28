@@ -9,7 +9,14 @@ const projectRoot = __dirname.includes(`${path.sep}dist${path.sep}server${path.s
   : path.resolve(__dirname, '../..');
 const defaultDataDir = path.join(projectRoot, 'data');
 
+const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(value => value === 'true' || value === '1');
+
 const configSchema = z.object({
+  frontendOnly: flag,
+  serverSelectionEnabled: flag,
+  authKey: z.string().max(4096).default(''),
+  tlsCertFile: z.string().optional(),
+  tlsKeyFile: z.string().optional(),
   port: z.coerce.number().default(3000),
   host: z.string().default('0.0.0.0'),
   dataDir: z.string().min(1).default(defaultDataDir).transform(value => path.resolve(value)),
@@ -27,6 +34,11 @@ const configSchema = z.object({
 });
 
 const parsed = configSchema.parse({
+  frontendOnly: process.env.FRONTEND_ONLY,
+  serverSelectionEnabled: process.env.SERVER_SELECTION_ENABLED,
+  authKey: process.env.AUTH_KEY,
+  tlsCertFile: process.env.TLS_CERT_FILE,
+  tlsKeyFile: process.env.TLS_KEY_FILE,
   port: process.env.PORT,
   host: process.env.HOST,
   dataDir: process.env.DATA_DIR,
@@ -42,6 +54,10 @@ const parsed = configSchema.parse({
   backupRetention: process.env.BACKUP_RETENTION,
   shutdownTimeout: process.env.SHUTDOWN_TIMEOUT,
 });
+
+if (Boolean(parsed.tlsCertFile) !== Boolean(parsed.tlsKeyFile)) {
+  throw new Error('TLS_CERT_FILE and TLS_KEY_FILE must be configured together');
+}
 
 export const config = {
   ...parsed,

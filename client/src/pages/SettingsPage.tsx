@@ -1,3 +1,4 @@
+import { activeServer, clearServerCache } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
@@ -13,6 +14,24 @@ interface DiskInfo {
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const [cacheBytes, setCacheBytes] = useState(0);
+  const [cacheMessage, setCacheMessage] = useState('');
+  const [cacheSupported, setCacheSupported] = useState(false);
+  useEffect(() => {
+    if (!('caches' in window) || !navigator.serviceWorker?.controller) return;
+    setCacheSupported(true);
+    void (async () => {
+      let total = 0;
+      for (const name of (await caches.keys()).filter(name => name.startsWith('aoi-data-'))) {
+        const cache = await caches.open(name);
+        for (const request of await cache.keys()) {
+          const response = await cache.match(request);
+          total += Number(response?.headers.get('X-AoI-Size') || 0);
+        }
+      }
+      setCacheBytes(total);
+    })().catch(() => setCacheMessage('无法读取缓存用量'));
+  }, []);
   const [diskInfo, setDiskInfo] = useState<DiskInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [tagCount, setTagCount] = useState(0);
@@ -43,6 +62,24 @@ export default function SettingsPage() {
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">设置</h2>
 
       <div className="space-y-3">
+        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 space-y-3">
+          <h3 className="text-sm font-medium text-white">离线缓存</h3>
+          <p className="text-sm text-gray-400">{cacheSupported ? `所有服务器合计 ${formatBytes(cacheBytes)} / 200 MiB` : '离线缓存未启用，请通过 HTTPS 安装或访问应用。'}</p>
+          <p className="text-xs text-gray-500">仅保存请求过的列表、详情和缩略图，不缓存原图。浏览器可能自动回收缓存。</p>
+          {cacheSupported && <button className="text-blue-400 text-sm" onClick={async () => {
+            try {
+              if (activeServer) await clearServerCache(activeServer.id);
+              setCacheMessage('当前服务器缓存已清空，后续请求会重新缓存');
+              let total = 0;
+              for (const name of (await caches.keys()).filter(name => name.startsWith('aoi-data-'))) {
+                const cache = await caches.open(name);
+                for (const request of await cache.keys()) total += Number((await cache.match(request))?.headers.get('X-AoI-Size') || 0);
+              }
+              setCacheBytes(total);
+            } catch { setCacheMessage('清理失败，请重试'); }
+          }}>清空当前服务器缓存</button>}
+          {cacheMessage && <p role="status" className="text-sm text-gray-400">{cacheMessage}</p>}
+        </div>
         {/* System info */}
         <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
           <div className="flex items-center gap-2 mb-3">

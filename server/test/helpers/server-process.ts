@@ -34,6 +34,11 @@ export async function startTestServer(
     cwd: process.cwd(),
     env: {
       ...process.env,
+      FRONTEND_ONLY: 'false',
+      SERVER_SELECTION_ENABLED: 'false',
+      AUTH_KEY: '',
+      TLS_CERT_FILE: '',
+      TLS_KEY_FILE: '',
       DATA_DIR: dataDir,
       HOST: '127.0.0.1',
       PORT: String(port),
@@ -72,7 +77,7 @@ export async function waitForHealth(server: TestServer, timeoutMs = 10_000): Pro
       throw new Error(`Test server exited before becoming healthy:\n${server.output()}`);
     }
     try {
-      const response = await fetch(`${server.url}/api/health`);
+      const response = await fetch(`${server.url}/healthz`);
       if (response.ok) return;
     } catch {
       // Server is still starting.

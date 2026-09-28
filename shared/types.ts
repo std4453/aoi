@@ -158,3 +158,26 @@ export interface FolderUploadStatus {
   pack: Pack;
   matches: DuplicatePack[];
 }
+
+// Runtime deployment and browser connection contracts.
+export interface RuntimeConfig {
+  serverSelectionEnabled: boolean;
+}
+
+export interface ServerConnection {
+  id: string;
+  alias: string;
+  address: string;
+  key: string;
+  verified?: boolean;
+}
+
+export interface ServerHealth {
+  status: 'ok';
+  service: 'aoi';
+  authRequired: boolean;
+}
+
+export interface LoginResponse {
+  token: string;
+}

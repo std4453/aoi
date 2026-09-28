@@ -1,3 +1,5 @@
+import { useConnectionState } from '../hooks/useConnectionState';
+import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchTags, fetchTagPacks, renameTag, removeTag, type TagWithStats } from '../api/packs';
@@ -9,6 +11,7 @@ import Modal from '../components/Modal';
 type TagItem = TagWithStats;
 
 export default function TagManagerPage() {
+  const offline = useConnectionState() !== 'online';
   const navigate = useNavigate();
   const [tags, setTags] = useState<TagItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,7 +195,7 @@ export default function TagManagerPage() {
                     className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:border-blue-500"
                   />
                   <button
-                    onClick={handleRename}
+                    disabled={offline} onClick={handleRename}
                     className="p-1.5 text-blue-400 hover:text-blue-300 transition-colors shrink-0"
                   >
                     <Check size={18} />
@@ -207,13 +210,13 @@ export default function TagManagerPage() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
-                      onClick={() => setRenaming(true)}
+                      disabled={offline} onClick={() => setRenaming(true)}
                       className="p-2 text-gray-400 hover:text-white transition-colors"
                     >
                       <Pencil size={16} />
                     </button>
                     <button
-                      onClick={handleDelete}
+                      disabled={offline} onClick={handleDelete}
                       className="p-2 text-gray-400 hover:text-red-400 transition-colors"
                     >
                       <Trash2 size={16} />
@@ -249,7 +252,7 @@ export default function TagManagerPage() {
                       className="w-full flex items-center gap-3 bg-gray-800 rounded-lg p-2 text-left hover:bg-gray-750 transition-colors"
                     >
                       <img
-                        src={`/api/packs/${pack.id}/cover`}
+                        src={resourceUrl(`/api/packs/${pack.id}/cover`)} crossOrigin="anonymous"
                         alt={pack.name}
                         className="w-12 h-9 rounded object-cover shrink-0"
                         loading="lazy"

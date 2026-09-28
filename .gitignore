@@ -36,3 +36,8 @@ npm-debug.log*
 
 # Local end-to-end test artifacts
 test-artifacts/
+
+# Deployment TLS material
+certs/
+*.pem
+*.key

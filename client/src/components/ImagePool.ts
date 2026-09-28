@@ -198,6 +198,7 @@ export class ImagePool {
       this.processQueue();
     };
 
+    img.crossOrigin = 'anonymous';
     img.src = this.getUrl(index);
   }
 

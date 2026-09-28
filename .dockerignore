@@ -9,3 +9,6 @@ client/dist
 test-artifacts
 *.log
 .env*
+certs
+*.pem
+*.key

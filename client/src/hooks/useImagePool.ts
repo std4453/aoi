@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import { useRef, useState, useEffect } from 'react';
 import { ImagePool } from '../components/ImagePool';
 
@@ -41,7 +42,7 @@ export function useImagePool(images: ImageItem[], currentIndex: number): UseImag
   useEffect(() => {
     const pool = new ImagePool(
       imagesRef.current.length,
-      (index: number) => imagesRef.current[index]?.fullUrl ?? '',
+      (index: number) => resourceUrl(imagesRef.current[index]?.fullUrl ?? ''),
       () => setRevision((r) => r + 1),
     );
     poolRef.current = pool;

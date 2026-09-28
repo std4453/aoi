@@ -162,21 +162,89 @@ env: {
 }
 ```
 
-## 使用 Docker 部署
+## 使用 Docker 部署（推荐）
 
-项目包含 `Dockerfile`：
+GitHub Actions 检查通过后，将 `linux/amd64` 镜像发布到 `ghcr.io/std4453/aoi`：
+
+| 触发 | 检查与镜像标签 |
+| --- | --- |
+| Pull Request | `npm run check`、构建及容器冒烟检查，不发布 |
+| `main` 更新 | `edge`、`sha-<完整提交哈希>` |
+| `vX.Y.Z` 标签 | `X.Y.Z`、`latest`、提交 SHA 标签 |
+| `vX.Y.Z-prerelease` 标签 | 预发布版本标签、提交 SHA，不更新 `latest` |
+| 手动运行 | 当前提交 SHA；在默认分支运行时也更新 `edge` |
+
+工作流使用 `GITHUB_TOKEN` 的 `packages: write` 权限，无需额外 PAT。首次发布后，在 GitHub Packages 设置中确认包可见性：若需要匿名拉取，应将包设置为 public；私有包需在部署机器登录 GHCR。工作流只发布镜像，不自动更新部署机器。发布前会检查完整服务和纯前端两种容器模式。
+
+仓库提供 `compose.yaml`：
 
 ```bash
-docker build -t aoi .
+# 确保目录由容器内 node 用户（uid 1000）可写
+mkdir -p data
+# 首次发布正式版前使用 edge；正式部署建议 AOI_VERSION 指定已发布的版本号
+AOI_VERSION=edge docker compose pull
+AOI_VERSION=edge docker compose up -d
 
-# 运行
-# 绑定宿主目录时，先确保容器内 node 用户（uid 1000）可写该目录
-docker run -d \
-  --stop-timeout 45 \
-  -p 3000:3000 \
-  -v /path/to/data:/app/data \
-  aoi
+docker compose logs -f
 ```
+
+可在部署目录的 `.env` 中配置 `AOI_VERSION`、`AOI_PORT` 和下表中的环境变量；不要提交 `.env`。升级时先拉取目标版本，再执行 `docker compose up -d`。数据始终挂载到 `/app/data`，保持单实例，不要让多个容器共用同一数据目录。纯前端模式不会使用数据卷。
+
+本地构建仍可使用 `docker build --platform linux/amd64 -t aoi .`。
+
+## 独立前端、服务器选择与鉴权
+
+所有开关均为**运行时配置**，同一构建和镜像可重复使用；不需要为不同后端重新构建前端。
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `FRONTEND_ONLY` | `false` | 仅提供前端、公开运行配置和 `/healthz`；不初始化数据库、上传目录或队列，不提供业务 API |
+| `SERVER_SELECTION_ENABLED` | `false` | 显示服务器列表，允许连接不同后端；关闭时连接当前页面同源后端 |
+| `AUTH_KEY` | 空 | 后端唯一登录 key；为空时无需输入 key |
+| `TLS_CERT_FILE` | 空 | PEM 证书链文件路径 |
+| `TLS_KEY_FILE` | 空 | PEM 私钥文件路径，必须与证书同时配置 |
+
+布尔开关接受 `true`/`false` 或 `1`/`0`。纯前端通常同时开启两个开关。例如：
+
+```bash
+FRONTEND_ONLY=true SERVER_SELECTION_ENABLED=true docker compose up -d
+```
+
+完整服务默认仍提供前端和 API。服务器地址格式为 `https://example.com:8555`，支持域名、IPv4、方括号包围的 IPv6 和可选端口，不支持路径前缀。HTTPS 前端应搭配受信任的 HTTPS 后端；还需允许浏览器访问局域网。
+
+浏览器 localStorage 保存每条服务器记录的别名、地址和 key。重新打开页面时自动验证最近的服务器；「切换服务器」可新增、编辑和删除记录。切换不删除 key，记录之间不共享缓存。修改记录地址和删除记录会清除对应缓存。key 错误时留在登录流程修改。
+
+`/api/health` 公开返回服务标识和是否需要 key；`/api/auth/login` 验证 key 并返回进程有效期内的临时凭证。普通 API 和 tus 使用 Bearer 头，图片、下载和 SSE 使用临时凭证，长期 key 不进入 URL。服务重启会使临时凭证失效；刷新或重新连接后使用保存的 key 登录。反向代理也应避免记录资源 URL 中的 `access_token`。
+
+前端运行配置 `/runtime-config.json` 只暴露服务器选择开关，不暴露 key 或证书配置。业务接口允许跨域访问；CORS 不替代鉴权。
+
+## HTTPS 与证书更新
+
+服务启动时读取 `TLS_CERT_FILE` 和 `TLS_KEY_FILE`，在 `PORT` 指定的端口提供 HTTPS。配置不完整或证书无法加载时启动失败，不回退 HTTP。也可继续由外部反向代理提供 HTTPS。
+
+证书申请和续期由外部工具负责。使用 Compose 时取消证书环境变量及 `./certs:/app/certs:ro` 的注释，挂载包含证书链及私钥的目录，并确保容器 uid 1000 可读取文件。若证书路径是符号链接，也必须挂载其目标文件。更新文件后运行 `docker compose restart aoi`；PM2 则执行 restart。
+
+局域网可使用解析到内网 IP 的域名配合受信任证书。证书必须匹配访问地址并被设备信任；网页无法忽略证书错误。容器健康检查访问本机 `/healthz`，支持 HTTP/HTTPS，且不依赖业务 key 或数据库。
+
+## iOS PWA 与离线浏览
+
+生产构建包含 manifest、安装图标和 Service Worker；开发模式不注册 Service Worker。使用 HTTPS 访问后，可在 iOS Safari 中通过分享菜单「添加到主屏幕」。首次联网成功后才能缓存应用和业务内容。
+
+- 缓存应用页面及实际请求过的图包列表、详情、封面、缩略图和只读配置；不预下载整个图包。
+- 不缓存原图、压缩包、登录响应、实时进度或写操作。
+- 各服务器记录独立缓存，业务缓存合计上限 200 MiB；达到上限时淘汰旧内容，浏览器配额不足时缓存失败不影响在线请求。
+- 设置页显示业务缓存用量，可清空当前服务器缓存。浏览器可能回收缓存，因此它不能代替备份。
+- 曾成功登录的服务器不可达时，可以选择只读查看已有缓存；未缓存内容显示缺失。服务端修改 key 无法远程撤销已经保存的离线内容；明确收到鉴权失败后要求重新登录。
+- 恢复连接后仅提示刷新，不自动更新当前页面、跳转服务器或重置阅读位置。写操作不会离线排队。
+- 应用新版本安装完成后提示「更新并刷新」，用户主动点击才更新当前页面。
+
+Safari/iOS 的证书信任、局域网授权、主屏幕安装和系统存储回收仍需在目标真机上验收。无法建立连接时，前端统一提示检查网络、地址、证书和局域网权限，因为浏览器通常不向网页暴露具体的 TLS/CORS 错误。
+
+## 从 PM2 迁移到 Docker
+
+`ecosystem.config.cjs` 继续保留，支持上述运行时开关、key 和证书配置。修改环境变量后使用 `pm2 restart ecosystem.config.cjs --update-env`；保持 fork/单实例，不能使用 cluster 或 reload。
+
+迁移步骤：备份持久化数据，停止 PM2 实例，将原 `DATA_DIR` 挂载为容器的 `/app/data`，检查 uid 1000 的读写权限，再启动 Docker。不要同时启动两种部署方式访问同一数据目录。证书续期或配置调整后通过 restart 生效。
 
 ## 项目结构
 

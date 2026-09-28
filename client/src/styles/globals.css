@@ -9,6 +9,7 @@ html {
 }
 
 body {
+  padding-top: env(safe-area-inset-top);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -115,4 +116,9 @@ svg.lucide[width="48"] { width: 3rem; height: 3rem; }
 }
 .animate-toast-exit {
   animation: toast-exit 0.15s ease-in forwards;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import { useEffect, useState } from 'react';
 import type { DuplicatePack } from '../../../shared/types.js';
 import { fetchThumbnails } from '../api/packs';
@@ -23,7 +24,7 @@ function DuplicateCard({ pack, disabled, onSelect }: { pack: DuplicatePack; disa
       </div>
       {thumbnails.length > 0 ? (
         <div className="grid grid-cols-4 gap-2">
-          {thumbnails.map(url => <img key={url} src={url} alt="图包缩略图" className="aspect-square w-full rounded-lg object-cover bg-gray-800"
+          {thumbnails.map(url => <img key={url} src={resourceUrl(url)} crossOrigin="anonymous" alt="图包缩略图" className="aspect-square w-full rounded-lg object-cover bg-gray-800"
             onError={() => setThumbnails(previous => previous.filter(item => item !== url))} />)}
         </div>
       ) : <div className="rounded-lg bg-gray-800 py-5 text-center text-sm text-gray-500">{loading ? '正在加载缩略图…' : '暂无缩略图'}</div>}

@@ -1,3 +1,5 @@
+import { useConnectionState } from '../hooks/useConnectionState';
+import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePacks } from '../hooks/usePacks';
@@ -62,6 +64,7 @@ function SkeletonGrid() {
 }
 
 export default function HomePage() {
+  const offline = useConnectionState() !== 'online';
   const navigate = useNavigate();
   const { packs, total, page, pageSize, loading, error, deletePack, goToPage, setSearchQuery, search, hardReset } = usePacks();
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -254,7 +257,7 @@ export default function HomePage() {
                 {/* Cover image */}
                 <div className="aspect-[4/3] bg-gray-800">
                   <img
-                    src={`/api/packs/${pack.id}/cover`}
+                    src={resourceUrl(`/api/packs/${pack.id}/cover`)} crossOrigin="anonymous"
                     alt={pack.name}
                     className="w-full h-full object-cover"
                     loading="lazy"
@@ -301,7 +304,7 @@ export default function HomePage() {
                     e.stopPropagation();
                     handleDelete(pack.id, pack.name);
                   }}
-                  disabled={deleting === pack.id}
+                  disabled={offline || deleting === pack.id}
                   className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600/80"
                 >
                   <Trash2 size={14} className="text-white" />

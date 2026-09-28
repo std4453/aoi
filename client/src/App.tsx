@@ -1,3 +1,4 @@
+import ConnectionGate from './components/ConnectionGate';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import AppShell from './components/layout/AppShell';
@@ -19,6 +20,7 @@ function LoadingSpinner() {
 
 export default function App() {
   return (
+    <ConnectionGate>
     <Suspense fallback={<LoadingSpinner />}>
       <Routes>
         <Route element={<AppShell />}>
@@ -32,5 +34,6 @@ export default function App() {
         </Route>
       </Routes>
     </Suspense>
+    </ConnectionGate>
   );
 }

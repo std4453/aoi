@@ -1,3 +1,4 @@
+import ConnectionStatus from '../ConnectionStatus';
 import { useRef, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Home, Upload, Settings } from 'lucide-react';
@@ -24,6 +25,7 @@ export default function AppShell() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-950">
       <Toast />
+      <ConnectionStatus />
       {/* Main content */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-4 pb-24">
         <Outlet />

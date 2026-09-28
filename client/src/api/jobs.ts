@@ -1,3 +1,4 @@
+import { resourceUrl, connectionState } from '../lib/connection';
 import { get } from './client';
 import type { JobProgress } from '../../../shared/types.js';
 
@@ -6,7 +7,8 @@ export function fetchJobProgress(jobId: string): Promise<JobProgress> {
 }
 
 export function subscribeJobProgress(jobId: string, onProgress: (progress: JobProgress) => void): () => void {
-  const eventSource = new EventSource(`/api/jobs/${jobId}/events`);
+  if (connectionState !== 'online') return () => {};
+  const eventSource = new EventSource(resourceUrl(`/api/jobs/${jobId}/events`));
   let poll: ReturnType<typeof setInterval> | null = null;
 
   eventSource.onmessage = (event) => {
