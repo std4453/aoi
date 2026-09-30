@@ -1,3 +1,4 @@
+import { serverWritable } from '../lib/connection';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -192,7 +193,7 @@ export default function TagManagerPage() {
                     autoFocus
                     className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:border-blue-500"
                   />
-                  <button
+                  <button disabled={!serverWritable}
                     onClick={handleRename}
                     className="p-1.5 text-blue-400 hover:text-blue-300 transition-colors shrink-0"
                   >
@@ -207,13 +208,13 @@ export default function TagManagerPage() {
                     <span className="text-xs text-gray-500 shrink-0">{activeTag.count}</span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button
+                    <button disabled={!serverWritable}
                       onClick={() => setRenaming(true)}
                       className="p-2 text-gray-400 hover:text-white transition-colors"
                     >
                       <Pencil size={16} />
                     </button>
-                    <button
+                    <button disabled={!serverWritable}
                       onClick={handleDelete}
                       className="p-2 text-gray-400 hover:text-red-400 transition-colors"
                     >

@@ -4,6 +4,10 @@ const STORAGE_KEY = 'aoi.servers.v1';
 export let runtime: RuntimeConfig = { serverSelectionEnabled: false };
 export let activeServer: ServerConnection | null = null;
 let token = '';
+export let serverWritable = true;
+export function setServerCapabilities(health: ServerHealth): void {
+  serverWritable = health.writable !== false;
+}
 
 export function savedServers(): ServerConnection[] {
   try {
@@ -72,6 +76,9 @@ export function handleUnauthorized(): void {
   returnToServers();
 }
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  if (!serverWritable && !['GET', 'HEAD', 'OPTIONS'].includes((init.method || 'GET').toUpperCase())) {
+    throw new Error('当前连接的是只读备服务器');
+  }
   const response = await fetch(apiUrl(path), { ...init, headers: { ...authHeaders(), ...init.headers }, cache: 'no-store' });
   if (response.status === 401) handleUnauthorized();
   return response;

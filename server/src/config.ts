@@ -13,6 +13,14 @@ const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(valu
 
 const configSchema = z.object({
   frontendOnly: flag,
+  replicationRole: z.enum(['off', 'primary', 'replica']).default('off'),
+  replicationInterval: z.coerce.number().int().min(5).default(300),
+  s3Endpoint: z.string().url().optional(),
+  s3Region: z.string().default('us-east-1'),
+  s3Bucket: z.string().optional(),
+  s3Prefix: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9/_-]*$/).default('aoi'),
+  s3AccessKey: z.string().optional(),
+  s3SecretKey: z.string().optional(),
   serverSelectionEnabled: flag,
   authKey: z.string().max(4096).default(''),
   tlsCertFile: z.string().optional(),
@@ -35,6 +43,14 @@ const configSchema = z.object({
 
 const parsed = configSchema.parse({
   frontendOnly: process.env.FRONTEND_ONLY,
+  replicationRole: process.env.AOI_REPLICATION_ROLE,
+  replicationInterval: process.env.AOI_REPLICATION_INTERVAL,
+  s3Endpoint: process.env.AOI_S3_ENDPOINT,
+  s3Region: process.env.AOI_S3_REGION,
+  s3Bucket: process.env.AOI_S3_BUCKET,
+  s3Prefix: process.env.AOI_S3_PREFIX,
+  s3AccessKey: process.env.AOI_S3_ACCESS_KEY,
+  s3SecretKey: process.env.AOI_S3_SECRET_KEY,
   serverSelectionEnabled: process.env.SERVER_SELECTION_ENABLED,
   authKey: process.env.AUTH_KEY,
   tlsCertFile: process.env.TLS_CERT_FILE,
@@ -57,6 +73,11 @@ const parsed = configSchema.parse({
 
 if (Boolean(parsed.tlsCertFile) !== Boolean(parsed.tlsKeyFile)) {
   throw new Error('TLS_CERT_FILE and TLS_KEY_FILE must be configured together');
+}
+
+if (!parsed.frontendOnly && parsed.replicationRole !== 'off' &&
+    (!parsed.s3Bucket || !parsed.s3AccessKey || !parsed.s3SecretKey)) {
+  throw new Error('Replication requires AOI_S3_BUCKET, AOI_S3_ACCESS_KEY and AOI_S3_SECRET_KEY');
 }
 
 export const config = {

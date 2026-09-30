@@ -175,6 +175,10 @@ export interface ServerHealth {
   status: 'ok';
   service: 'aoi';
   authRequired: boolean;
+  writable?: boolean;
+  role?: 'off' | 'primary' | 'replica';
+  build?: string;
+  replicationProtocol?: number;
 }
 
 export interface LoginResponse {

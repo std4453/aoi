@@ -1,3 +1,5 @@
+import { Replicator } from './replication/replicator.js';
+import { registerReplicationHooks } from './replication/http.js';
 import { scheduleVerification, getVerification, resumeHistoricalVerification } from './services/content-verification.js';
 import Fastify from 'fastify';
 import { registerAuth } from './services/auth.js';
@@ -166,7 +168,7 @@ function recoverJobs(): void {
   }
 }
 
-function installShutdownHandlers(app: FastifyInstance): void {
+function installShutdownHandlers(app: FastifyInstance, replicator?: Replicator): void {
   let shutdownPromise: Promise<void> | null = null;
 
   const shutdown = (signal: string, exitCode = 0): Promise<void> => {
@@ -175,6 +177,7 @@ function installShutdownHandlers(app: FastifyInstance): void {
     shutdownPromise = (async () => {
       app.log.info({ signal }, 'Graceful shutdown started');
       const closePromise = app.close();
+      await replicator?.stop();
       const drained = await jobQueue.shutdown(config.shutdownTimeout);
 
       if (!drained) {
@@ -192,7 +195,7 @@ function installShutdownHandlers(app: FastifyInstance): void {
 
       await closePromise;
       try {
-        const backupPath = await backupDb('shutdown');
+        const backupPath = config.replicationRole === 'replica' ? null : await backupDb('shutdown');
         app.log.info({ backupPath }, 'Database backup completed');
       } catch (error) {
         app.log.error({ error }, 'Database backup during shutdown failed');
@@ -235,7 +238,7 @@ async function main() {
     bodyLimit: config.maxApiBodySize,
   });
 
-  await app.register(cors, { origin: true, exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Tus-Resumable', 'Content-Disposition'], methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
+  await app.register(cors, { origin: true, exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Tus-Resumable', 'Content-Disposition', 'ETag', 'X-AoI-Generation'], methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
 
   app.get('/runtime-config.json', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
@@ -243,9 +246,11 @@ async function main() {
   });
   app.get('/healthz', async () => ({ status: 'ok' }));
 
+  let replicator: Replicator | undefined;
   if (!config.frontendOnly) {
     registerAuth(app);
-    await app.register(tusPlugin);
+    registerReplicationHooks(app);
+    if (config.replicationRole !== 'replica') await app.register(tusPlugin);
 
     await initDb();
     app.log.info({ database: getDbPath(), dataDir: config.dataDir }, 'Database initialized');
@@ -256,8 +261,15 @@ async function main() {
     await app.register(registerDownloadRoutes);
     await app.register(registerSystemRoutes);
 
-    recoverJobs();
-    jobQueue.start();
+    if (config.replicationRole !== 'replica') {
+      recoverJobs();
+      jobQueue.start();
+    }
+    if (config.replicationRole !== 'off') {
+      replicator = new Replicator();
+      await replicator.initialize();
+      replicator.start();
+    }
   }
 
   // Serve React static files in production
@@ -285,7 +297,7 @@ async function main() {
   });
 
   if (!config.frontendOnly) {
-    installShutdownHandlers(app);
+    installShutdownHandlers(app, replicator);
   } else {
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       process.once(signal, () => void app.close().then(() => process.exit(0)));

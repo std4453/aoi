@@ -16,7 +16,9 @@ RUN npm ci \
 COPY shared ./shared
 COPY server ./server
 COPY client ./client
+ARG BUILD_REVISION=development
 RUN npm run build
+RUN node -e 'require("fs").writeFileSync("server/dist/server/src/replication/build-revision.txt", process.argv[1])' "$BUILD_REVISION"
 
 FROM node:22-slim AS production-dependencies
 

@@ -1,3 +1,4 @@
+import { beginMutation } from '../replication/state.js';
 import { getDb } from '../db/connection.js';
 import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification.js';
 import { EventEmitter } from 'node:events';
@@ -55,7 +56,8 @@ class JobQueue extends EventEmitter {
     if (!job) return;
 
     this.currentJobId = job.id;
-    const task = this.runJob(job);
+    const endMutation = beginMutation();
+    const task = this.runJob(job).finally(endMutation);
     this.currentTask = task;
 
     void task.finally(() => {

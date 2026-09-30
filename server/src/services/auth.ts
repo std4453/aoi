@@ -1,3 +1,4 @@
+import { buildRevision, protocolVersion } from '../replication/build.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
@@ -24,7 +25,7 @@ export function registerAuth(app: FastifyInstance): void {
   });
   app.get('/api/health', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return { status: 'ok', service: 'aoi', authRequired: Boolean(config.authKey) };
+    return { status: 'ok', service: 'aoi', authRequired: Boolean(config.authKey), writable: config.replicationRole !== 'replica', role: config.replicationRole, build: buildRevision, replicationProtocol: protocolVersion };
   });
   app.post<{ Body: { key?: string } }>('/api/auth/login', {
     schema: { body: { type: 'object', properties: { key: { type: 'string', maxLength: 4096 } }, additionalProperties: false } },

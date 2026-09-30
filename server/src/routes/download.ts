@@ -1,3 +1,4 @@
+import { readContext } from '../replication/state.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
 import { getGeneratedPath } from '../services/storage.js';
@@ -51,7 +52,9 @@ export const registerDownloadRoutes: FastifyPluginAsync = async function (fastif
         `%${character.charCodeAt(0).toString(16).toUpperCase()}`
       );
 
-    const range = request.headers.range;
+    const generation = readContext.getStore()?.id;
+    const etag = `"${generation || `${fileStat.size}-${fileStat.mtimeMs}`}-${pack.id}"`;
+    const range = !request.headers['if-range'] || request.headers['if-range'] === etag ? request.headers.range : undefined;
     let start = 0;
     let end = fileStat.size - 1;
 
@@ -75,6 +78,7 @@ export const registerDownloadRoutes: FastifyPluginAsync = async function (fastif
     }
     reply.raw.writeHead(range ? 206 : 200, {
       'Content-Type': 'application/zip',
+      ETag: etag,
       'Content-Disposition': `attachment; filename="aoi-compressed.zip"; filename*=UTF-8''${encodedFileName}`,
       'Content-Length': chunkSize,
       'Accept-Ranges': 'bytes',

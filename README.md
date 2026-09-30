@@ -353,3 +353,25 @@ npm --prefix client audit
 ## License
 
 MIT
+
+### 可选 S3 主备复制
+
+默认 `AOI_REPLICATION_ROLE=off`，不会运行主备同步。设置 `primary` / `replica` 可通过
+S3-compatible 对象存储异步复制已发布内容；两端无需互通或同时在线。备机仅允许浏览和下载，
+前端连接备机时写操作置灰。这与独立前端部署、服务器选择开关相互独立。
+
+主备必须使用同一构建镜像（推荐固定 digest），各自挂载独立 `DATA_DIR`，并配置
+`AOI_S3_BUCKET`、`AOI_S3_ACCESS_KEY`、`AOI_S3_SECRET_KEY`；MinIO 等还需配置
+`AOI_S3_ENDPOINT`。`AOI_S3_PREFIX` 默认 `aoi`，同步间隔 `AOI_REPLICATION_INTERVAL`
+默认 300 秒。bucket 需预先创建，密钥只放部署环境，不放前端或仓库。
+
+```sh
+# 两个后端分别配置；其余 S3 参数指向相同 bucket/prefix
+AOI_REPLICATION_ROLE=primary  # 主后端，正常读写
+AOI_REPLICATION_ROLE=replica  # 备后端，只读；首次同步前读 API 返回 503
+```
+
+v1 是内容副本：不复制上传会话、处理中/失败的未发布图包、任务历史或未来新增的本机数据。
+网络传输按 blob 增量，数据库按表/列白名单导出；不自动清理历史版本，不支持自动切主。
+主机导出期间若发生业务写入会延期重试，服务无需停机。请监控复制滞后和存储空间。
+完整协议、边界、环境变量及升级方式见 [主备设计文档](docs/replication-design.md)。

@@ -1,3 +1,4 @@
+import { serverWritable } from '../lib/connection';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -302,7 +303,7 @@ export default function HomePage() {
                     e.stopPropagation();
                     handleDelete(pack.id, pack.name);
                   }}
-                  disabled={deleting === pack.id}
+                  disabled={!serverWritable || deleting === pack.id}
                   className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600/80"
                 >
                   <Trash2 size={14} className="text-white" />

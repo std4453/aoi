@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import type { ServerConnection } from '../../../shared/types';
-import { deleteServer, inspectServer, loadRuntime, login, LoginError, normalizeAddress, runtime, savedServers } from '../lib/connection';
+import { setServerCapabilities, deleteServer, inspectServer, loadRuntime, login, LoginError, normalizeAddress, runtime, savedServers } from '../lib/connection';
 import { showError } from './Toast';
 
 const blank = (): ServerConnection => ({
@@ -84,6 +84,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
       if (cancelled()) return;
       if (!health.authRequired) server.key = '';
       await login(server);
+      setServerCapabilities(health);
       if (!cancelled()) {
         if (!automatic || window.location.pathname.startsWith('/servers')) navigate('/', { replace: true });
         setReady(true);
