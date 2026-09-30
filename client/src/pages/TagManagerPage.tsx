@@ -1,3 +1,4 @@
+import { useConnectionState } from '../hooks/useConnectionState';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +11,7 @@ import Modal from '../components/Modal';
 type TagItem = TagWithStats;
 
 export default function TagManagerPage() {
+  const offline = useConnectionState() !== 'online';
   const navigate = useNavigate();
   const [tags, setTags] = useState<TagItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,7 +195,7 @@ export default function TagManagerPage() {
                     className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:border-blue-500"
                   />
                   <button
-                    onClick={handleRename}
+                    disabled={offline} onClick={handleRename}
                     className="p-1.5 text-blue-400 hover:text-blue-300 transition-colors shrink-0"
                   >
                     <Check size={18} />
@@ -208,13 +210,13 @@ export default function TagManagerPage() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
-                      onClick={() => setRenaming(true)}
+                      disabled={offline} onClick={() => setRenaming(true)}
                       className="p-2 text-gray-400 hover:text-white transition-colors"
                     >
                       <Pencil size={16} />
                     </button>
                     <button
-                      onClick={handleDelete}
+                      disabled={offline} onClick={handleDelete}
                       className="p-2 text-gray-400 hover:text-red-400 transition-colors"
                     >
                       <Trash2 size={16} />
