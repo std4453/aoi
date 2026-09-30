@@ -1,4 +1,4 @@
-import { activeServer, apiUrl, authHeaders } from '../lib/connection';
+import { activeServer, apiUrl, authHeaders, connectionState } from '../lib/connection';
 import { useState, useCallback, useRef } from 'react';
 import * as tus from 'tus-js-client';
 import { confirmUpload } from '../api/packs';
@@ -64,6 +64,7 @@ export function useUpload() {
     const upload = new tus.Upload(file, {
       endpoint: apiUrl('/api/upload/files'),
       headers: authHeaders(),
+      onBeforeRequest: () => { if (connectionState !== 'online') throw new Error('离线状态无法上传'); },
       chunkSize: Infinity,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       metadata: { filename: file.name, filetype: file.type || 'application/octet-stream' },

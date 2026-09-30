@@ -1,11 +1,13 @@
-import { activeServer, returnToServers } from '../lib/connection';
+import { isPwa } from '../lib/pwa';
+import { showError, showSuccess } from '../components/Toast';
+import { activeServer, clearServerCache, returnToServers } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
 import { fetchTags } from '../api/packs';
 import { fetchPresets } from '../api/presets';
 import { formatBytes } from '../lib/utils';
-import { HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
+import { Database, HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
 
 interface DiskInfo {
   disk: { free: number; size: number; used: number };
@@ -14,6 +16,24 @@ interface DiskInfo {
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const [cacheBytes, setCacheBytes] = useState(0);
+  const pwa = isPwa();
+  const cacheLimit = 200 * 1024 * 1024;
+  const readCacheBytes = async () => {
+    let total = 0;
+    if ('caches' in window) {
+      for (const name of (await caches.keys()).filter(name => name.startsWith('aoi-data-'))) {
+        const cache = await caches.open(name);
+        for (const request of await cache.keys()) {
+          total += Number((await cache.match(request))?.headers.get('X-AoI-Size') || 0);
+        }
+      }
+    }
+    setCacheBytes(total);
+  };
+  useEffect(() => {
+    if (pwa) void readCacheBytes().catch(() => showError('无法读取缓存用量'));
+  }, [pwa]);
   const [diskInfo, setDiskInfo] = useState<DiskInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [tagCount, setTagCount] = useState(0);
@@ -55,6 +75,23 @@ export default function SettingsPage() {
           </div>
           <span className="min-w-0 ml-auto truncate text-sm text-gray-500">{activeServer?.alias}</span>
         </button>
+        {pwa && <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 shrink-0">
+              <Database size={18} className="text-gray-400" />
+              <h3 className="text-sm font-medium text-white">离线缓存</h3>
+            </div>
+            <span className="text-sm text-gray-500">{formatBytes(cacheBytes)} / {formatBytes(cacheLimit)}</span>
+          </div>
+          <button className="text-blue-400 text-sm mt-3" onClick={async () => {
+            try {
+              const names = (await caches.keys()).filter(name => name.startsWith('aoi-data-'));
+              for (const name of names) await clearServerCache(name.slice('aoi-data-'.length));
+              await readCacheBytes();
+              showSuccess('缓存已清除');
+            } catch { showError('清理失败，请重试'); }
+          }}>清除缓存</button>
+        </div>}
         {/* System info */}
         <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
           <div className="flex items-center gap-2 mb-3">
