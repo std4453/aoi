@@ -179,21 +179,102 @@ PR 发布根据作者的 `author_association` 判断，不要求查询用户权�
 
 工作流使用 `GITHUB_TOKEN` 的 `packages: write` 权限，无需额外 PAT。首次发布后，在 GitHub Packages 设置中确认包可见性：若需要匿名拉取，应将包设置为 public；私有包需在部署机器登录 GHCR。工作流只发布镜像，不自动更新部署机器。发布前会检查完整服务和纯前端两种容器模式。
 
-仓库提供 `compose.yaml`：
+### 单容器部署（前端和后端一起提供）
+
+部署机器需要 Docker Engine 和 Docker Compose 插件，无需安装 Node.js 或 `7z`。将仓库的 `compose.yaml` 复制到一个独立部署目录，在该目录创建 `.env`：
+
+```dotenv
+# 测试本 PR 使用 pr-3；main 发布后可用 edge，正式部署建议固定已发布版本
+AOI_VERSION=pr-3
+AOI_PORT=8555
+AUTH_KEY=replace-with-your-own-long-key
+FRONTEND_ONLY=false
+SERVER_SELECTION_ENABLED=false
+```
+
+将示例 key 替换为自己的 key；留空表示不鉴权。然后执行：
 
 ```bash
-# 确保目录由容器内 node 用户（uid 1000）可写
 mkdir -p data
-# 首次发布正式版前使用 edge；正式部署建议 AOI_VERSION 指定已发布的版本号
-AOI_VERSION=edge docker compose pull
-AOI_VERSION=edge docker compose up -d
-
+# 仅对这个专用数据目录设置容器 node 用户的权限
+sudo chown 1000:1000 data
+chmod 600 .env
+docker compose pull
+docker compose up -d
+docker compose ps
 docker compose logs -f
 ```
 
-可在部署目录的 `.env` 中配置 `AOI_VERSION`、`AOI_PORT` 和下表中的环境变量；不要提交 `.env`。升级时先拉取目标版本，再执行 `docker compose up -d`。数据始终挂载到 `/app/data`，保持单实例，不要让多个容器共用同一数据目录。纯前端模式不会使用数据卷。
+访问 `http://服务器地址:8555`，输入 key 后使用。`AOI_PORT` 是宿主机端口，容器内部仍监听 `3000`。数据挂载到 `/app/data`，不要让多个服务实例共用同一数据目录。
 
-本地构建仍可使用 `docker build --platform linux/amd64 -t aoi .`。
+`.env` 用于 Compose 变量替换，不会自动把所有变量传入容器。仓库模板已传入两个功能开关及 `AUTH_KEY`；若要调整上传限制等其他配置，需要在 `compose.yaml` 的 `environment` 中增加对应项，例如 `MAX_UPLOAD_SIZE: "10737418240"`（10 GiB）。数据目录通过 `volumes` 的宿主机路径调整，容器内保持 `/app/data`。
+
+### 前后端分开部署
+
+两个实例使用同一个镜像和启动入口。下面是可直接保存为 `compose.yaml` 的示例（替换上面的单容器模板），在同一台机器分别通过 `8555`、`8556` 访问：
+
+```yaml
+services:
+  frontend:
+    image: ghcr.io/std4453/aoi:${AOI_VERSION:-pr-3}
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "8555:3000"
+    environment:
+      FRONTEND_ONLY: "true"
+      SERVER_SELECTION_ENABLED: "true"
+    volumes:
+      - ./frontend-data:/app/data
+    stop_grace_period: 45s
+
+  backend:
+    image: ghcr.io/std4453/aoi:${AOI_VERSION:-pr-3}
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "8556:3000"
+    environment:
+      DATA_DIR: /app/data
+      FRONTEND_ONLY: "false"
+      SERVER_SELECTION_ENABLED: "false"
+      AUTH_KEY: ${AUTH_KEY:-}
+    volumes:
+      - ./backend-data:/app/data
+    stop_grace_period: 45s
+```
+
+`.env` 保留 `AOI_VERSION` 和 `AUTH_KEY` 即可；这个示例的端口直接写在 YAML 中，不使用 `AOI_PORT`。启动：
+
+```bash
+mkdir -p frontend-data backend-data
+sudo chown 1000:1000 frontend-data backend-data
+chmod 600 .env
+docker compose pull
+docker compose up -d
+```
+
+打开 `http://服务器地址:8555`，填写别名、后端地址 `http://服务器地址:8556` 和 `.env` 中的 key。纯前端无需额外认证，也不会初始化数据库或写入业务数据；后端默认仍可提供自己的前端页面。
+
+也可以把两个 service 分别放到两台机器的 Compose 文件中，各自启动。浏览器直接连接后端，因此填写的地址必须能从浏览器所在设备访问，不能填写 Docker 内部的 `backend:3000`；手机访问时也不能用指向手机自身的 `localhost`。前端和后端端口都需要可达。公网 HTTPS 前端应连接受信任的 HTTPS 后端，证书配置见下文。
+
+Docker 的 `ports` 发布通常通过转发规则处理，不能仅依赖 UFW 的入站规则限制访问。如果需要由 UFW 直接管理端口，Linux 上可以改用 `network_mode: host`，删除 `ports`，并分别设置 `PORT: "8555"`、`PORT: "8556"`，再放行对应 TCP 端口。
+
+### 更新、停止和本地构建
+
+修改 `.env` 中的镜像版本或配置后运行：
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+需要停止服务时执行 `docker compose down`，这会移除容器并保留上述绑定挂载的数据目录。
+
+更新前备份数据；同一数据目录始终只运行一个后端。修改 `.env` 后用 `up -d` 重建受影响的容器，单独 `restart` 不会加载新的容器环境变量。不要提交 `.env` 或运行数据。
+
+本地构建可使用 `docker build --platform linux/amd64 -t aoi .`，随后将 Compose 中的 `image` 改成 `aoi` 并运行 `docker compose up -d`。
 
 ## 独立前端、服务器选择与鉴权
 
@@ -233,7 +314,7 @@ FRONTEND_ONLY=true SERVER_SELECTION_ENABLED=true docker compose up -d
 
 `ecosystem.config.cjs` 继续保留，支持上述运行时开关、key 和证书配置。修改环境变量后使用 `pm2 restart ecosystem.config.cjs --update-env`；保持 fork/单实例，不能使用 cluster 或 reload。
 
-迁移步骤：备份持久化数据，停止 PM2 实例，将原 `DATA_DIR` 挂载为容器的 `/app/data`，检查 uid 1000 的读写权限，再启动 Docker。不要同时启动两种部署方式访问同一数据目录。证书续期或配置调整后通过 restart 生效。
+迁移步骤：备份持久化数据，停止 PM2 实例，将原 `DATA_DIR` 挂载为容器的 `/app/data`，检查 uid 1000 的读写权限，再启动 Docker。不要同时启动两种部署方式访问同一数据目录。证书续期后重启服务；Docker 环境变量调整后执行 `docker compose up -d`，PM2 则使用 `--update-env` 重启。
 
 ## 项目结构
 
