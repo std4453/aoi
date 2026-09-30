@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePacks } from '../hooks/usePacks';
@@ -254,7 +255,7 @@ export default function HomePage() {
                 {/* Cover image */}
                 <div className="aspect-[4/3] bg-gray-800">
                   <img
-                    src={`/api/packs/${pack.id}/cover`}
+                    src={resourceUrl(`/api/packs/${pack.id}/cover`)} crossOrigin="anonymous"
                     alt={pack.name}
                     className="w-full h-full object-cover"
                     loading="lazy"

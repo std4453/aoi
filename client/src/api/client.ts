@@ -1,58 +1,18 @@
-const BASE = '/api';
+import { apiFetch } from '../lib/connection';
 
-export async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { signal });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as any).error || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-export async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+async function request<T>(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await apiFetch(`/api${path}`, {
+    method, signal,
+    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
   if (!res.ok) {
-    const resBody = await res.json().catch(() => ({}));
-    throw new Error((resBody as any).error || `HTTP ${res.status}`);
+    const result = await res.json().catch(() => ({}));
+    throw new Error(result.error || `HTTP ${res.status}`);
   }
   return res.json();
 }
-
-export async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as any).error || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-export async function put<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const resBody = await res.json().catch(() => ({}));
-    throw new Error((resBody as any).error || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-export async function patch<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const resBody = await res.json().catch(() => ({}));
-    throw new Error((resBody as any).error || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
+export const get = <T>(path: string, signal?: AbortSignal): Promise<T> => request(path, 'GET', undefined, signal);
+export const post = <T>(path: string, body?: unknown): Promise<T> => request(path, 'POST', body);
+export const put = <T>(path: string, body?: unknown): Promise<T> => request(path, 'PUT', body);
+export const patch = <T>(path: string, body?: unknown): Promise<T> => request(path, 'PATCH', body);
+export const del = <T>(path: string): Promise<T> => request(path, 'DELETE');

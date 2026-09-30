@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchTags, fetchTagPacks, renameTag, removeTag, type TagWithStats } from '../api/packs';
@@ -249,7 +250,7 @@ export default function TagManagerPage() {
                       className="w-full flex items-center gap-3 bg-gray-800 rounded-lg p-2 text-left hover:bg-gray-750 transition-colors"
                     >
                       <img
-                        src={`/api/packs/${pack.id}/cover`}
+                        src={resourceUrl(`/api/packs/${pack.id}/cover`)} crossOrigin="anonymous"
                         alt={pack.name}
                         className="w-12 h-9 rounded object-cover shrink-0"
                         loading="lazy"

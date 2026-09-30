@@ -1,0 +1,22 @@
+services:
+  aoi:
+    image: ghcr.io/std4453/aoi:${AOI_VERSION:-edge}
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - '${AOI_PORT:-8555}:3000'
+    environment:
+      DATA_DIR: /app/data
+      PORT: '3000'
+      HOST: 0.0.0.0
+      FRONTEND_ONLY: ${FRONTEND_ONLY:-false}
+      SERVER_SELECTION_ENABLED: ${SERVER_SELECTION_ENABLED:-false}
+      AUTH_KEY: ${AUTH_KEY:-}
+      # Uncomment together with the certificate volume for built-in HTTPS.
+      # TLS_CERT_FILE: /app/certs/fullchain.pem
+      # TLS_KEY_FILE: /app/certs/privkey.pem
+    volumes:
+      - ./data:/app/data
+      # Mount the directory, so externally renewed files are visible after restart.
+      # - ./certs:/app/certs:ro
+    stop_grace_period: 45s

@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchPack, fetchThumbnails, fetchFileTree, startProcessing, removePack, renamePack, updatePackTags, retryVerification } from '../api/packs';
@@ -207,7 +208,7 @@ export default function PackDetailPage() {
 
   const handleDownload = () => {
     if (!id) return;
-    window.open(`/api/packs/${id}/download`, '_blank', 'noopener,noreferrer');
+    window.open(resourceUrl(`/api/packs/${id}/download`), '_blank', 'noopener,noreferrer');
   };
 
   const handleRename = () => {
@@ -411,7 +412,7 @@ export default function PackDetailPage() {
                   className="absolute inset-0"
                 />
                 <img
-                  src={thumb.thumbUrl}
+                  src={resourceUrl(thumb.thumbUrl)} crossOrigin="anonymous"
                   alt={thumb.name}
                   className="w-full h-full object-cover relative z-10"
                   loading="lazy"

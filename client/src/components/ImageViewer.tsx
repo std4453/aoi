@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { X, ChevronLeft, ChevronRight, FolderTree } from 'lucide-react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
@@ -263,7 +264,7 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
               >
                 <div className="absolute inset-0 bg-gray-700" />
                 <img
-                  src={img.thumbUrl}
+                  src={resourceUrl(img.thumbUrl)} crossOrigin="anonymous"
                   alt={img.name}
                   className="w-full h-full object-cover relative z-10"
                   loading="lazy"

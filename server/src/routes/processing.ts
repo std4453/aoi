@@ -143,6 +143,9 @@ export const registerProcessingRoutes: FastifyPluginAsync = async function (fast
 
     reply.hijack();
     activeEventStreams.add(res);
+    for (const [name, value] of Object.entries(reply.getHeaders())) {
+      if (value !== undefined) res.setHeader(name, value);
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',

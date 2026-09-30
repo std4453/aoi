@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { X, ChevronRight, Folder, Image, Video } from 'lucide-react';
 import type { FileTreeNode, FileSelection } from '../../../shared/types.js';
@@ -154,7 +155,7 @@ function TreeNode({
         {node.type === 'image' && node.thumbUrl && (
           <div className="w-7 h-7 rounded bg-gray-800 shrink-0 overflow-hidden">
             <img
-              src={node.thumbUrl}
+              src={resourceUrl(node.thumbUrl)} crossOrigin="anonymous"
               alt={node.name}
               className="w-full h-full object-cover"
               loading="lazy"
@@ -201,7 +202,7 @@ export default function FileTreePanel({ visible, mode, tree, initialSelection, e
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
-  const prevFocusPathRef = useRef<string | undefined>();
+  const prevFocusPathRef = useRef<string | undefined>(undefined);
   const prevVisibleRef = useRef(false);
   const pendingScrollRef = useRef(false);
 

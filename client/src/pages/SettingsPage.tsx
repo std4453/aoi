@@ -1,10 +1,11 @@
+import { activeServer, returnToServers } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
 import { fetchTags } from '../api/packs';
 import { fetchPresets } from '../api/presets';
 import { formatBytes } from '../lib/utils';
-import { HardDrive, Tag, SlidersHorizontal } from 'lucide-react';
+import { HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
 
 interface DiskInfo {
   disk: { free: number; size: number; used: number };
@@ -43,6 +44,17 @@ export default function SettingsPage() {
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">设置</h2>
 
       <div className="space-y-3">
+        <button
+          type="button"
+          onClick={returnToServers}
+          className="w-full bg-gray-900 rounded-xl p-4 border border-gray-800 flex items-center gap-3 hover:border-gray-700 transition-colors text-left"
+        >
+          <div className="flex items-center gap-2 shrink-0">
+            <Server size={18} className="text-blue-400" />
+            <span className="text-sm font-medium text-white">服务器</span>
+          </div>
+          <span className="min-w-0 ml-auto truncate text-sm text-gray-500">{activeServer?.alias}</span>
+        </button>
         {/* System info */}
         <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
           <div className="flex items-center gap-2 mb-3">

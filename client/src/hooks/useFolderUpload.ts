@@ -1,3 +1,4 @@
+import { apiUrl, authHeaders } from '../lib/connection';
 import type { DuplicatePack } from '../../../shared/types.js';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import * as tus from 'tus-js-client';
@@ -70,7 +71,8 @@ export function useFolderUpload() {
     activeCountRef.current++;
 
     const upload = new tus.Upload(file, {
-      endpoint: '/api/upload/files',
+      endpoint: apiUrl('/api/upload/files'),
+      headers: authHeaders(),
       chunkSize: Infinity,
       retryDelays: [0, 1000, 3000, 5000],
       metadata: {

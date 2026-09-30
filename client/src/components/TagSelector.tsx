@@ -1,3 +1,4 @@
+import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useMemo } from 'react';
 import { fetchTags, createTag, type TagWithStats } from '../api/packs';
 import { X, Plus } from 'lucide-react';
@@ -122,7 +123,7 @@ export default function TagSelector({ visible = true, selectedIds, onConfirm, on
                       {tag.covers.slice(0, 8).map((cover, i) => (
                         <img
                           key={i}
-                          src={cover}
+                          src={resourceUrl(cover)} crossOrigin="anonymous"
                           alt=""
                           className="h-full aspect-square object-cover"
                           loading="lazy"

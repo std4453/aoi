@@ -1,5 +1,6 @@
 import { scheduleVerification, getVerification, resumeHistoricalVerification } from './services/content-verification.js';
 import Fastify from 'fastify';
+import { registerAuth } from './services/auth.js';
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs';
 import cors from '@fastify/cors';
@@ -218,8 +219,14 @@ function installShutdownHandlers(app: FastifyInstance): void {
 
 async function main() {
   const app = Fastify({
+    ...(config.tlsCertFile && config.tlsKeyFile ? { https: {
+      cert: fs.readFileSync(config.tlsCertFile),
+      key: fs.readFileSync(config.tlsKeyFile),
+    } } : {}),
+    disableRequestLogging: true,
     logger: {
       level: 'info',
+      serializers: { req: request => ({ method: request.method, url: request.url?.split('?')[0] }) },
       transport: {
         target: 'pino-pretty',
         options: { colorize: true },
@@ -228,20 +235,30 @@ async function main() {
     bodyLimit: config.maxApiBodySize,
   });
 
-  await app.register(cors, { origin: true });
-  await app.register(tusPlugin);
+  await app.register(cors, { origin: true, exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Tus-Resumable', 'Content-Disposition'], methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
 
-  await initDb();
-  app.log.info({ database: getDbPath(), dataDir: config.dataDir }, 'Database initialized');
+  app.get('/runtime-config.json', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return { serverSelectionEnabled: config.serverSelectionEnabled };
+  });
+  app.get('/healthz', async () => ({ status: 'ok' }));
 
-  await app.register(registerPackRoutes);
-  await app.register(registerPresetRoutes);
-  await app.register(registerProcessingRoutes);
-  await app.register(registerDownloadRoutes);
-  await app.register(registerSystemRoutes);
+  if (!config.frontendOnly) {
+    registerAuth(app);
+    await app.register(tusPlugin);
 
-  recoverJobs();
-  jobQueue.start();
+    await initDb();
+    app.log.info({ database: getDbPath(), dataDir: config.dataDir }, 'Database initialized');
+
+    await app.register(registerPackRoutes);
+    await app.register(registerPresetRoutes);
+    await app.register(registerProcessingRoutes);
+    await app.register(registerDownloadRoutes);
+    await app.register(registerSystemRoutes);
+
+    recoverJobs();
+    jobQueue.start();
+  }
 
   // Serve React static files in production
   // In dev: __dirname = server/src/ → ../public = server/public/
@@ -253,20 +270,29 @@ async function main() {
     root: publicDir,
     prefix: '/',
     wildcard: false,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('sw.js') || filePath.endsWith('index.html')) res.header('Cache-Control', 'no-cache');
+    },
   });
 
   // SPA fallback
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith('/api')) {
+    if (request.url.startsWith('/api') || path.extname(request.url.split('?')[0])) {
       reply.code(404).send({ error: 'Not Found' });
       return;
     }
     reply.sendFile('index.html');
   });
 
-  installShutdownHandlers(app);
+  if (!config.frontendOnly) {
+    installShutdownHandlers(app);
+  } else {
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      process.once(signal, () => void app.close().then(() => process.exit(0)));
+    }
+  }
   await app.listen({ port: config.port, host: config.host });
-  app.log.info(`Server listening on http://${config.host}:${config.port}`);
+  app.log.info(`Server listening on ${config.tlsCertFile ? 'https' : 'http'}://${config.host}:${config.port}`);
   process.send?.('ready');
 }
 

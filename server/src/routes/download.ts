@@ -70,6 +70,9 @@ export const registerDownloadRoutes: FastifyPluginAsync = async function (fastif
     const chunkSize = end - start + 1;
 
     reply.hijack();
+    for (const [name, value] of Object.entries(reply.getHeaders())) {
+      if (value !== undefined) reply.raw.setHeader(name, value);
+    }
     reply.raw.writeHead(range ? 206 : 200, {
       'Content-Type': 'application/zip',
       'Content-Disposition': `attachment; filename="aoi-compressed.zip"; filename*=UTF-8''${encodedFileName}`,

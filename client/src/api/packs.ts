@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/connection';
 import type { ArchiveUploadRequest, DuplicateArchiveResponse, FolderUploadStatus } from '../../../shared/types.js';
 import { get, post, patch, del, put } from './client';
 import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams, PackFile } from '../../../shared/types.js';
@@ -29,7 +30,7 @@ export function renamePack(id: string, name: string): Promise<Pack> {
 }
 
 export async function confirmUpload(data: ArchiveUploadRequest): Promise<Pack | DuplicateArchiveResponse> {
-  const response = await fetch('/api/packs/upload-complete', {
+  const response = await apiFetch('/api/packs/upload-complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

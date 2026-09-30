@@ -8,7 +8,7 @@
     "dev:server": "cd server && npx tsx watch src/index.ts",
     "dev:client": "cd client && npx vite",
     "build": "npm run build:client && npm run build:server",
-    "build:client": "cd client && npx vite build --outDir ../server/public",
+    "build:client": "cd client && npx tsc --noEmit && npx vite build --outDir ../server/public",
     "build:server": "cd server && npx tsc && cp src/db/schema.sql dist/server/src/db/schema.sql",
     "start": "cd server && node dist/server/src/index.js",
     "test": "npm --prefix server test",

@@ -1,3 +1,4 @@
+import { activeServer, apiUrl, authHeaders } from '../lib/connection';
 import { useState, useCallback, useRef } from 'react';
 import * as tus from 'tus-js-client';
 import { confirmUpload } from '../api/packs';
@@ -20,8 +21,8 @@ export function useUpload() {
   const pendingKey = useRef('');
 
   const removePending = useCallback(() => {
-    const pending = JSON.parse(localStorage.getItem('pendingUploads') || '[]');
-    localStorage.setItem('pendingUploads', JSON.stringify(pending.filter((item: { key?: string }) => item.key !== pendingKey.current)));
+    const pending = JSON.parse(localStorage.getItem(`pendingUploads:${activeServer?.id || 'local'}`) || '[]');
+    localStorage.setItem(`pendingUploads:${activeServer?.id || 'local'}`, JSON.stringify(pending.filter((item: { key?: string }) => item.key !== pendingKey.current)));
   }, []);
 
   const confirm = useCallback(async (allowDuplicate = false) => {
@@ -61,7 +62,8 @@ export function useUpload() {
     setState({ progress: 0, status: 'uploading', error: null });
     const name = packName || file.name.replace(/\.[^/.]+$/, '');
     const upload = new tus.Upload(file, {
-      endpoint: '/api/upload/files',
+      endpoint: apiUrl('/api/upload/files'),
+      headers: authHeaders(),
       chunkSize: Infinity,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       metadata: { filename: file.name, filetype: file.type || 'application/octet-stream' },
@@ -82,9 +84,9 @@ export function useUpload() {
     });
     uploadRef.current = upload;
     pendingKey.current = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const pending = JSON.parse(localStorage.getItem('pendingUploads') || '[]');
+    const pending = JSON.parse(localStorage.getItem(`pendingUploads:${activeServer?.id || 'local'}`) || '[]');
     pending.push({ key: pendingKey.current, filename: file.name, packName: name, size: file.size, createdAt: Date.now() });
-    localStorage.setItem('pendingUploads', JSON.stringify(pending));
+    localStorage.setItem(`pendingUploads:${activeServer?.id || 'local'}`, JSON.stringify(pending));
     upload.start();
   }, [confirm]);
 
