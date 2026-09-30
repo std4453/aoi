@@ -146,7 +146,7 @@ export async function createSnapshot(database: Database.Database, dataDir: strin
   }
   const changes = () => (database.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
   const initialChanges = changes();
-  await fs.promises.mkdir(directory, { recursive: true });
+  await fs.promises.mkdir(directory, { recursive: true, mode: 0o700 });
   const blobs = path.join(directory, 'blobs');
   await fs.promises.mkdir(blobs, { recursive: true });
   const sourcePath = path.join(directory, 'source.sqlite');

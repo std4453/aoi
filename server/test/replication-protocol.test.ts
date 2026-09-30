@@ -35,6 +35,7 @@ test('content scope exports only allowed rows and columns; blobs are stable acro
   const f = fixture();
   try {
     const first = await createSnapshot(f.db, f.data, path.join(f.root, 'one'));
+    assert.equal(fs.statSync(path.join(f.root, 'one')).mode & 0o777, 0o700);
     assert.equal(first.files.length, 1);
     assert.equal(first.files[0].path, 'generated/pack1/compressed.zip');
     const catalog = new Database(path.join(f.root, 'one', 'catalog.sqlite'), { readonly: true });
