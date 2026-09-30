@@ -169,7 +169,6 @@ export interface ServerConnection {
   alias: string;
   address: string;
   key: string;
-  verified?: boolean;
 }
 
 export interface ServerHealth {

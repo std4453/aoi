@@ -1,4 +1,3 @@
-import { useConnectionState } from '../hooks/useConnectionState';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useUpload } from '../hooks/useUpload';
@@ -16,7 +15,6 @@ type UploadMode = 'archive' | 'folder' | null;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 export default function UploadPage() {
-  const offline = useConnectionState() !== 'online';
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialFolderId = useRef(searchParams.get('folder'));
@@ -318,7 +316,7 @@ export default function UploadPage() {
   const isAnyDone = isArchiveDone || isFolderDone;
 
   return (
-    <fieldset disabled={offline} className="max-w-lg mx-auto disabled:opacity-60">
+    <div className="max-w-lg mx-auto">
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">上传图包</h2>
 
       <DuplicateUploadModal
@@ -778,6 +776,6 @@ export default function UploadPage() {
           onClosed={() => setShowTagSelector(null)}
         />
       )}
-    </fieldset>
+    </div>
   );
 }

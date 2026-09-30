@@ -1,9 +1,8 @@
-import { isPwa } from '../lib/pwa';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import type { ServerConnection } from '../../../shared/types';
-import { clearServerCache, deleteServer, enterOffline, inspectServer, loadRuntime, login, LoginError, normalizeAddress, runtime, savedServers, saveServer } from '../lib/connection';
+import { deleteServer, inspectServer, loadRuntime, login, LoginError, normalizeAddress, runtime, savedServers } from '../lib/connection';
 import { showError } from './Toast';
 
 const blank = (): ServerConnection => ({
@@ -21,7 +20,6 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [records, setRecords] = useState<ServerConnection[]>([]);
   const [draft, setDraft] = useState<ServerConnection>(blank);
-  const [offlineServer, setOfflineServer] = useState<ServerConnection | null>(null);
   const [configured, setConfigured] = useState(false);
   const listPage = runtime.serverSelectionEnabled && location.pathname === '/servers';
   const editing = runtime.serverSelectionEnabled && location.pathname.startsWith('/servers/edit/');
@@ -30,10 +28,8 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (location.pathname === '/servers/new') {
       setDraft(blank());
-      setOfflineServer(null);
     }
     if (location.pathname.startsWith('/servers/edit/')) {
-      setOfflineServer(null);
       const id = location.pathname.slice('/servers/edit/'.length);
       const server = savedServers().find(item => item.id === id);
       if (server) setDraft(server);
@@ -80,15 +76,10 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
   async function connect(value: ServerConnection, automatic = false, cancelled = () => false) {
     setBusy(true);
     setConnectingId(value.id);
-    setOfflineServer(null);
     let server = value;
     const old = savedServers().find(item => item.id === value.id);
     try {
       server = { ...value, address: normalizeAddress(value.address), alias: value.alias.trim() || value.address };
-      if (old && old.address !== server.address) {
-        await clearServerCache(server.id);
-        server.verified = false;
-      }
       const health = await inspectServer(server.address);
       if (cancelled()) return;
       if (!health.authRequired) server.key = '';
@@ -100,10 +91,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
     } catch (error) {
       if (cancelled()) return;
       if (error instanceof LoginError) {
-        server.verified = false;
         if (old && old.address === server.address) {
-          saveServer({ ...old, verified: false });
-          setRecords(savedServers().filter(item => item.id !== 'same-origin'));
           if (runtime.serverSelectionEnabled) navigate(`/servers/edit/${server.id}`, { replace: automatic });
         }
       } else if (automatic && runtime.serverSelectionEnabled) {
@@ -111,7 +99,6 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
       }
       setDraft(server);
       const unreachable = error instanceof TypeError || (error instanceof DOMException && error.name === 'TimeoutError');
-      if (isPwa() && server.verified && unreachable) setOfflineServer(server);
       showError(unreachable
         ? '无法连接服务器，请检查地址、网络或证书。'
         : error instanceof Error ? error.message : '连接失败');
@@ -129,7 +116,6 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
       await deleteServer(server.id);
       const remaining = savedServers().filter(item => item.id !== 'same-origin');
       setRecords(remaining);
-      setOfflineServer(null);
       if (!remaining.length) navigate('/servers/new', { replace: true });
     } catch (error) {
       showError(error instanceof Error ? error.message : '删除失败，请重试');
@@ -189,7 +175,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
                   <input className="mt-2 w-full rounded-xl bg-gray-900 border border-gray-700 p-3" value={draft.alias} placeholder="例如：家里的服务器" onChange={event => setDraft({ ...draft, alias: event.target.value })} />
                 </label>
                 <label className="block text-sm">服务器地址
-                  <input required type="url" autoCapitalize="none" autoCorrect="off" className="mt-2 w-full rounded-xl bg-gray-900 border border-gray-700 p-3" value={draft.address} placeholder="https://aoi.example.com:8555" onChange={event => setDraft({ ...draft, address: event.target.value, verified: false })} />
+                  <input required type="url" autoCapitalize="none" autoCorrect="off" className="mt-2 w-full rounded-xl bg-gray-900 border border-gray-700 p-3" value={draft.address} placeholder="https://aoi.example.com:8555" onChange={event => setDraft({ ...draft, address: event.target.value })} />
                 </label>
               </>}
               <label className="block text-sm">Key
@@ -202,11 +188,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
             </fieldset>
           </form>
         )}
-        {offlineServer && !busy && <button type="button" className="mt-5 w-full border border-gray-700 rounded-xl py-3 px-4 text-sm text-gray-300" onClick={() => {
-          enterOffline(offlineServer);
-          if (window.location.pathname.startsWith('/servers')) navigate('/', { replace: true });
-          setReady(true);
-        }}>查看「{offlineServer.alias}」的离线缓存</button>}
+
       </section>
     </main>
   );

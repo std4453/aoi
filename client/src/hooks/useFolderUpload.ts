@@ -1,4 +1,4 @@
-import { apiUrl, authHeaders, connectionState } from '../lib/connection';
+import { apiUrl, authHeaders } from '../lib/connection';
 import type { DuplicatePack } from '../../../shared/types.js';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import * as tus from 'tus-js-client';
@@ -73,7 +73,6 @@ export function useFolderUpload() {
     const upload = new tus.Upload(file, {
       endpoint: apiUrl('/api/upload/files'),
       headers: authHeaders(),
-      onBeforeRequest: () => { if (connectionState !== 'online') throw new Error('离线状态无法上传'); },
       chunkSize: Infinity,
       retryDelays: [0, 1000, 3000, 5000],
       metadata: {

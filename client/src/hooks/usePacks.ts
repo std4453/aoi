@@ -1,4 +1,3 @@
-import { refreshRecoveredHome } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fetchPacks, removePack } from '../api/packs';
@@ -89,7 +88,6 @@ export function usePacks() {
   }, [setSearchParams]);
 
   const hardReset = useCallback(() => {
-    if (refreshRecoveredHome()) return;
     clearPacksCache();
     setPacks([]);
     setTotal(0);
@@ -121,7 +119,6 @@ export function usePacks() {
     loading,
     error,
     refresh: useCallback(() => {
-      if (refreshRecoveredHome()) return;
       const params: PackListParams = { page, pageSize: DEFAULT_PAGE_SIZE };
       if (search) params.search = search;
       refresh(params);

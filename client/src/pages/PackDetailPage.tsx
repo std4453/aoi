@@ -1,4 +1,3 @@
-import { useConnectionState } from '../hooks/useConnectionState';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -25,7 +24,6 @@ const DEFAULT_OPTIONS: CompressionOptions = {
 };
 
 export default function PackDetailPage() {
-  const offline = useConnectionState() !== 'online';
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [pack, setPack] = useState<Pack | null>(null);
@@ -319,19 +317,19 @@ export default function PackDetailPage() {
           <h2 className="text-xl font-bold text-white leading-tight mb-2">{pack.name}</h2>
           <div className="flex items-center gap-1 shrink-0">
             <button
-              disabled={offline} onClick={() => setShowTagSelector('open')}
+              onClick={() => setShowTagSelector('open')}
               className="p-2 text-gray-400 hover:text-white transition-colors"
             >
               <Tag size={16} />
             </button>
             <button
-              disabled={offline} onClick={handleRename}
+              onClick={handleRename}
               className="p-2 text-gray-400 hover:text-white transition-colors"
             >
               <Pencil size={16} />
             </button>
             <button
-              disabled={offline} onClick={() => setDeleteConfirm('open')}
+              onClick={() => setDeleteConfirm('open')}
               className="p-2 text-gray-400 hover:text-red-400 transition-colors"
             >
               <Trash2 size={16} />
@@ -376,7 +374,7 @@ export default function PackDetailPage() {
         <div className="mb-4 text-sm text-red-400">
           <p>校验失败：{pack.verification.error}</p>
           {verificationActionError && <p role="alert">{verificationActionError}</p>}
-          <button className="underline mt-2 disabled:opacity-50" disabled={offline || retryingVerification} onClick={async () => {
+          <button className="underline mt-2 disabled:opacity-50" disabled={retryingVerification} onClick={async () => {
             setRetryingVerification(true);
             setVerificationActionError(null);
             try { await retryVerification(pack.id); await refreshPackStatus(); }
@@ -588,7 +586,7 @@ export default function PackDetailPage() {
         <div className="flex gap-3 mt-6">
           {canGenerate && !isProcessing && (
             <button
-              disabled={offline} onClick={handleGenerate}
+              onClick={handleGenerate}
               className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-500 transition-colors"
             >
               <Play size={18} />
@@ -606,7 +604,7 @@ export default function PackDetailPage() {
           )}
           {isGenerated && !isProcessing && (
             <button
-              disabled={offline} onClick={handleDownload}
+              onClick={handleDownload}
               className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-500 transition-colors"
             >
               <Download size={18} />
@@ -641,7 +639,7 @@ export default function PackDetailPage() {
               </button>
               <button
                 onClick={confirmRename}
-                disabled={offline || !renameValue.trim()}
+                disabled={!renameValue.trim()}
                 className="flex-1 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50"
               >
                 确认
@@ -672,7 +670,7 @@ export default function PackDetailPage() {
               </button>
               <button
                 onClick={handleDelete}
-                disabled={offline || deleting}
+                disabled={deleting}
                 className="flex-1 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-500 transition-colors disabled:opacity-50"
               >
                 {deleting ? '删除中...' : '删除'}
