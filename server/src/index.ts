@@ -96,6 +96,10 @@ function recoverJobs(): void {
   }
 
   for (const pack of listPacks()) {
+    if (config.isReplica) {
+      if (pack.status === 'thumbnailing') ensureRecoveryJob(pack.id, 'thumbnail');
+      continue;
+    }
     const verification = getVerification(pack.id);
     if (verification?.historical && verification.status === 'pending' && ['extracted', 'generated', 'failed'].includes(pack.status)) {
       resumeHistoricalVerification(pack.id);
@@ -239,7 +243,7 @@ async function main() {
     bodyLimit: config.maxApiBodySize,
   });
 
-  await app.register(cors, { origin: true, exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Tus-Resumable', 'Content-Disposition', 'ETag', 'X-AoI-Generation'], methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
+  await app.register(cors, { origin: true, exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Tus-Resumable', 'Content-Disposition', 'ETag'], methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
 
   app.get('/runtime-config.json', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
@@ -263,15 +267,13 @@ async function main() {
     await app.register(registerDownloadRoutes);
     await app.register(registerSystemRoutes);
 
-    if (!config.isReplica) {
-      recoverJobs();
-      jobQueue.start();
-    }
     if (config.isReplica || config.snapshotEnabled) {
       replicator = new Replicator();
       await replicator.initialize();
-      replicator.start();
     }
+    recoverJobs();
+    jobQueue.start();
+    replicator?.start();
   }
 
   // Serve React static files in production

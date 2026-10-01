@@ -1,8 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { config } from '../config.js';
-import { getActiveVersion, activePacks } from '../replication/state.js';
-import { readContext } from '../replication/state.js';
 import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
 import { getDb } from './connection.js';
@@ -88,8 +83,7 @@ export function getTag(id: string): Tag | undefined {
 }
 
 export function listTags(): Tag[] {
-  if (config.isReplica) return [...new Map(activePacks().flatMap(pack => pack.tags.map(tag => [tag.id, tag] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
-  return queryAll('SELECT * FROM tags ORDER BY name').map(row => ({
+  return queryAll('SELECT id, MIN(name) AS name FROM (SELECT id,name FROM tags UNION SELECT id,name FROM pack_display_tags) GROUP BY id ORDER BY name').map(row => ({
     id: row.id,
     name: row.name,
   }));
@@ -128,9 +122,8 @@ export function setPackTags(packId: string, tagIds: string[]): void {
 }
 
 export function getPackTags(packId: string): Tag[] {
-  if (config.isReplica) return getPack(packId)?.tags ?? [];
   const rows = queryAll(
-    'SELECT t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.pack_id = ? ORDER BY t.name',
+    'SELECT id, name FROM pack_display_tags WHERE pack_id = ? ORDER BY name',
     [packId]
   );
   return rows.map(row => ({ id: row.id, name: row.name }));
@@ -157,9 +150,6 @@ export function createPack(data: {
 }
 
 export function getPack(id: string): StoredPack | undefined {
-  const pinned = readContext.getStore();
-  if (pinned?.pack.id === id) return pinned.pack;
-  if (config.isReplica) return getActiveVersion(id)?.pack;
   const row = queryOne('SELECT * FROM packs WHERE id = ?', [id]);
   if (!row) return undefined;
   const tags = getPackTags(id);
@@ -167,11 +157,10 @@ export function getPack(id: string): StoredPack | undefined {
 }
 
 export function listPacks(): StoredPack[] {
-  if (config.isReplica) return activePacks().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const rows = queryAll('SELECT * FROM packs ORDER BY created_at DESC');
   // Batch load all tags for efficiency
   const allTags = rows.length > 0
-    ? queryAll('SELECT pt.pack_id, t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id')
+    ? queryAll('SELECT pack_id, id, name FROM pack_display_tags')
     : [];
   const tagMap = new Map<string, Tag[]>();
   for (const row of allTags) {
@@ -186,10 +175,6 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
   const pageSize = Math.max(1, Math.min(100, params.pageSize ?? 20));
   const search = params.search?.trim() ?? '';
   const keywords = search.split(/\s+/).filter(Boolean);
-  if (config.isReplica) {
-    const matches = listPacks().filter(pack => !keywords.length || keywords.some(word => [pack.name, ...pack.tags.map(tag => tag.name)].some(value => value.toLowerCase().includes(word.toLowerCase()))));
-    return { items: matches.slice((page - 1) * pageSize, page * pageSize), total: matches.length, page, pageSize };
-  }
 
   let whereClause = '';
   const whereParams: string[] = [];
@@ -206,7 +191,7 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
 
   // Count query
   const countSql = keywords.length > 0
-    ? `SELECT COUNT(DISTINCT p.id) as cnt FROM packs p LEFT JOIN pack_tags pt ON pt.pack_id = p.id LEFT JOIN tags t ON pt.tag_id = t.id ${whereClause}`
+    ? `SELECT COUNT(DISTINCT p.id) as cnt FROM packs p LEFT JOIN pack_display_tags t ON t.pack_id = p.id ${whereClause}`
     : 'SELECT COUNT(*) as cnt FROM packs p';
   const countRow = queryOne(countSql, whereParams.length > 0 ? whereParams : undefined);
   const total = (countRow?.cnt as number) ?? 0;
@@ -214,7 +199,7 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
   // Data query
   const offset = (page - 1) * pageSize;
   const dataSql = keywords.length > 0
-    ? `SELECT p.* FROM packs p LEFT JOIN pack_tags pt ON pt.pack_id = p.id LEFT JOIN tags t ON pt.tag_id = t.id ${whereClause} GROUP BY p.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
+    ? `SELECT p.* FROM packs p LEFT JOIN pack_display_tags t ON t.pack_id = p.id ${whereClause} GROUP BY p.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
     : 'SELECT * FROM packs p ORDER BY p.created_at DESC LIMIT ? OFFSET ?';
   const dataParams = keywords.length > 0
     ? [...whereParams, pageSize, offset]
@@ -225,7 +210,7 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
   const packIds = rows.map(r => r.id as string);
   const tagPlaceholders = packIds.map(() => '?').join(',');
   const allTags = packIds.length > 0
-    ? queryAll(`SELECT pt.pack_id, t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.pack_id IN (${tagPlaceholders})`, packIds)
+    ? queryAll(`SELECT pack_id, id, name FROM pack_display_tags WHERE pack_id IN (${tagPlaceholders})`, packIds)
     : [];
   const tagMap = new Map<string, Tag[]>();
   for (const row of allTags) {
@@ -279,10 +264,6 @@ export function updatePackBlurhashes(id: string, blurhashes: Record<string, Blur
 }
 
 export function getPackBlurhashes(id: string): Record<string, BlurhashEntry> {
-  const version = readContext.getStore() ?? getActiveVersion(id);
-  if (version) {
-    try { return JSON.parse(fs.readFileSync(path.join(version.root, 'cache-v1', 'blurhashes.json'), 'utf8')); } catch { return {}; }
-  }
   const row = queryOne('SELECT blurhashes FROM packs WHERE id = ?', [id]);
   if (!row || !row.blurhashes) return {};
   try {

@@ -3,12 +3,13 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { config } from '../config.js';
-import { getDb } from '../db/connection.js';
+import { beginReplicaInstall, finishReplicaInstall, installedManifest, installedManifests, pendingInstallations, markReplicaRemoving, readState, removeReplicaPack, replicaReady, retryReplicaProcessing, saveReplicaIndex, writeState } from '../db/snapshot-repository.js';
+import { getPath, removePackFiles } from '../services/storage.js';
+import { getPack, hasAnyActiveJob } from '../db/repositories.js';
+import { jobQueue } from '../services/job-queue.js';
 import { resolveWithin } from '../services/safe-path.js';
-import { activateVersion, getActiveVersion, clearVersions, removeVersion, referencedRoots } from './state.js';
-import { canonicalJson, contractValues, durableFile, hashFile, manifestPack, safeContentFile, syncTree, validateIndex, validateManifest, type FileInfo, type Manifest } from './protocol.js';
-import { readState, writeState, SnapshotPublisher } from './snapshots.js';
-import { warmCache, drainCaches } from './cache.js';
+import { contractValues, durableFile, hashFile, safeContentFile, syncTree, validateIndex, validateManifest, type FileInfo, type Manifest } from './protocol.js';
+import { SnapshotPublisher } from './snapshots.js';
 
 export const publisher = new SnapshotPublisher();
 export const replicationStatus = {
@@ -26,23 +27,20 @@ export class Replicator {
   private token = '';
   async initialize(): Promise<void> {
     if (!config.isReplica) { publisher.initialize(); return; }
-    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-    await durableFile(config.dataDir);
-    const rows = getDb().prepare('SELECT manifest,root FROM replica_packs').all() as { manifest: string; root: string }[];
-    for (const row of rows) {
-      const manifest = validateManifest(JSON.parse(row.manifest));
-      const expected = this.versionRoot(manifest);
-      if (row.root !== expected) throw new Error('Invalid local version root');
-      for (const file of manifest.files) {
-        const filename = await safeContentFile(path.join(expected, 'extracted', manifest.metadata.id), file.path);
-        const actual = await hashFile(filename);
-        if (actual.hash !== file.hash || actual.size !== file.size) throw new Error('Local snapshot is corrupt');
-      }
-      this.activate(manifest);
+    for (const directory of [root, config.dirs.extracted, config.dirs.thumbnails]) {
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
-    replicationStatus.ready = rows.length > 0 || readState('replicaEmpty') === 'true';
-    await this.collect(true);
+    await durableFile(config.dataDir);
+    const recovering = await this.recoverInstalls();
+    for (const manifest of installedManifests()) {
+      if (recovering.has(manifest.metadata.id)) continue;
+      if (getPack(manifest.metadata.id)?.status === 'extracted' && !fs.existsSync(getPath('extracted', manifest.metadata.id))) throw new Error('Missing replica content; use a new DATA_DIR for earlier development replicas');
+      retryReplicaProcessing(manifest.metadata.id);
+    }
+    await this.cleanStaging();
+    replicationStatus.ready = replicaReady();
   }
+
   start(): void {
     void this.run();
     this.timer = setInterval(() => void this.run(), config.isReplica ? config.replicationInterval * 1000 : 1000);
@@ -54,7 +52,13 @@ export class Replicator {
     replicationStatus.running = true;
     this.pending = (async () => {
       try {
-        if (config.isReplica) await this.pull(); else await publisher.run(this.abort.signal);
+        if (config.isReplica) {
+          await this.recoverInstalls();
+          for (const manifest of installedManifests()) retryReplicaProcessing(manifest.metadata.id);
+          jobQueue.start();
+          await this.cleanStaging();
+          await this.pull();
+        } else await publisher.run(this.abort.signal);
         replicationStatus.lastSuccess = new Date().toISOString(); replicationStatus.lastError = null;
       } catch (error) {
         replicationStatus.lastError = error instanceof Error ? error.message : 'Snapshot synchronization failed';
@@ -66,7 +70,7 @@ export class Replicator {
   }
   async stop(): Promise<void> {
     this.stopped = true; this.abort.abort(); clearInterval(this.timer);
-    await this.pending; await drainCaches(); clearVersions();
+    await this.pending;
   }
   private async request(endpoint: string, headers: Record<string, string> = {}, retry = true): Promise<Response> {
     const response = await fetch(`${config.replicaSourceUrl}${endpoint}`, {
@@ -102,16 +106,13 @@ export class Replicator {
     try { return JSON.parse(Buffer.concat(chunks).toString()); }
     catch { throw new Error('Invalid upstream JSON'); }
   }
-  private versionRoot(manifest: Manifest): string {
-    return path.join(root, 'versions', manifest.metadata.id, manifest.contentHash);
-  }
-  private activate(manifest: Manifest): void {
-    const version = { id: manifest.revision, root: this.versionRoot(manifest), pack: manifestPack(manifest), readers: 0 };
-    activateVersion(version); warmCache(version);
+  private staging(manifest: Manifest): string {
+    return resolveWithin(path.join(root, 'staging'), `${manifest.metadata.id}/${manifest.revision}`);
   }
   private async receive(manifest: Manifest, file: FileInfo): Promise<void> {
-    const blobs = path.join(root, 'blobs'); await fs.promises.mkdir(blobs, { recursive: true });
-    const destination = path.join(blobs, file.hash);
+    const downloads = path.join(this.staging(manifest), 'downloads');
+    await fs.promises.mkdir(downloads, { recursive: true });
+    const destination = path.join(downloads, file.hash);
     if (fs.existsSync(destination)) {
       const existing = await hashFile(destination, this.abort.signal);
       if (existing.hash !== file.hash || existing.size !== file.size) throw new Error('Local immutable file is corrupt');
@@ -142,56 +143,95 @@ export class Replicator {
     if (actual.hash !== file.hash || actual.size !== file.size) {
       await fs.promises.rm(temp, { force: true }); throw new Error('Downloaded file checksum mismatch');
     }
-    await durableFile(temp); await fs.promises.rename(temp, destination); await durableFile(blobs);
+    await durableFile(temp); await fs.promises.rename(temp, destination); await durableFile(downloads);
     replicationStatus.downloadedFiles++;
   }
+  private async verifyContent(directory: string, manifest: Manifest): Promise<void> {
+    for (const file of manifest.files) {
+      const filename = await safeContentFile(directory, file.path);
+      const actual = await hashFile(filename, this.abort.signal);
+      if (actual.hash !== file.hash || actual.size !== file.size) throw new Error('Incomplete local candidate');
+      await durableFile(filename);
+    }
+    await syncTree(directory);
+  }
   private async install(manifest: Manifest): Promise<void> {
-    const directory = this.versionRoot(manifest);
-    if (!fs.existsSync(path.join(directory, 'manifest.json'))) {
-      await fs.promises.rm(directory, { recursive: true, force: true });
-      await fs.promises.mkdir(directory, { recursive: true });
-      // Group identical hashes so concurrent workers never append to the same part file.
-      const files = [...new Map(manifest.files.map(file => [file.hash, file])).values()];
-      let cursor = 0;
-      const worker = async () => { while (cursor < files.length) await this.receive(manifest, files[cursor++]); };
-      const results = await Promise.allSettled([worker(), worker()]);
-      const failure = results.find(result => result.status === 'rejected');
-      if (failure?.status === 'rejected') throw failure.reason;
-      for (const file of manifest.files) {
-        const target = resolveWithin(path.join(directory, 'extracted', manifest.metadata.id), file.path);
-        await fs.promises.mkdir(path.dirname(target), { recursive: true });
-        await fs.promises.link(path.join(root, 'blobs', file.hash), target);
+    const id = manifest.metadata.id;
+    if (hasAnyActiveJob(id)) throw new Error('Local pack processing is still active');
+    const stage = this.staging(manifest);
+    const content = path.join(stage, 'content');
+    await fs.promises.rm(content, { recursive: true, force: true });
+    await fs.promises.mkdir(content, { recursive: true });
+    const previous = installedManifest(id);
+    const reusable = new Map(previous?.files.map(file => [file.hash, file]) ?? []);
+    const files = [...new Map(manifest.files.map(file => [file.hash, file])).values()];
+    const locations = new Map<string, string>();
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < files.length) {
+        const file = files[cursor++];
+        const old = reusable.get(file.hash);
+        if (old) {
+          try {
+            const filename = await safeContentFile(getPath('extracted', id), old.path);
+            const actual = await hashFile(filename, this.abort.signal);
+            if (actual.hash === file.hash && actual.size === file.size) {
+              locations.set(file.hash, filename); continue;
+            }
+          } catch { this.abort.signal.throwIfAborted(); }
+          // A missing/corrupt reusable file must be downloaded again.
+
+        }
+        await this.receive(manifest, file);
+        locations.set(file.hash, path.join(stage, 'downloads', file.hash));
       }
-      await fs.promises.writeFile(path.join(directory, 'manifest.json'), canonicalJson(manifest), { mode: 0o600 });
-      await durableFile(path.join(directory, 'manifest.json')); await syncTree(directory);
-      await durableFile(path.dirname(directory)); await durableFile(path.join(root, 'versions'));
-      await durableFile(root);
+    };
+    const results = await Promise.allSettled([worker(), worker()]);
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    for (const file of manifest.files) {
+      const target = resolveWithin(content, file.path);
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await fs.promises.link(locations.get(file.hash)!, target);
     }
-    // A previous failed installation may have written its marker before fsync
-    // failed. Never commit such a directory solely because the marker exists.
-    if (getActiveVersion(manifest.metadata.id)?.root !== directory) {
-      for (const file of manifest.files) {
-        const filename = await safeContentFile(path.join(directory, 'extracted', manifest.metadata.id), file.path);
-        const actual = await hashFile(filename, this.abort.signal);
-        if (actual.hash !== file.hash || actual.size !== file.size) throw new Error('Incomplete local candidate');
-        await durableFile(filename);
+    await this.verifyContent(content, manifest);
+    await syncTree(stage); await durableFile(path.dirname(stage));
+    await durableFile(path.join(root, 'staging')); await durableFile(root);
+    // The journal and processing status commit together before the first rename.
+    beginReplicaInstall(manifest);
+    await this.finishInstall(manifest);
+  }
+  private async finishInstall(manifest: Manifest): Promise<void> {
+    const id = manifest.metadata.id;
+    const stage = this.staging(manifest);
+    const content = path.join(stage, 'content');
+    const previous = path.join(stage, 'previous');
+    const current = getPath('extracted', id);
+    if (fs.existsSync(content)) {
+      await this.verifyContent(content, manifest);
+      if (fs.existsSync(current)) {
+        if (fs.existsSync(previous)) throw new Error('Ambiguous interrupted installation');
+        await fs.promises.rename(current, previous);
+        await durableFile(config.dirs.extracted); await durableFile(stage);
       }
-      await durableFile(path.join(directory, 'manifest.json')); await syncTree(directory);
-      await durableFile(path.dirname(directory)); await durableFile(path.join(root, 'versions')); await durableFile(root);
+      await fs.promises.rename(content, current);
     }
-    const pack = manifestPack(manifest); const db = getDb();
-    db.transaction(() => {
-      db.prepare(`INSERT INTO packs(id,name,original_filename,original_size,original_format,source_type,status,image_count,video_count,total_images_size,total_videos_size,created_at,updated_at)
-        VALUES (@id,@name,@originalFilename,@originalSize,@originalFormat,@sourceType,'extracted',@imageCount,@videoCount,@totalImagesSize,@totalVideosSize,@createdAt,@updatedAt)
-        ON CONFLICT(id) DO UPDATE SET name=excluded.name,original_filename=excluded.original_filename,original_size=excluded.original_size,
-        original_format=excluded.original_format,source_type=excluded.source_type,status='extracted',image_count=excluded.image_count,video_count=excluded.video_count,
-        total_images_size=excluded.total_images_size,total_videos_size=excluded.total_videos_size,updated_at=excluded.updated_at,compressed_size=0,error_message=NULL`).run(pack);
-      // Per-pack manifests own their tag names: partially synchronized packs may
-      // legitimately refer to different revisions of the same upstream tag.
-      db.prepare(`INSERT INTO replica_packs(pack_id,manifest,root) VALUES (?,?,?)
-        ON CONFLICT(pack_id) DO UPDATE SET manifest=excluded.manifest,root=excluded.root`).run(pack.id, canonicalJson(manifest), directory);
-    })();
-    this.activate(manifest); replicationStatus.ready = true;
+    // If the second rename completed before a crash, the current directory is
+    // already the candidate. Never infer completeness from existence alone.
+    await this.verifyContent(current, manifest);
+    await durableFile(config.dirs.extracted); await durableFile(stage);
+    await fs.promises.rm(getPath('thumbnails', id), { recursive: true, force: true });
+    await durableFile(config.dirs.thumbnails);
+    finishReplicaInstall(manifest);
+    await fs.promises.rm(stage, { recursive: true, force: true });
+  }
+  private async recoverInstalls(): Promise<Set<string>> {
+    const pending = new Set<string>();
+    for (const manifest of pendingInstallations()) {
+      try { await this.finishInstall(manifest); }
+      catch { pending.add(manifest.metadata.id); }
+    }
+    return pending;
   }
   private async pull(): Promise<void> {
     const health = await this.json(await this.request('/api/health')) as { service?: string; writable?: boolean; replicationProtocol?: string; capabilities?: { snapshots?: boolean } };
@@ -199,18 +239,14 @@ export class Replicator {
     const previous = readState('replicaIndex'); const etag = readState('replicaEtag');
     const response = await this.request('/api/packs/snapshot', previous && etag ? { 'If-None-Match': etag } : {});
     const index = response.status === 304 && previous ? validateIndex(JSON.parse(previous)) : validateIndex(await this.json(response));
-    const bound = readState('replicaDataset');
-    if (bound && bound !== index.datasetId) throw new Error('Upstream dataset changed; use a new replica DATA_DIR');
-    const db = getDb();
-    db.transaction(() => {
-      writeState('replicaDataset', index.datasetId); writeState('replicaIndex', canonicalJson(index));
-      if (response.status !== 304) writeState('replicaEtag', response.headers.get('etag') ?? '');
-    })();
+    saveReplicaIndex(index, response.status === 304 ? undefined : response.headers.get('etag') ?? '');
+    const recovering = new Set(pendingInstallations().map(manifest => manifest.metadata.id));
     replicationStatus.failedPacks = 0; replicationStatus.downloadedFiles = 0; replicationStatus.pendingPacks = 0;
     for (const entry of index.packs) {
       if (entry.state === 'pending') { replicationStatus.pendingPacks++; continue; }
-      const stored = db.prepare('SELECT manifest FROM replica_packs WHERE pack_id=?').pluck().get(entry.id) as string | undefined;
-      if (stored && validateManifest(JSON.parse(stored)).revision === entry.revision) continue;
+      if (recovering.has(entry.id)) { replicationStatus.failedPacks++; replicationStatus.pendingPacks++; continue; }
+      const stored = installedManifest(entry.id);
+      if (stored?.revision === entry.revision && getPack(entry.id)?.status !== 'extracting') continue;
       try {
         const manifest = validateManifest(await this.json(await this.request(`/api/packs/${encodeURIComponent(entry.id)}/snapshot?revision=${entry.revision}`)));
         if (manifest.metadata.id !== entry.id || manifest.revision !== entry.revision) throw new Error('Snapshot identity mismatch');
@@ -221,40 +257,41 @@ export class Replicator {
       }
     }
     const ids = new Set(index.packs.map(pack => pack.id));
-    const removed: string[] = [];
-    db.transaction(() => {
-      for (const row of db.prepare('SELECT pack_id FROM replica_packs').all() as { pack_id: string }[]) {
-        if (!ids.has(row.pack_id)) { db.prepare('DELETE FROM packs WHERE id=?').run(row.pack_id); removed.push(row.pack_id); }
-      }
-      writeState('replicaEmpty', String(index.packs.length === 0));
-    })();
-    for (const id of removed) removeVersion(id);
-    replicationStatus.ready = index.packs.length === 0 || Boolean(db.prepare('SELECT 1 FROM replica_packs LIMIT 1').get());
-    await this.collect();
+    const localIds = new Set([...installedManifests(), ...pendingInstallations()].map(manifest => manifest.metadata.id));
+    for (const id of localIds) if (!ids.has(id)) {
+      try {
+        // Leave a processing row until file cleanup succeeds, so a crash or disk
+        // error cannot expose a pack with missing files as available.
+        markReplicaRemoving(id);
+        removePackFiles(id);
+        await durableFile(config.dirs.extracted); await durableFile(config.dirs.thumbnails);
+        await fs.promises.rm(resolveWithin(path.join(root, 'staging'), id), { recursive: true, force: true });
+        removeReplicaPack(id);
+      } catch { replicationStatus.failedPacks++; replicationStatus.pendingPacks++; }
+    }
+    writeState('replicaEmpty', String(index.packs.length === 0 && !installedManifests().length && !pendingInstallations().length));
+    replicationStatus.ready = replicationStatus.ready || replicaReady();
+    jobQueue.start();
+    await this.cleanStaging();
     if (replicationStatus.failedPacks) throw new Error(`${replicationStatus.failedPacks} pack snapshots could not be synchronized`);
   }
-  private async collect(startup = false): Promise<void> {
-    const protectedRoots = referencedRoots();
-    const keepHashes = new Set<string>();
+  private async cleanStaging(): Promise<void> {
+    const protectedStages = new Set(pendingInstallations().map(manifest => this.staging(manifest)));
     const desired = readState('replicaIndex');
-    const desiredIds = new Set(desired ? validateIndex(JSON.parse(desired)).packs.map(pack => pack.id) : []);
-    const versions = path.join(root, 'versions');
-    if (fs.existsSync(versions)) for (const id of await fs.promises.readdir(versions)) {
-      const packDir = resolveWithin(versions, id);
-      for (const hash of await fs.promises.readdir(packDir)) {
-        const dir = resolveWithin(packDir, hash);
-        if (protectedRoots.has(dir)) {
-          const manifest = validateManifest(JSON.parse(await fs.promises.readFile(path.join(dir, 'manifest.json'), 'utf8')));
-          for (const file of manifest.files) keepHashes.add(file.hash);
-        } else await fs.promises.rm(dir, { recursive: true, force: true });
+    if (desired) for (const entry of validateIndex(JSON.parse(desired)).packs) {
+      if (entry.state === 'ready' && installedManifest(entry.id)?.revision !== entry.revision) {
+        protectedStages.add(resolveWithin(path.join(root, 'staging'), `${entry.id}/${entry.revision}`));
       }
     }
-    // Retain partial files across retries. Completed unreferenced blobs are also
-    // retained while any pack is pending so a failed install can reuse them.
-    if (startup || replicationStatus.pendingPacks || desiredIds.size && !replicationStatus.ready) return;
-    const blobs = path.join(root, 'blobs');
-    if (fs.existsSync(blobs)) for (const name of await fs.promises.readdir(blobs)) {
-      if (!keepHashes.has(name)) await fs.promises.rm(resolveWithin(blobs, name), { force: true });
+    const staging = path.join(root, 'staging');
+    if (!fs.existsSync(staging)) return;
+    for (const id of await fs.promises.readdir(staging)) {
+      const packStage = resolveWithin(staging, id);
+      for (const revision of await fs.promises.readdir(packStage)) {
+        const directory = resolveWithin(packStage, revision);
+        if (!protectedStages.has(directory)) await fs.promises.rm(directory, { recursive: true, force: true });
+      }
+      if (!(await fs.promises.readdir(packStage)).length) await fs.promises.rmdir(packStage);
     }
   }
 }

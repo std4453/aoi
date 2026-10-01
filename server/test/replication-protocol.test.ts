@@ -4,7 +4,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalJson, digest, makeManifest, manifestPack, validateIndex, validateManifest, contractValues, safeContentFile } from '../src/replication/protocol.js';
-import { beginMutation, snapshotFence, assertSnapshotFence, activateVersion, clearVersions, pinVersion, referencedRoots, readContext } from '../src/replication/state.js';
+import { beginMutation, snapshotFence, assertSnapshotFence } from '../src/replication/state.js';
 import type { StoredPack } from '../src/db/repositories.js';
 
 const pack: StoredPack = { id: 'pack1', name: 'Pack', originalFilename: 'archive.zip', originalSize: 9,
@@ -39,18 +39,11 @@ test('reject mismatched patch, paths, duplicate identities and tampered manifest
   assert.throws(() => validateIndex({ ...contractValues(), datasetId: 'ee272abc-7746-416a-9bda-90a03734653c', packs: [{ id: 'pack1', state: 'pending' }, { id: 'pack1', state: 'pending' }] }), /Duplicate/);
 });
 
-test('mutation fences reject overlapping writers; old per-pack roots remain pinned across activation', () => {
+test('mutation fences reject overlapping writers', () => {
   const fence = snapshotFence(); const end = beginMutation();
   assert.throws(() => snapshotFence(), /deferred/); end(); end();
   assert.throws(() => assertSnapshotFence(fence), /changed/);
-  const old = { id: 'old', root: '/old', pack, readers: 0 };
-  activateVersion(old); const release = pinVersion(old);
-  readContext.run(old, () => {
-    activateVersion({ ...old, id: 'new', root: '/new', readers: 0 });
-    assert.equal(readContext.getStore()?.root, '/old');
-    assert.deepEqual([...referencedRoots()].sort(), ['/new', '/old']);
-  });
-  release(); release(); assert.deepEqual([...referencedRoots()], ['/new']); clearVersions();
+
 });
 
 

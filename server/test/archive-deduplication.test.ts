@@ -100,7 +100,8 @@ test('archive duplicate confirmation, historical hashes, cancellation and concur
     let thumbnails: Array<{ thumbUrl: string }> = [];
     for (let attempt = 0; attempt < 100; attempt++) {
       thumbnails = await (await fetch(`${server.url}/api/packs/${firstPack.id}/thumbnails`)).json() as typeof thumbnails;
-      if (thumbnails.length) break;
+      const pack = await (await fetch(`${server.url}/api/packs/${firstPack.id}`)).json() as { status: string };
+      if (thumbnails.length && pack.status === 'extracted') break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     assert.equal(thumbnails.length, 1);

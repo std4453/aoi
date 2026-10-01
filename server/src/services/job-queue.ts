@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { beginMutation } from '../replication/state.js';
 import { getDb } from '../db/connection.js';
 import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification.js';
@@ -108,7 +109,7 @@ class JobQueue extends EventEmitter {
         }
       }
 
-      if (job.type === 'thumbnail' || job.type === 'compress') resumeHistoricalVerification(job.packId);
+      if (!config.isReplica && (job.type === 'thumbnail' || job.type === 'compress')) resumeHistoricalVerification(job.packId);
       updateJobStatus(job.id, 'completed', 100);
       const completed = this.getProgress(job.id);
       if (completed) {
@@ -135,7 +136,7 @@ class JobQueue extends EventEmitter {
         } else if (pack && pack.status !== 'failed') {
           updatePackStatus(job.packId, 'failed', message);
         }
-        if (job.type === 'thumbnail' || job.type === 'compress') resumeHistoricalVerification(job.packId);
+        if (!config.isReplica && (job.type === 'thumbnail' || job.type === 'compress')) resumeHistoricalVerification(job.packId);
       } catch (dbErr) {
         console.error('Failed to update pack status after job failure:', dbErr);
       }
@@ -188,7 +189,7 @@ class JobQueue extends EventEmitter {
         error: null,
         ...progress,
       });
-    });
+    }, { concurrency: config.isReplica ? 2 : undefined });
 
     if (Object.keys(blurhashes).length > 0) {
       updatePackBlurhashes(job.packId, blurhashes);

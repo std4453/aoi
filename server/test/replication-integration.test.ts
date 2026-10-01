@@ -79,6 +79,11 @@ test('direct snapshots: defaults, auth, scoped incremental content, pending, del
       assert.equal((await fetch(replica.url + route, { method, body: 'invalid' })).status, 403);
     }
     const replicaDb = new Database(path.join(dir, 'replica/db/packdb.sqlite'));
+    assert.ok(replicaDb.prepare("SELECT 1 FROM jobs WHERE type='thumbnail' AND status='completed'").get());
+    assert.ok(fs.existsSync(path.join(dir, 'replica/extracted/pack1/thumbnails/nested/a.jpg')));
+    assert.ok(fs.existsSync(path.join(dir, 'replica/thumbnails/pack1/_cover.jpg')));
+    assert.equal(fs.existsSync(path.join(dir, 'replica/replica/versions')), false);
+    assert.equal(fs.existsSync(path.join(dir, 'replica/replica/blobs')), false);
     assert.equal(replicaDb.prepare("SELECT 1 FROM sqlite_master WHERE name='viewing_history'").get(), undefined);
     assert.equal(replicaDb.prepare('SELECT count(*) FROM presets').pluck().get(), 0);
     replicaDb.exec("CREATE TABLE viewing_history(value TEXT); INSERT INTO viewing_history VALUES ('local-history')");

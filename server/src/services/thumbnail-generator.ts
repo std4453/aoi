@@ -126,7 +126,8 @@ export async function generateCover(inputPath: string, outputPath: string): Prom
 export const thumbnailGenerator = {
   async generateAll(
     packId: string,
-    onProgress?: (progress: { completed: number; total: number; percentage: number }) => void
+    onProgress?: (progress: { completed: number; total: number; percentage: number }) => void,
+    options: { concurrency?: number } = {},
   ): Promise<Record<string, BlurhashResult>> {
     const imagesDir = getExtractedImagesDir(packId);
     const thumbDir = getThumbnailsDir(packId);
@@ -138,7 +139,7 @@ export const thumbnailGenerator = {
 
     if (files.length === 0) return {};
 
-    const limit = pLimit(Math.max(1, Math.min(8, os.cpus().length)));
+    const limit = pLimit(options.concurrency ?? Math.max(1, Math.min(8, os.cpus().length)));
     let completed = 0;
     const total = files.length;
     const blurhashes: Record<string, BlurhashResult> = {};

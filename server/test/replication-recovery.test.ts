@@ -24,7 +24,8 @@ test('conditional polls retry failed installs, resume after restart, reject inco
     status: 'extracted', imageCount: 0, videoCount: 1, totalImagesSize: 0, totalVideosSize: 0, errorMessage: null, archivePassword: null, compressedSize: 0,
     tags: [], createdAt: '2026-10-01', updatedAt: '2026-10-01' };
   let bytes = Buffer.alloc(256 * 1024, 42);
-  const make = () => makeManifest(pack, [{ path: 'videos/test.mp4', hash: createHash('sha256').update(bytes).digest('hex'), size: bytes.length }]);
+  let relative = 'videos/test.mp4';
+  const make = () => makeManifest(pack, [{ path: relative, hash: createHash('sha256').update(bytes).digest('hex'), size: bytes.length }]);
   let manifest = make();
   let dataset = randomUUID(); let protocol = '1.0.1'; let writable = true;
   let good = false; let interrupt = false; let ranges = 0; let conditional = 0; let logins = 0; let token = 'token1';
@@ -79,8 +80,9 @@ test('conditional polls retry failed installs, resume after restart, reject inco
     db.exec("CREATE TRIGGER reject_replica_update BEFORE UPDATE ON packs BEGIN SELECT RAISE(ABORT,'simulated commit failure'); END");
     pack.name = 'New version'; bytes = Buffer.alloc(bytes.length, 81); manifest = make();
     interrupt = true;
-    await eventually(async () => fs.existsSync(path.join(dir, 'replica/blobs', manifest.files[0].hash + '.part')) && fs.statSync(path.join(dir, 'replica/blobs', manifest.files[0].hash + '.part')).size > 0, 'partial file was not persisted');
+    await eventually(async () => fs.existsSync(path.join(dir, 'replica/staging/pack1', manifest.revision, 'downloads', manifest.files[0].hash + '.part')) && fs.statSync(path.join(dir, 'replica/staging/pack1', manifest.revision, 'downloads', manifest.files[0].hash + '.part')).size > 0, 'partial file was not persisted');
     await eventually(async () => (await status(replica!)).failedPacks > 0, 'interruption was not detected');
+    assert.equal((await fetch(replica.url + '/api/packs/pack1/videos/test.mp4')).status, 200, 'downloads retain old access');
     await stopTestServer(replica); replica = await startTestServer(dir, true, env);
     await eventually(async () => ranges > 0, 'download did not resume after restart');
     await eventually(async () => (await status(replica!)).failedPacks > 0, 'commit failure not detected');
@@ -88,6 +90,10 @@ test('conditional polls retry failed installs, resume after restart, reject inco
     assert.equal(old.name, 'Original');
     db.exec('DROP TRIGGER reject_replica_update'); db.close();
     await eventually(async () => (await (await fetch(replica!.url + '/api/packs/pack1')).json() as { name: string }).name === 'New version', 'failed commit did not recover');
+    relative = 'videos/renamed/test.mp4'; manifest = make();
+    await eventually(async () => (await fetch(replica!.url + '/api/packs/pack1/videos/renamed/test.mp4')).status === 200, 'rename did not reuse local content');
+    assert.equal((await (await fetch(replica.url + '/api/system/replication')).json() as { downloadedFiles: number }).downloadedFiles, 0);
+    assert.equal((await fetch(replica.url + '/api/packs/pack1/videos/test.mp4')).status, 404);
     token = 'token2';
     await eventually(async () => logins >= 3, 'expired token not refreshed');
     const originalDataset = dataset; dataset = randomUUID();

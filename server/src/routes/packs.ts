@@ -1,4 +1,3 @@
-import { cachedImage, requestVersion } from '../replication/cache.js';
 import { scheduleVerification, getVerification, getLiveMatches, continueFolderVerification } from '../services/content-verification.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
@@ -684,11 +683,6 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string; '*': string };
   }>('/api/packs/:id/thumbnails/*', async (request, reply) => {
-    const version = requestVersion(request.params.id);
-    if (version) {
-      const file = await cachedImage(version, request.params['*']);
-      return file ? reply.sendFile(path.basename(file), path.dirname(file)) : reply.code(404).send({ error: 'Thumbnail not found' });
-    }
     if (!getPack(request.params.id)) {
       reply.code(404).send({ error: 'Pack not found' });
       return;
@@ -703,12 +697,6 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       return;
     }
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-      const imagesDir = getExtractedImagesDir(request.params.id);
-      const original = fs.existsSync(imagesDir) ? [...buildJpegOutputPaths(walkDirForExt(imagesDir, null))].find(([, thumb]) => thumb === relPath)?.[0] : undefined;
-      if (original) {
-        const source = resolveWithin(imagesDir, original);
-        return reply.sendFile(path.basename(source), path.dirname(source));
-      }
       return reply.code(404).send({ error: 'Thumbnail not found' });
     }
     return reply.sendFile(path.basename(resolved), path.dirname(resolved));
@@ -718,11 +706,6 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string };
   }>('/api/packs/:id/cover', async (request, reply) => {
-    const version = requestVersion(request.params.id);
-    if (version) {
-      const file = await cachedImage(version, '', true);
-      return file ? reply.sendFile(path.basename(file), path.dirname(file)) : reply.code(404).send({ error: 'Cover not found' });
-    }
     if (!getPack(request.params.id)) {
       reply.code(404).send({ error: 'Pack not found' });
       return;

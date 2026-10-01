@@ -429,7 +429,7 @@ export default function PackDetailPage() {
         </div>
       )}
 
-      <button onClick={() => setShowFileTree('view')} className="mb-4 flex items-center gap-2 text-sm text-blue-400">
+      <button disabled={!isAvailable} onClick={() => setShowFileTree('view')} className="mb-4 flex items-center gap-2 text-sm text-blue-400">
         <FolderTree size={16} />浏览文件
       </button>
 

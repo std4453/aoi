@@ -1,13 +1,22 @@
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
-import { beginMutation, getActiveVersion, pinVersion, readContext } from './state.js';
+import { beginMutation } from './state.js';
+import { getPack } from '../db/repositories.js';
+import { replicaReady } from '../db/snapshot-repository.js';
 import { replicationStatus } from './replicator.js';
 
 export function registerReplicationHooks(app: FastifyInstance): void {
   if (!config.isReplica && config.snapshotEnabled) {
     app.addHook('onRoute', options => {
       const methods = Array.isArray(options.method) ? options.method : [options.method];
-      if (methods.every(method => ['GET', 'HEAD', 'OPTIONS'].includes(method)) || options.url === '/api/auth/login') return;
+      if (methods.every(method => ['GET', 'HEAD', 'OPTIONS'].includes(method)) ||
+          ![
+            '/api/tags', '/api/tags/:id', '/api/packs/:id', '/api/packs/:id/tags',
+            '/api/packs/upload-complete', '/api/packs/folder-create',
+            '/api/packs/:id/folder-file-complete', '/api/packs/:id/folder-continue',
+            '/api/packs/:id/retry-verification', '/api/packs/:id/cancel-upload',
+            '/api/packs/:id/process',
+          ].includes(options.url)) return;
       const original = options.handler;
       options.handler = async function (request, reply) {
         const end = beginMutation();
@@ -22,16 +31,20 @@ export function registerReplicationHooks(app: FastifyInstance): void {
     if (!['GET', 'HEAD'].includes(request.method)) {
       void reply.code(403).send({ code: 'READ_ONLY_REPLICA', error: '备服务器只读，无法执行写操作' }); return;
     }
-    if (!replicationStatus.ready) {
+    replicationStatus.ready ||= replicaReady();
+    if (!replicationStatus.ready && pathname === '/api/packs') {
       void reply.code(503).send({ code: 'REPLICA_NOT_READY', error: '备服务器正在等待首次同步' }); return;
     }
     const id = (request.params as { id?: string })?.id;
-    const version = id ? getActiveVersion(id) : undefined;
-    if (!version) return done();
-    const release = pinVersion(version);
-    reply.raw.once('finish', release); reply.raw.once('close', release);
-    reply.header('X-AoI-Generation', version.id);
-    readContext.run(version, done);
+    const pack = id ? getPack(id) : undefined;
+    if (pack && !['extracted', 'generated'].includes(pack.status) &&
+        /^\/api\/packs\/[^/]+\/(images|videos|thumbnails|cover|file-tree)(?:\/|$)/.test(pathname)) {
+      void reply.code(409).send({ code: 'PACK_PROCESSING', error: '图包正在处理，请稍后刷新' }); return;
+    }
+    done();
   });
-  app.get('/api/system/replication', async () => ({ ...replicationStatus }));
+  app.get('/api/system/replication', async () => {
+    if (config.isReplica) replicationStatus.ready ||= replicaReady();
+    return { ...replicationStatus };
+  });
 }
