@@ -8,7 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process.js';
-import { canonicalJson, contractValues, digest, makeManifest, type SnapshotIndex } from '../src/replication/protocol.js';
+import { canonicalJson, contractValues, digest, makeManifest } from '../src/replication/protocol.js';
 import type { StoredPack } from '../src/db/repositories.js';
 
 async function eventually(check: () => Promise<boolean>, message: string, timeout = 20_000) {

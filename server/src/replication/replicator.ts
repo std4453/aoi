@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
 import { resolveWithin } from '../services/safe-path.js';
 import { activateVersion, getActiveVersion, clearVersions, removeVersion, referencedRoots } from './state.js';
-import { canonicalJson, contractValues, durableFile, hashFile, manifestPack, safeContentFile, syncTree, validateIndex, validateManifest, type FileInfo, type Manifest, type SnapshotIndex } from './protocol.js';
+import { canonicalJson, contractValues, durableFile, hashFile, manifestPack, safeContentFile, syncTree, validateIndex, validateManifest, type FileInfo, type Manifest } from './protocol.js';
 import { readState, writeState, SnapshotPublisher } from './snapshots.js';
 import { warmCache, drainCaches } from './cache.js';
 

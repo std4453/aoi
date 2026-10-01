@@ -758,34 +758,15 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       reply.code(404).send({ error: 'Pack not found' });
       return;
     }
-    const thumbDir = getThumbnailsDir(request.params.id);
     const imagesDir = getExtractedImagesDir(request.params.id);
     if (!fs.existsSync(imagesDir)) return [];
     // Load blurhashes from DB
     const blurhashMap = getPackBlurhashes(request.params.id);
 
-    // Build lookup from relative stem → original relative file
-    let originalFiles: Map<string, string> | null = null;
-    let originalByThumbnail: Map<string, string> | null = null;
-    if (fs.existsSync(imagesDir)) {
-      originalFiles = new Map();
-      const allImages = walkDirForExt(imagesDir, null);
-      originalByThumbnail = new Map(
-        [...buildJpegOutputPaths(allImages)].map(([original, thumbnail]) => [
-          thumbnail,
-          original,
-        ])
-      );
-      for (const rel of allImages) {
-        const stem = rel.replace(/\.[^.]+$/, '');
-        if (!originalFiles.has(stem)) originalFiles.set(stem, rel);
-      }
-    }
-
-    const thumbFiles = [...(originalByThumbnail?.keys() ?? [])];
+    const thumbFiles = [...buildJpegOutputPaths(walkDirForExt(imagesDir, null))];
 
     // Sort by path, segment by segment, with numeric awareness
-    thumbFiles.sort((a, b) => {
+    thumbFiles.sort(([, a], [, b]) => {
       const aParts = a.split(/[/\\]/);
       const bParts = b.split(/[/\\]/);
       for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
@@ -795,10 +776,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       return aParts.length - bParts.length;
     });
 
-    return thumbFiles.map(relPath => {
-      const stem = relPath.replace(/\.jpg$/, '');
-      const originalFile =
-        originalByThumbnail?.get(relPath) ?? originalFiles?.get(stem) ?? relPath;
+    return thumbFiles.map(([originalFile, relPath]) => {
       const bh = blurhashMap[relPath];
       return {
         name: relPath,
