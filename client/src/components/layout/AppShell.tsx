@@ -25,7 +25,6 @@ export default function AppShell() {
     <div className="min-h-screen flex flex-col bg-gray-950">
       {/* Main content */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-4 pb-24">
-        {!serverWritable && <div role="status" className="mb-4 rounded-lg border border-amber-800 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">只读备服务器 · 可浏览和下载，内容随同步更新</div>}
         {!serverWritable && location.pathname.replace(/\/+$/, '') === '/upload' ? <p className="text-gray-400">备服务器不支持上传，请连接主服务器。</p> : <Outlet />}
       </main>
 

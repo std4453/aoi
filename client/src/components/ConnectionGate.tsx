@@ -20,6 +20,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [records, setRecords] = useState<ServerConnection[]>([]);
   const [draft, setDraft] = useState<ServerConnection>(blank);
+  const [writableByAddress, setWritableByAddress] = useState<Record<string, boolean>>({});
   const [configured, setConfigured] = useState(false);
   const listPage = runtime.serverSelectionEnabled && location.pathname === '/servers';
   const editing = runtime.serverSelectionEnabled && location.pathname.startsWith('/servers/edit/');
@@ -73,6 +74,18 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Refresh labels without logging in or blocking selection. If a server is
+  // offline, retain the capability saved by the last successful connection.
+  useEffect(() => {
+    if (!configured || !listPage || ready) return;
+    let cancelled = false;
+    void Promise.allSettled(records.map(async server => {
+      const health = await inspectServer(server.address);
+      if (!cancelled) setWritableByAddress(current => ({ ...current, [server.address]: health.writable !== false }));
+    }));
+    return () => { cancelled = true; };
+  }, [configured, listPage, ready, records]);
+
   async function connect(value: ServerConnection, automatic = false, cancelled = () => false) {
     setBusy(true);
     setConnectingId(value.id);
@@ -82,6 +95,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
       server = { ...value, address: normalizeAddress(value.address), alias: value.alias.trim() || value.address };
       const health = await inspectServer(server.address);
       if (cancelled()) return;
+      server.writable = health.writable !== false;
       if (!health.authRequired) server.key = '';
       await login(server);
       setServerCapabilities(health);
@@ -151,7 +165,10 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
                 <button type="button" onClick={() => void connect(server)} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-gray-800/50">
                   {connectingId === server.id ? <Loader2 size={20} className="shrink-0 animate-spin text-blue-400" /> : <Server size={20} className="shrink-0 text-gray-500" />}
                   <span className="min-w-0">
-                    <span className="block font-medium truncate">{server.alias}</span>
+                    <span className="flex font-medium">
+                      <span className="truncate">{server.alias}</span>
+                      {(writableByAddress[server.address] ?? server.writable) === false && <span className="shrink-0">（只读）</span>}
+                    </span>
                     <span className="block text-xs text-gray-500 truncate mt-1">{server.address}</span>
                   </span>
                 </button>

@@ -75,14 +75,14 @@ if (process.env.AOI_PLAYWRIGHT_MODULE) {
     // Both same-origin and standalone frontends derive capabilities from the backend.
     for (const origin of [replica, frontend]) {
       await page.goto(origin);
-      await page.evaluate(({ address, separate }) => {
+      await page.evaluate(({ address, primaryAddress, separate }) => {
         const record = { id: separate ? 'test-replica' : 'same-origin', alias: '只读备服务器', address, key: '' };
-        localStorage.setItem('aoi.servers.v1', JSON.stringify([record]));
+        localStorage.setItem('aoi.servers.v1', JSON.stringify(separate ? [{ id: 'test-primary', alias: '主服务器', address: primaryAddress, key: '', writable: false }, record] : [record]));
         localStorage.setItem('aoi.activeServer', record.id);
         sessionStorage.clear();
-      }, { address: replica, separate: origin === frontend });
+      }, { address: replica, primaryAddress: primary, separate: origin === frontend });
       await page.goto(`${origin}/packs/${pack.id}`);
-      await page.getByRole('status').filter({ hasText: '只读备服务器' }).waitFor();
+      assert.equal(await page.getByText('只读备服务器 · 可浏览和下载，内容随同步更新').count(), 0);
       await page.getByRole('heading', { name: '已同步 · 只读副本' }).waitFor();
       assert.equal(await page.getByRole('button', { name: /生成压缩包|重新生成/ }).first().isDisabled(), true);
       assert.equal(await page.getByRole('button', { name: /下载/ }).first().isEnabled(), true);
@@ -90,6 +90,24 @@ if (process.env.AOI_PLAYWRIGHT_MODULE) {
       if (process.env.AOI_SCREENSHOT_DIR) {
         fs.mkdirSync(process.env.AOI_SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({ path: path.join(process.env.AOI_SCREENSHOT_DIR, origin === replica ? 'replica-detail.png' : 'standalone-replica-detail.png'), fullPage: true });
+      }
+      await page.goto(`${origin}/settings`);
+      await page.getByRole('button', { name: /服务器.*（只读）/ }).waitFor();
+      if (process.env.AOI_SCREENSHOT_DIR) {
+        await page.screenshot({ path: path.join(process.env.AOI_SCREENSHOT_DIR, origin === replica ? 'replica-settings.png' : 'standalone-replica-settings.png'), fullPage: true });
+      }
+      if (origin === frontend) {
+        await page.getByRole('button', { name: /服务器.*（只读）/ }).click();
+        await page.getByRole('heading', { name: '切换服务器' }).waitFor();
+        const serverButton = page.getByRole('button', { name: /只读备服务器\s*（只读）/ });
+        await serverButton.waitFor();
+        assert.equal(await serverButton.locator('.font-medium').textContent(), '只读备服务器（只读）');
+        assert.equal(await serverButton.locator('.text-xs').textContent(), replica);
+        await page.getByRole('button', { name: `主服务器 ${primary}`, exact: true }).waitFor();
+        if (process.env.AOI_SCREENSHOT_DIR) {
+          await page.screenshot({ path: path.join(process.env.AOI_SCREENSHOT_DIR, 'server-list.png'), fullPage: true });
+        }
+        await serverButton.click();
       }
       await page.goto(`${origin}/settings/presets`);
       await page.getByRole('button', { name: /新建|新增|添加/ }).first().waitFor();

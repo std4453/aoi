@@ -1,4 +1,4 @@
-import { activeServer, returnToServers } from '../lib/connection';
+import { activeServer, returnToServers, serverWritable } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
@@ -53,7 +53,10 @@ export default function SettingsPage() {
             <Server size={18} className="text-blue-400" />
             <span className="text-sm font-medium text-white">服务器</span>
           </div>
-          <span className="min-w-0 ml-auto truncate text-sm text-gray-500">{activeServer?.alias}</span>
+          <span className="min-w-0 ml-auto flex text-sm text-gray-500">
+            <span className="truncate">{activeServer?.alias}</span>
+            {!serverWritable && <span className="shrink-0">（只读）</span>}
+          </span>
         </button>
         {/* System info */}
         <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
