@@ -80,11 +80,16 @@ test('conditional polls retry failed installs, resume after restart, reject inco
     db.exec("CREATE TRIGGER reject_replica_update BEFORE UPDATE ON packs BEGIN SELECT RAISE(ABORT,'simulated commit failure'); END");
     pack.name = 'New version'; bytes = Buffer.alloc(bytes.length, 81); manifest = make();
     interrupt = true;
-    await eventually(async () => fs.existsSync(path.join(dir, 'replica/staging/pack1', manifest.revision, 'downloads', manifest.files[0].hash + '.part')) && fs.statSync(path.join(dir, 'replica/staging/pack1', manifest.revision, 'downloads', manifest.files[0].hash + '.part')).size > 0, 'partial file was not persisted');
+    await eventually(async () => fs.existsSync(path.join(dir, 'replica/staging/pack1', 'downloads', manifest.files[0].hash + '.part')) && fs.statSync(path.join(dir, 'replica/staging/pack1', 'downloads', manifest.files[0].hash + '.part')).size > 0, 'partial file was not persisted');
     await eventually(async () => (await status(replica!)).failedPacks > 0, 'interruption was not detected');
     assert.equal((await fetch(replica.url + '/api/packs/pack1/videos/test.mp4')).status, 200, 'downloads retain old access');
+    // A metadata revision change must not discard a resumable file with the same hash.
+    pack.updatedAt = '2026-10-02'; manifest = make();
+    const stale = path.join(dir, 'replica/staging/pack1/downloads', 'b'.repeat(64) + '.part');
+    fs.writeFileSync(stale, 'obsolete');
     await stopTestServer(replica); replica = await startTestServer(dir, true, env);
-    await eventually(async () => ranges > 0, 'download did not resume after restart');
+    await eventually(async () => ranges > 0, 'download did not resume after restart and revision change');
+    assert.equal(fs.existsSync(stale), false, 'obsolete download was not removed');
     await eventually(async () => (await status(replica!)).failedPacks > 0, 'commit failure not detected');
     const old = await (await fetch(replica.url + '/api/packs/pack1')).json() as { name: string };
     assert.equal(old.name, 'Original');

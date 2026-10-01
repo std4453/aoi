@@ -30,10 +30,6 @@ export function saveManifestCache(manifest: Manifest, signatures: Record<string,
     ON CONFLICT(pack_id) DO UPDATE SET manifest=excluded.manifest,signatures=excluded.signatures`)
     .run(manifest.metadata.id, canonicalJson(manifest), canonicalJson(signatures));
 }
-export function installedManifests(): Manifest[] {
-  return (getDb().prepare('SELECT manifest FROM replica_packs').all() as { manifest: string }[])
-    .map(row => validateManifest(JSON.parse(row.manifest)));
-}
 export function installedManifest(id: string): Manifest | undefined {
   const value = getDb().prepare('SELECT manifest FROM replica_packs WHERE pack_id=?').pluck().get(id) as string | undefined;
   return value ? validateManifest(JSON.parse(value)) : undefined;

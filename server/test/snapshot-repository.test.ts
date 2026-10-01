@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
+import migration from '../src/db/migrations/009_add_snapshots.js';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-snapshot-db-'));
 process.env.DATA_DIR = directory;
@@ -64,4 +66,20 @@ test('snapshot change tracking excludes local data and bookkeeping, but fences c
     await publisher.run(new AbortController().signal);
     assert.equal(readManifestCache(pack.id)!.manifest.metadata.tags[0].name, 'After');
   } finally { closeDb(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('the single snapshot migration upgrades existing data and is idempotent', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec(fs.readFileSync(new URL('../src/db/schema.sql', import.meta.url), 'utf8'));
+    db.exec("ALTER TABLE packs ADD COLUMN source_type TEXT DEFAULT 'archive'; INSERT INTO packs(id,name,original_filename,original_size,original_format) VALUES ('existing','Original','original.zip',7,'zip');");
+    migration.up(db);
+    db.prepare("UPDATE snapshot_content_clock SET revision=42").run();
+    migration.up(db);
+    assert.equal(db.prepare('SELECT name FROM packs').pluck().get(), 'Original');
+    assert.equal(db.prepare('SELECT revision FROM snapshot_content_clock').pluck().get(), 42);
+    assert.deepEqual((db.pragma('table_info(replica_packs)') as { name: string }[]).map(column => column.name), ['pack_id', 'manifest']);
+    db.exec("INSERT INTO tags(id,name) VALUES ('tag','Tag'); INSERT INTO pack_tags VALUES ('existing','tag');");
+    assert.equal(db.prepare('SELECT name FROM pack_display_tags').pluck().get(), 'Tag');
+  } finally { db.close(); }
 });

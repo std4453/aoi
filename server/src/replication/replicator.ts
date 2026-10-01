@@ -3,9 +3,9 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { config } from '../config.js';
-import { beginReplicaInstall, finishReplicaInstall, installedManifest, installedManifests, pendingInstallations, markReplicaRemoving, readState, removeReplicaPack, replicaReady, retryReplicaProcessing, saveReplicaIndex, writeState } from '../db/snapshot-repository.js';
+import { beginReplicaInstall, finishReplicaInstall, installedManifest, pendingInstallations, markReplicaRemoving, readState, removeReplicaPack, replicaReady, retryReplicaProcessing, saveReplicaIndex, writeState } from '../db/snapshot-repository.js';
 import { getPath, removePackFiles } from '../services/storage.js';
-import { getPack, hasAnyActiveJob } from '../db/repositories.js';
+import { getPack, hasAnyActiveJob, listPacks } from '../db/repositories.js';
 import { jobQueue } from '../services/job-queue.js';
 import { resolveWithin } from '../services/safe-path.js';
 import { contractValues, durableFile, hashFile, safeContentFile, syncTree, validateIndex, validateManifest, type FileInfo, type Manifest } from './protocol.js';
@@ -31,13 +31,6 @@ export class Replicator {
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
     await durableFile(config.dataDir);
-    const recovering = await this.recoverInstalls();
-    for (const manifest of installedManifests()) {
-      if (recovering.has(manifest.metadata.id)) continue;
-      if (getPack(manifest.metadata.id)?.status === 'extracted' && !fs.existsSync(getPath('extracted', manifest.metadata.id))) throw new Error('Missing replica content; use a new DATA_DIR for earlier development replicas');
-      retryReplicaProcessing(manifest.metadata.id);
-    }
-    await this.cleanStaging();
     replicationStatus.ready = replicaReady();
   }
 
@@ -54,7 +47,7 @@ export class Replicator {
       try {
         if (config.isReplica) {
           await this.recoverInstalls();
-          for (const manifest of installedManifests()) retryReplicaProcessing(manifest.metadata.id);
+          for (const pack of listPacks()) retryReplicaProcessing(pack.id);
           jobQueue.start();
           await this.cleanStaging();
           await this.pull();
@@ -106,11 +99,11 @@ export class Replicator {
     try { return JSON.parse(Buffer.concat(chunks).toString()); }
     catch { throw new Error('Invalid upstream JSON'); }
   }
-  private staging(manifest: Manifest): string {
-    return resolveWithin(path.join(root, 'staging'), `${manifest.metadata.id}/${manifest.revision}`);
+  private staging(id: string): string {
+    return resolveWithin(path.join(root, 'staging'), id);
   }
   private async receive(manifest: Manifest, file: FileInfo): Promise<void> {
-    const downloads = path.join(this.staging(manifest), 'downloads');
+    const downloads = path.join(this.staging(manifest.metadata.id), 'downloads');
     await fs.promises.mkdir(downloads, { recursive: true });
     const destination = path.join(downloads, file.hash);
     if (fs.existsSync(destination)) {
@@ -158,13 +151,18 @@ export class Replicator {
   private async install(manifest: Manifest): Promise<void> {
     const id = manifest.metadata.id;
     if (hasAnyActiveJob(id)) throw new Error('Local pack processing is still active');
-    const stage = this.staging(manifest);
+    const stage = this.staging(manifest.metadata.id);
     const content = path.join(stage, 'content');
     await fs.promises.rm(content, { recursive: true, force: true });
     await fs.promises.mkdir(content, { recursive: true });
     const previous = installedManifest(id);
     const reusable = new Map(previous?.files.map(file => [file.hash, file]) ?? []);
     const files = [...new Map(manifest.files.map(file => [file.hash, file])).values()];
+    const downloads = path.join(stage, 'downloads');
+    const needed = new Set(files.flatMap(file => [file.hash, `${file.hash}.part`]));
+    if (fs.existsSync(downloads)) for (const name of await fs.promises.readdir(downloads)) {
+      if (!needed.has(name)) await fs.promises.rm(resolveWithin(downloads, name), { force: true });
+    }
     const locations = new Map<string, string>();
     let cursor = 0;
     const worker = async () => {
@@ -180,7 +178,6 @@ export class Replicator {
             }
           } catch { this.abort.signal.throwIfAborted(); }
           // A missing/corrupt reusable file must be downloaded again.
-
         }
         await this.receive(manifest, file);
         locations.set(file.hash, path.join(stage, 'downloads', file.hash));
@@ -194,44 +191,36 @@ export class Replicator {
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
       await fs.promises.link(locations.get(file.hash)!, target);
     }
-    await this.verifyContent(content, manifest);
+    // receive() and reusable-file checks already verified every linked inode.
     await syncTree(stage); await durableFile(path.dirname(stage));
-    await durableFile(path.join(root, 'staging')); await durableFile(root);
-    // The journal and processing status commit together before the first rename.
+    await durableFile(root);
+    // The journal and processing status commit together before replacing current files.
     beginReplicaInstall(manifest);
     await this.finishInstall(manifest);
   }
-  private async finishInstall(manifest: Manifest): Promise<void> {
+  private async finishInstall(manifest: Manifest, recovering = false): Promise<void> {
     const id = manifest.metadata.id;
-    const stage = this.staging(manifest);
+    const stage = this.staging(manifest.metadata.id);
     const content = path.join(stage, 'content');
-    const previous = path.join(stage, 'previous');
     const current = getPath('extracted', id);
+    // Recovery verifies the candidate once, wherever the last rename left it.
+    if (recovering) await this.verifyContent(fs.existsSync(content) ? content : current, manifest);
     if (fs.existsSync(content)) {
-      await this.verifyContent(content, manifest);
-      if (fs.existsSync(current)) {
-        if (fs.existsSync(previous)) throw new Error('Ambiguous interrupted installation');
-        await fs.promises.rename(current, previous);
-        await durableFile(config.dirs.extracted); await durableFile(stage);
-      }
+      // A durable candidate and journal make deletion safely resumable.
+      await fs.promises.rm(current, { recursive: true, force: true });
       await fs.promises.rename(content, current);
     }
-    // If the second rename completed before a crash, the current directory is
-    // already the candidate. Never infer completeness from existence alone.
-    await this.verifyContent(current, manifest);
     await durableFile(config.dirs.extracted); await durableFile(stage);
     await fs.promises.rm(getPath('thumbnails', id), { recursive: true, force: true });
     await durableFile(config.dirs.thumbnails);
     finishReplicaInstall(manifest);
     await fs.promises.rm(stage, { recursive: true, force: true });
   }
-  private async recoverInstalls(): Promise<Set<string>> {
-    const pending = new Set<string>();
+  private async recoverInstalls(): Promise<void> {
     for (const manifest of pendingInstallations()) {
-      try { await this.finishInstall(manifest); }
-      catch { pending.add(manifest.metadata.id); }
+      try { await this.finishInstall(manifest, true); }
+      catch { /* Keep the journal and processing status for the next attempt. */ }
     }
-    return pending;
   }
   private async pull(): Promise<void> {
     const health = await this.json(await this.request('/api/health')) as { service?: string; writable?: boolean; replicationProtocol?: string; capabilities?: { snapshots?: boolean } };
@@ -257,41 +246,32 @@ export class Replicator {
       }
     }
     const ids = new Set(index.packs.map(pack => pack.id));
-    const localIds = new Set([...installedManifests(), ...pendingInstallations()].map(manifest => manifest.metadata.id));
-    for (const id of localIds) if (!ids.has(id)) {
+    for (const { id } of listPacks()) if (!ids.has(id)) {
       try {
         // Leave a processing row until file cleanup succeeds, so a crash or disk
         // error cannot expose a pack with missing files as available.
         markReplicaRemoving(id);
         removePackFiles(id);
         await durableFile(config.dirs.extracted); await durableFile(config.dirs.thumbnails);
-        await fs.promises.rm(resolveWithin(path.join(root, 'staging'), id), { recursive: true, force: true });
+        await fs.promises.rm(this.staging(id), { recursive: true, force: true });
         removeReplicaPack(id);
       } catch { replicationStatus.failedPacks++; replicationStatus.pendingPacks++; }
     }
-    writeState('replicaEmpty', String(index.packs.length === 0 && !installedManifests().length && !pendingInstallations().length));
+    writeState('replicaEmpty', String(index.packs.length === 0 && !listPacks().length));
     replicationStatus.ready = replicationStatus.ready || replicaReady();
     jobQueue.start();
     await this.cleanStaging();
     if (replicationStatus.failedPacks) throw new Error(`${replicationStatus.failedPacks} pack snapshots could not be synchronized`);
   }
   private async cleanStaging(): Promise<void> {
-    const protectedStages = new Set(pendingInstallations().map(manifest => this.staging(manifest)));
+    const keep = new Set(pendingInstallations().map(manifest => manifest.metadata.id));
     const desired = readState('replicaIndex');
     if (desired) for (const entry of validateIndex(JSON.parse(desired)).packs) {
-      if (entry.state === 'ready' && installedManifest(entry.id)?.revision !== entry.revision) {
-        protectedStages.add(resolveWithin(path.join(root, 'staging'), `${entry.id}/${entry.revision}`));
-      }
+      if (entry.state === 'pending' || installedManifest(entry.id)?.revision !== entry.revision) keep.add(entry.id);
     }
     const staging = path.join(root, 'staging');
-    if (!fs.existsSync(staging)) return;
-    for (const id of await fs.promises.readdir(staging)) {
-      const packStage = resolveWithin(staging, id);
-      for (const revision of await fs.promises.readdir(packStage)) {
-        const directory = resolveWithin(packStage, revision);
-        if (!protectedStages.has(directory)) await fs.promises.rm(directory, { recursive: true, force: true });
-      }
-      if (!(await fs.promises.readdir(packStage)).length) await fs.promises.rmdir(packStage);
+    if (fs.existsSync(staging)) for (const id of await fs.promises.readdir(staging)) {
+      if (!keep.has(id)) await fs.promises.rm(this.staging(id), { recursive: true, force: true });
     }
   }
 }

@@ -88,8 +88,8 @@ hash 规则：
 
 ## 普通后端索引
 
-迁移 009 建立快照状态和清单表。迁移 010 增加安装日志 replica_installs、内容变更计数
-snapshot_content_clock 和展示标签视图，移除 replica_packs 的多版本 root 字段。
+本 PR 仅新增迁移 009，一次建立快照状态、清单、安装日志 replica_installs、内容变更计数
+snapshot_content_clock 和展示标签视图；不包含旧开发结构的升级兼容分支。
 初次显式关闭时不填充 hash、manifest 或数据集状态；变更计数仅有固定大小记录，
 不扫描文件。后续关闭保留旧索引但不再更新或提供接口。
 主机持久化 datasetId UUID、当前 manifest 和文件 stat 签名。没有备机也维护清单。
@@ -121,26 +121,28 @@ ETag。地址改变可以连接相同数据集，datasetId 改变拒绝同步，
 
 - extracted/<packId>/images、videos：当前原文件；extracted/<packId>/thumbnails：原有任务生成的缩略图。
 - thumbnails/<packId>/_cover.jpg：原有封面目录；packs.blurhashes：本地生成的 BlurHash。
-- replica/staging/<packId>/<revision>/downloads/<hash>[.part]：下载/续传文件，只属于本轮候选。
-- 同一暂存目录内 content/：已校验的新图包；previous/：仅安装事务期间保留的旧目录。
+- replica/staging/<packId>/downloads/<hash>[.part]：下载/续传文件。每个图包仅一个暂存目录；revision 变化仍可复用相同 hash 的下载，候选不再需要的 hash 在重试前清理。
+- 同一暂存目录内 content/：已校验的新图包，不保存旧目录备份。
 - replica_installs：需要继续的安装日志（图包 ID、目标 manifest）；replica_packs：已安装 manifest。
 
 安装步骤：
 
 1. 下载阶段继续展示旧图包。Range 续传校验 Content-Range；收到完整 200 时从头覆盖，
    最终核验每个文件的完整 SHA-256 和长度。下载、校验或空间不足不触碰当前图包。
-2. 在暂存 content 中组装新目录，全部文件及目录 fsync；数据库事务保存安装日志，
+2. 在暂存 content 中组装新目录；下载和复用时已逐文件校验，正常安装不重复扫描整包。
+   文件和目录持久化后，数据库事务保存安装日志，
    将图包标为 extracting。没有日志就绝不切换文件。存在本地图包任务时推迟安装。
-3. 将当前目录移至暂存 previous，然后将 content 移入普通 extracted/<packId>；每次
-   rename 后同步父目录。清除旧封面。此窗口内图包显示处理中，内容接口返回 409 PACK_PROCESSING。
-4. 再次确认当前文件完整，数据库事务同时提交 manifest、状态 thumbnailing、本地 thumbnail
+3. 清理当前图包目录，再将 content 移入普通 extracted/<packId> 并同步两个父目录。
+   旧目录删除中断时保留完整候选，下次继续清理和安装；不需要旧目录回退分支。
+   清除旧封面。此窗口内图包显示处理中，内容接口返回 409 PACK_PROCESSING。
+4. 数据库事务同时提交 manifest、状态 thumbnailing、本地 thumbnail
    任务并移除安装日志。标签从已安装 manifest 的显式 tags 白名单通过数据库视图读取，
    容许不同图包暂时保留同一标签的不同名称；列表、搜索和详情复用普通仓储读取。
-5. 使用原有任务队列生成缩略图、封面、BlurHash，完成后图包可读。清理候选暂存及 previous，
+5. 使用原有任务队列生成缩略图、封面、BlurHash，完成后图包可读。清理候选暂存，
    不长期保留旧版本。若清理失败，后续轮次继续清理。
 
-重启先读取安装日志。content 仍存在时继续上述两次移动；content 已移走时验证当前目录
-是否匹配目标 manifest，然后继续提交。本地恢复不依赖主机在线。已提交但未完成的缩略图
+启动立即读取安装日志恢复。仅恢复路径根据 content 是否存在，选择暂存目录或当前目录
+进行一次完整校验和持久化，再继续移动和提交。本地恢复不依赖主机在线。已提交但未完成的缩略图
 任务由原有 recoverInterruptedJobs/任务恢复逻辑重新排队；失败任务在下次同步或重启重试。
 恢复失败保留日志和处理状态，不把缺文件或半成品标成可用。每个图包独立安装，不承诺
 全库同时切换。下载完成后发生的文件/数据库错误可能延长处理窗口，而非保证旧版持续可读。
@@ -164,5 +166,5 @@ npm run check 覆盖默认/禁用模式、范围、鉴权、ETag、精确版本�
 临时脚本/截图不提交，测试数据在 /data；不使用 sudo，不改变线上 Kubernetes 资源。
 旧 S3 测试数据不会自动迁移或删除，新备机从独立空目录开始。
 
-本 PR 未合并，协议仍为 1.0.0。之前多版本缓存原型的备机测试目录不做迁移，请使用新目录；
-普通主机业务数据按有序迁移正常升级。
+本 PR 未合并，协议仍为 1.0.0；数据库变更合并在迁移 009 中。早期 PR 镜像的测试目录
+不作为升级兼容目标，本轮验证使用新目录。main 上已有业务数据通过迁移 009 正常升级。

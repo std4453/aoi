@@ -17,7 +17,7 @@ async function eventually(check: () => Promise<boolean>, message: string) {
 const env = { AOI_REPLICA_SOURCE_URL: 'http://127.0.0.1:1', AOI_REPLICATION_INTERVAL: '5' };
 
 test('offline recovery at every install boundary shares normal thumbnail jobs, paths and failure recovery', { timeout: 90_000 }, async t => {
-  for (const phase of ['prepared', 'old-moved', 'new-moved', 'committed', 'thumbnail-running', 'commit-failed', 'thumbnail-failed']) {
+  for (const phase of ['prepared', 'old-removing', 'old-removed', 'new-moved', 'committed', 'thumbnail-running', 'commit-failed', 'thumbnail-failed']) {
     await t.test(phase, async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-install-'));
       let server: TestServer | undefined;
@@ -29,16 +29,17 @@ test('offline recovery at every install boundary shares normal thumbnail jobs, p
           status: 'extracted', imageCount: 1, videoCount: 0, totalImagesSize: png.length, totalVideosSize: 0, archivePassword: null, errorMessage: null, compressedSize: 0,
           tags: [{ id: 'tag', name: 'Visible tag' }], createdAt: '2026-10-01', updatedAt: '2026-10-01' },
         [{ path: 'images/new.png', size: png.length, hash: createHash('sha256').update(png).digest('hex') }]);
-        const stage = path.join(dir, 'replica/staging/pack', manifest.revision);
-        const content = path.join(stage, 'content'); const previous = path.join(stage, 'previous');
+        const stage = path.join(dir, 'replica/staging/pack');
+        const content = path.join(stage, 'content');
         const current = path.join(dir, 'extracted/pack');
         fs.mkdirSync(path.join(content, 'images'), { recursive: true }); fs.writeFileSync(path.join(content, 'images/new.png'), png);
         fs.mkdirSync(path.join(current, 'images'), { recursive: true }); fs.writeFileSync(path.join(current, 'images/old.png'), 'old');
         fs.mkdirSync(path.join(dir, 'thumbnails/pack'), { recursive: true }); fs.writeFileSync(path.join(dir, 'thumbnails/pack/_cover.jpg'), 'old cover');
         db = new Database(path.join(dir, 'db/packdb.sqlite'));
         db.exec("INSERT INTO packs(id,name,original_filename,original_size,original_format,source_type,status,image_count) VALUES ('pack','New','folder',0,'folder','folder','extracting',1); CREATE TABLE viewing_history(value TEXT); INSERT INTO viewing_history VALUES ('private');");
-        if (phase !== 'prepared') fs.renameSync(current, previous);
-        if (!['prepared', 'old-moved'].includes(phase)) fs.renameSync(content, current);
+        if (phase === 'old-removing') fs.unlinkSync(path.join(current, 'images/old.png'));
+        else if (phase !== 'prepared') fs.rmSync(current, { recursive: true });
+        if (!['prepared', 'old-removing', 'old-removed'].includes(phase)) fs.renameSync(content, current);
         if (['committed', 'thumbnail-running', 'thumbnail-failed'].includes(phase)) {
           db.prepare('INSERT INTO replica_packs VALUES (?,?)').run('pack', canonicalJson(manifest));
           db.exec("UPDATE packs SET status='thumbnailing'; INSERT INTO jobs(id,pack_id,type,status) VALUES ('thumbnail','pack','thumbnail','pending');");
