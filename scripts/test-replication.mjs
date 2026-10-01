@@ -99,10 +99,10 @@ if (process.env.AOI_PLAYWRIGHT_MODULE) {
       if (origin === frontend) {
         await page.getByRole('button', { name: /服务器.*（只读）/ }).click();
         await page.getByRole('heading', { name: '切换服务器' }).waitFor();
-        const serverButton = page.getByRole('button', { name: /只读备服务器\s*（只读）/ });
+        const serverButton = page.getByRole('button', { name: /只读备服务器.*（只读）/ });
         await serverButton.waitFor();
-        assert.equal(await serverButton.locator('.font-medium').textContent(), '只读备服务器（只读）');
-        assert.equal(await serverButton.locator('.text-xs').textContent(), replica);
+        assert.equal(await serverButton.locator('.font-medium').textContent(), '只读备服务器');
+        assert.equal(await serverButton.locator('.text-xs').textContent(), `${replica}（只读）`);
         await page.getByRole('button', { name: `主服务器 ${primary}`, exact: true }).waitFor();
         if (process.env.AOI_SCREENSHOT_DIR) {
           await page.screenshot({ path: path.join(process.env.AOI_SCREENSHOT_DIR, 'server-list.png'), fullPage: true });
