@@ -1,4 +1,4 @@
-# AoI 主备与对象存储复制协议 v1
+# AoI 主备与对象存储复制协议 1.0.0
 
 ## 目标与部署矩阵
 
@@ -24,7 +24,7 @@
 ## 数据边界：明确选择，默认不复制
 
 scope 固定为 `aoi-content-v1`。数据库使用表和列双重白名单，代码位于
-`server/src/replication/protocol.ts` 的 `columns`。新表、新字段不会自动复制其值。
+`server/src/replication/catalog.sql` 的显式列投影和行过滤条件。新表、新字段不会自动复制其值。
 未来浏览历史、用户会话、节点偏好应放独立本机数据库；不要放进可被整体替换的内容库。
 若必须共用主数据库，新表仍默认排除；备机的本地历史不能写在副本 catalog 中。
 
@@ -59,9 +59,8 @@ manifest 示例：
 
 ```json
 {
-  "protocol": 1,
+  "protocol": "1.0.0",
   "scope": "aoi-content-v1",
-  "build": "<完整构建 commit>",
   "generation": "<UUID>",
   "createdAt": "2026-10-01T00:00:00.000Z",
   "catalog": { "hash": "<sha256>", "size": 12345 },
@@ -75,15 +74,22 @@ manifest 示例：
 `manifestHash`、`owner`。哈希使用 canonical JSON：递归按对象键的字典序排序、数组保持顺序，再用
 JSON.stringify 无空白序列化成 UTF-8（不转义 Unicode）。传输对象的键顺序不影响校验。
 
-主备必须同时满足 **protocol、scope、build 完全一致**。GitHub Actions 的两个 Docker
-构建步骤把 `github.sha` 写入镜像内 `build-revision.txt`。PR 镜像使用 checkout 的
-合并 commit，正式镜像使用对应构建 commit；同一个 PR 的不同构建不能混用。
-生产请固定同一镜像 digest，而不是依赖可变 tag。独立 protocol 版本描述协议；commit
-额外防止数据库/API 实现不兼容。非 Docker 部署需明确设置相同 `AOI_BUILD_REVISION`，
-不能使用默认 `development` 启用复制。镜像内的构建标识优先于环境变量，不能覆盖。
+主备必须同时满足 **protocol、scope 完全一致**。协议版本在 `server/src/version.ts`
+中维护，当前为 SemVer `1.0.0`。比较的是完整版本号：major、minor、patch 都必须相同，
+例如 `1.0.0` 与 `1.0.1` 不能同步；不使用 SemVer 范围或仅比较 major/minor。
+不同应用 commit 可以同步，只要它们遵守同一份协议契约；构建不再注入 revision，
+启用复制也不需要构建标识环境变量。
 
-升级主备需部署同一新镜像。旧备机拒绝新主快照但继续服务旧本地版本；升级后的备机
-不打开不兼容旧数据库，等待新版本同步（此时读 API 返回 503）。这是严格同版本的代价。
+修改 manifest、对象布局、数据 scope、catalog 表/列/约束或读取语义等协议契约时，
+必须同步修改代码中的协议版本和本文档，并更新兼容性回归测试。破坏性变更提升 major，
+增加契约能力提升 minor，协议修正提升 patch；无论提升哪一级，主备均须更新到同一完整
+协议版本。只改 UI 或其他不影响协议的实现不需要升版本。新增本机数据应继续排除；
+若它改变导出的 schema，也属于 catalog 契约变更，须评估并提升版本。
+
+协议升级时部署支持同一新协议的主备。旧备机拒绝新协议快照但继续服务旧本地版本；
+升级后的备机不打开不兼容旧数据库，等待新版本同步（此时读 API 返回 503）。
+此前带数字 protocol 和 build 字段的开发快照不兼容；须由主机重新发布，不能修改 manifest
+绕过检查。生产仍建议固定镜像 digest，方便追踪和回退，但镜像 digest 不参与兼容性判断。
 独立前端无需拥有 S3 凭据；保持前后端同版本是推荐部署方式。
 
 ## 不停服的一致性导出
@@ -94,7 +100,9 @@ JSON.stringify 无空白序列化成 UTF-8（不转义 Unicode）。传输对象
 1. 业务写请求（包括 TUS）和后台任务记录开始/结束 revision 及活跃写入数。
 2. 有活跃写入或 pending/running job 时，本轮延期，不阻塞写方。
 3. 取得 revision 和 SQLite `total_changes()`，在线 backup 到临时本机数据库。
-4. 从该快照向全新 catalog 按白名单复制数据；不上传原始全库 backup。
+4. 用 SQLite `ATTACH` 挂载临时快照（只从该库读取），在事务中执行 `catalog.sql` 的
+   `INSERT … SELECT`，按表/列和已发布状态批量复制到全新 catalog；保留所需表的约束，
+   校验外键，不经 JavaScript 逐行搬运数据。不上传原始全库 backup。
 5. 把所选图包文件流式复制到本轮私有目录，计算 SHA-256 并形成不可变 blob。
 6. 再检查 revision、活跃写入和 total_changes；有变化则丢弃候选，下轮重试。
 7. 检查通过后，catalog、文件和 manifest 都已与主机工作目录分离。此后主机修改或
@@ -131,7 +139,7 @@ JSON.stringify 无空白序列化成 UTF-8（不转义 Unicode）。传输对象
 不会更新 latest。SDK 有限重试，调度器下轮继续；已完成对象复用。进程重启不恢复
 半个 multipart 或半个下载对象：该对象重新传输。不是字节级断点续传。
 
-备机读取 latest，检查发布标记、manifest 哈希、协议/scope/build、发布者和递增序号；
+备机读取 latest，检查发布标记、manifest 哈希、协议/scope、发布者和递增序号；
 下载 catalog 和本地缺失 blob，检查每个大小/SHA-256、路径及数据库完整性。目录穿越、
 重复路径、符号链接、未知根目录被拒绝。所有内容从暂存区形成独立 generation，文件
 通过硬链接共享本机 blob，不允许原地覆盖。已有本地 blob 损坏会报错，不修改正在服务
@@ -176,7 +184,6 @@ latest 目录以外全部当作垃圾。可单独设置中止未完成 multipart
 | AOI_S3_PREFIX | aoi；每个独立数据集一个 prefix |
 | AOI_S3_ACCESS_KEY | 启用时必填 |
 | AOI_S3_SECRET_KEY | 启用时必填；不要提交仓库 |
-| AOI_BUILD_REVISION | 仅非镜像部署需要；两端相同构建标识 |
 
 主机需要 prefix 下 GetObject/HeadObject、PutObject、multipart 上传/中止权限；备机
 仅需 GetObject（不需要 ListBucket/PutObject/DeleteObject）。主机 HEAD 判断对象不存在
@@ -188,7 +195,7 @@ latest 目录以外全部当作垃圾。可单独设置中止未完成 multipart
 端口、无需 SSH、数据库端口或共享盘。用户访问备机的业务入口是独立网络需求。
 
 状态：`GET /api/system/replication`，沿用现有 AUTH_KEY 鉴权。包含 role、ready、running、
-generation、snapshotAt、lastSuccess、lastError、最近上传/下载 blob 数、build/protocol/scope。
+generation、snapshotAt、lastSuccess、lastError、最近上传/下载 blob 数、protocol/scope。
 它是节点运行状态，不属于备份。lastSuccess 为本轮成功检查时间，snapshotAt 才是内容时间。
 
 ## 验证

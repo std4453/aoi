@@ -6,15 +6,14 @@ import { pipeline } from 'node:stream/promises';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import { normalizeRelativePath, resolveWithin, validateIdentifier } from '../services/safe-path.js';
-import { buildRevision, dataScope, protocolVersion } from './build.js';
+import { dataScope, protocolVersion } from '../version.js';
 import { snapshotFence, assertSnapshotFence } from './state.js';
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const objectSchema = z.object({ hash: hashSchema, size: z.number().int().nonnegative().safe() }).strict();
 export const manifestSchema = z.object({
-  protocol: z.literal(protocolVersion),
+  protocol: z.literal(protocolVersion, { errorMap: () => ({ message: `Replication protocol mismatch: expected ${protocolVersion}` }) }),
   scope: z.literal(dataScope),
-  build: z.string().min(1).max(200),
   generation: z.string().uuid(),
   createdAt: z.string().datetime(),
   catalog: objectSchema,
@@ -24,8 +23,8 @@ export type Manifest = z.infer<typeof manifestSchema>;
 export type BlobInfo = z.infer<typeof objectSchema>;
 export const contentRoots = ['archives', 'extracted', 'generated', 'thumbnails'] as const;
 
-// Explicit column allowlist. A future table/column (e.g. viewing history) is
-// excluded unless intentionally added to a new content scope/protocol.
+// Required catalog columns, checked before activating a replica. The explicit
+// export projections and row filters live in catalog.sql.
 export const columns: Record<string, string[]> = {
   packs: 'id name original_filename original_size original_format status image_count video_count total_images_size total_videos_size error_message compressed_size created_at updated_at structure_type blurhashes source_type archive_md5'.split(' '),
   presets: 'id name is_default options created_at updated_at'.split(' '),
@@ -35,10 +34,10 @@ export const columns: Record<string, string[]> = {
   migrations: 'name executed_at'.split(' '),
 };
 const emptyTables = ['jobs', 'uploads', 'pack_files'];
+const catalogSql = fs.readFileSync(new URL('./catalog.sql', import.meta.url), 'utf8');
 
 export function validateManifest(value: unknown): Manifest {
   const manifest = manifestSchema.parse(value);
-  if (manifest.build !== buildRevision) throw new Error(`Build mismatch: snapshot ${manifest.build}, local ${buildRevision}`);
   const paths = new Set<string>();
   const hashes = new Map<string, number>();
   for (const file of manifest.files) {
@@ -92,22 +91,15 @@ export function exportCatalog(source: Database.Database, target: string): string
   const dest = new Database(target);
   try {
     dest.pragma('foreign_keys = ON');
+    // Attach only the private backup; catalog.sql reads source and writes main.
+    dest.prepare('ATTACH DATABASE ? AS source').run(source.name);
     dest.transaction(() => {
       for (const table of [...Object.keys(columns), ...emptyTables]) {
         const schema = source.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table) as { sql: string };
         if (!schema) throw new Error(`Missing content schema: ${table}`);
         dest.exec(schema.sql);
       }
-      for (const [table, names] of Object.entries(columns)) {
-        let filter = '';
-        if (table === 'packs') filter = " WHERE status IN ('extracted', 'generated')";
-        if (table === 'pack_tags' || table === 'pack_verifications') {
-          filter = " WHERE pack_id IN (SELECT id FROM packs WHERE status IN ('extracted', 'generated'))";
-        }
-        const rows = source.prepare(`SELECT ${names.join(',')} FROM ${table}${filter}`).iterate() as Iterable<Record<string, string | number | null | Buffer>>;
-        const insert = dest.prepare(`INSERT INTO ${table} (${names.join(',')}) VALUES (${names.map(() => '?').join(',')})`);
-        for (const row of rows) insert.run(...names.map(name => row[name]));
-      }
+      dest.exec(catalogSql);
     })();
     if ((dest.pragma('foreign_key_check') as unknown[]).length) throw new Error('Export foreign key check failed');
     return (dest.prepare('SELECT id FROM packs ORDER BY id').all() as Array<{ id: string }>).map(row => row.id);
@@ -185,7 +177,7 @@ export async function createSnapshot(database: Database.Database, dataDir: strin
   if (changes() !== initialChanges) throw new Error('Snapshot deferred: database changed during export');
   await durableFile(catalogPath);
   const manifest: Manifest = {
-    protocol: protocolVersion, scope: dataScope, build: buildRevision,
+    protocol: protocolVersion, scope: dataScope,
     generation: randomUUID(), createdAt: new Date().toISOString(),
     catalog: await hashFile(catalogPath, signal), files: files.sort((a, b) => a.path.localeCompare(b.path)),
   };

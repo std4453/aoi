@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && cp src/db/schema.sql dist/server/src/db/schema.sql",
+    "build": "tsc && cp src/db/schema.sql dist/server/src/db/schema.sql && cp src/replication/catalog.sql dist/server/src/replication/catalog.sql",
     "start": "node dist/server/src/index.js",
     "test": "tsx --test --test-concurrency=1 test/**/*.test.ts"
   },

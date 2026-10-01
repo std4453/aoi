@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
 import { resolveWithin } from '../services/safe-path.js';
 import { activateGeneration, currentGeneration } from './state.js';
-import { buildRevision, protocolVersion, dataScope } from './build.js';
+import { protocolVersion, dataScope } from '../version.js';
 import { canonicalJson, createSnapshot, durableFile, durableJson, hashFile, validateManifest, columns, type BlobInfo, type Manifest } from './protocol.js';
 import { S3Store, type ObjectStore } from './s3.js';
 
@@ -24,7 +24,6 @@ export const replicationStatus = {
   lastError: null as string | null,
   uploadedBlobs: 0,
   downloadedBlobs: 0,
-  build: buildRevision,
   protocol: protocolVersion,
   scope: dataScope,
 };
@@ -38,7 +37,6 @@ export class Replicator {
   constructor(private readonly store: ObjectStore = new S3Store()) {}
 
   async initialize(): Promise<void> {
-    if (buildRevision === 'development') throw new Error('Replication requires a baked build revision or AOI_BUILD_REVISION');
     fs.mkdirSync(root, { recursive: true });
     if (config.replicationRole === 'replica') {
       const pointerPath = path.join(root, 'current.json');
@@ -200,7 +198,11 @@ export class Replicator {
     try {
       db.pragma('query_only = ON');
       if (db.pragma('quick_check', { simple: true }) !== 'ok' || (db.pragma('foreign_key_check') as unknown[]).length) throw new Error('Replica database integrity check failed');
-      for (const [table, fields] of Object.entries(columns)) db.prepare(`SELECT ${fields.join(',')} FROM ${table} LIMIT 0`).all();
+      const tableColumns = db.prepare('SELECT name FROM pragma_table_info(?)').pluck();
+      for (const [table, fields] of Object.entries(columns)) {
+        const actual = new Set(tableColumns.all(table));
+        if (fields.some(field => !actual.has(field))) throw new Error(`Missing content schema: ${table}`);
+      }
       // Persist before swapping the in-memory context. All referenced objects
       // have been fsynced; a restart can safely reopen the selected generation.
       if (save) durableJson(path.join(root, 'current.json'), pointer);

@@ -178,8 +178,7 @@ export interface ServerHealth {
   authRequired: boolean;
   writable?: boolean;
   role?: 'off' | 'primary' | 'replica';
-  build?: string;
-  replicationProtocol?: number;
+  replicationProtocol?: string;
 }
 
 export interface LoginResponse {

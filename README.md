@@ -360,7 +360,8 @@ MIT
 S3-compatible 对象存储异步复制已发布内容；两端无需互通或同时在线。备机仅允许浏览和下载，
 前端连接备机时写操作置灰。这与独立前端部署、服务器选择开关相互独立。
 
-主备必须使用同一构建镜像（推荐固定 digest），各自挂载独立 `DATA_DIR`，并配置
+主备必须使用相同的备份协议版本（SemVer 完整匹配，包含 patch），各自挂载独立
+`DATA_DIR`，并配置
 `AOI_S3_BUCKET`、`AOI_S3_ACCESS_KEY`、`AOI_S3_SECRET_KEY`；MinIO 等还需配置
 `AOI_S3_ENDPOINT`。`AOI_S3_PREFIX` 默认 `aoi`，同步间隔 `AOI_REPLICATION_INTERVAL`
 默认 300 秒。bucket 需预先创建，密钥只放部署环境，不放前端或仓库。

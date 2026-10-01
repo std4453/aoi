@@ -6,6 +6,7 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { createSnapshot, validateManifest, hashFile } from '../src/replication/protocol.js';
+import { protocolVersion } from '../src/version.js';
 import { beginMutation } from '../src/replication/state.js';
 
 function fixture() {
@@ -21,7 +22,9 @@ function fixture() {
     INSERT INTO packs (id,name,original_filename,original_size,original_format,status)
     VALUES ('unfinished','Not published','a.zip',10,'zip','uploading');
     INSERT INTO tags (id,name) VALUES ('tag1','Tag');
-    INSERT INTO pack_tags VALUES ('pack1','tag1');
+    INSERT INTO pack_tags VALUES ('pack1','tag1'), ('unfinished','tag1');
+    INSERT INTO presets (id,name,options) VALUES ('preset1','Preset','{}');
+    INSERT INTO pack_verifications (pack_id,version,status) VALUES ('pack1',1,'valid'), ('unfinished',1,'valid');
     INSERT INTO uploads (id,filename,file_size) VALUES ('upload1','secret-upload',10);`);
   const files = path.join(root, 'data', 'generated', 'pack1');
   fs.mkdirSync(files, { recursive: true });
@@ -34,7 +37,10 @@ function fixture() {
 test('content scope exports only allowed rows and columns; blobs are stable across metadata edits', async () => {
   const f = fixture();
   try {
+    f.db.exec("UPDATE packs SET original_size=9007199254740993 WHERE id='pack1'");
+    const sourceBefore = await hashFile(f.db.name);
     const first = await createSnapshot(f.db, f.data, path.join(f.root, 'one'));
+    assert.deepEqual(await hashFile(f.db.name), sourceBefore, 'export must not modify the source');
     assert.equal(fs.statSync(path.join(f.root, 'one')).mode & 0o777, 0o700);
     assert.equal(first.files.length, 1);
     assert.equal(first.files[0].path, 'generated/pack1/compressed.zip');
@@ -42,17 +48,26 @@ test('content scope exports only allowed rows and columns; blobs are stable acro
     try {
       assert.equal(catalog.prepare("SELECT 1 FROM sqlite_master WHERE name='viewing_history'").get(), undefined);
       assert.equal(catalog.prepare('SELECT count(*) AS n FROM packs').get()?.n, 1);
+      assert.equal(catalog.prepare('SELECT original_size FROM packs').safeIntegers().pluck().get(), 9007199254740993n);
       assert.deepEqual(catalog.prepare('SELECT archive_password,future_private_column FROM packs').get(), { archive_password: null, future_private_column: null });
       assert.equal(catalog.prepare('SELECT count(*) AS n FROM uploads').get()?.n, 0);
       assert.equal(catalog.prepare('SELECT count(*) AS n FROM pack_tags').get()?.n, 1);
+      assert.deepEqual(catalog.prepare('SELECT pack_id FROM pack_verifications').all(), [{ pack_id: 'pack1' }]);
+      assert.equal(catalog.prepare('SELECT name FROM presets WHERE id=?').pluck().get('preset1'), 'Preset');
+      assert.deepEqual(catalog.pragma('foreign_key_check'), []);
     } finally { catalog.close(); }
     f.db.prepare("UPDATE packs SET name='Renamed' WHERE id='pack1'").run();
     const second = await createSnapshot(f.db, f.data, path.join(f.root, 'two'));
     assert.deepEqual(first.files, second.files);
     assert.notEqual(first.catalog.hash, second.catalog.hash);
     assert.deepEqual(await hashFile(path.join(f.root, 'two', 'blobs', second.files[0].hash)), { hash: second.files[0].hash, size: second.files[0].size });
-    assert.throws(() => validateManifest({ ...first, build: 'wrong-build' }), /Build mismatch/);
-    assert.throws(() => validateManifest({ ...first, protocol: 99 }));
+    assert.equal(first.protocol, protocolVersion);
+    assert.equal('build' in first, false);
+    assert.deepEqual(validateManifest(first), first);
+    const [major, minor, patch] = protocolVersion.split('.').map(Number);
+    for (const protocol of [1, undefined, `${major + 1}.${minor}.${patch}`, `${major}.${minor + 1}.${patch}`, `${major}.${minor}.${patch + 1}`, `${protocolVersion}-rc.1`]) {
+      assert.throws(() => validateManifest({ ...first, protocol }), /Replication protocol mismatch/);
+    }
     assert.throws(() => validateManifest({ ...first, scope: 'all-data' }));
     assert.throws(() => validateManifest({ ...first, files: [{ ...first.files[0], path: 'generated/pack1/../../escape' }] }), /unsafe/);
     assert.throws(() => validateManifest({ ...first, files: [first.files[0], first.files[0]] }), /Duplicate/);

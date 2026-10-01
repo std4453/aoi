@@ -74,7 +74,6 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          build-args: BUILD_REVISION=${{ github.sha }}
           platforms: linux/amd64
           load: true
           push: false
@@ -113,7 +112,6 @@ jobs:
         if: env.PUBLISH_IMAGE == 'true'
         with:
           context: .
-          build-args: BUILD_REVISION=${{ github.sha }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.metadata.outputs.tags }}

@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
+import { createHash, randomUUID } from 'node:crypto';
+import { canonicalJson } from '../src/replication/protocol.js';
+import { protocolVersion } from '../src/version.js';
 import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process.js';
 import { startObjectStore } from './helpers/s3-store.js';
 
@@ -23,7 +26,7 @@ test('S3 primary/replica incrementally publish, retain old reads on failure, enf
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-replication-'));
   const store = await startObjectStore();
   const env = {
-    AOI_BUILD_REVISION: 'integration-test-build', AOI_REPLICATION_INTERVAL: '5',
+    AOI_REPLICATION_INTERVAL: '5',
     AOI_S3_BUCKET: 'test', AOI_S3_PREFIX: 'data', AOI_S3_ENDPOINT: store.endpoint,
     AOI_S3_ACCESS_KEY: 'test-access', AOI_S3_SECRET_KEY: 'test-secret',
   };
@@ -75,15 +78,41 @@ test('S3 primary/replica incrementally publish, retain old reads on failure, enf
     const replicaDb = new Database(path.join(dir, 'replica', 'replication', 'generations', (await status(replica)).generation, 'catalog.sqlite'), { readonly: true });
     assert.equal(replicaDb.prepare("SELECT 1 FROM sqlite_master WHERE name='viewing_history'").get(), undefined);
     replicaDb.close();
-    wrong = await startTestServer(path.join(dir, 'wrong'), true, { ...env, AOI_REPLICATION_ROLE: 'replica', AOI_BUILD_REVISION: 'different-build' });
-    await eventually(async () => Boolean((await status(wrong!)).lastError?.includes('Build mismatch')), 'build mismatch not rejected');
-    assert.equal((await fetch(`${wrong.url}/api/packs`)).status, 503);
-    await stopTestServer(wrong); wrong = undefined;
     wrong = await startTestServer(path.join(dir, 'other-primary'), true, { ...env, AOI_REPLICATION_ROLE: 'primary' });
     await eventually(async () => Boolean((await status(wrong!)).lastError?.includes('another primary')), 'second publisher was not rejected');
     await stopTestServer(wrong); wrong = undefined;
     // Stop the publisher; an absent blob invalidates a new replica installation.
     await stopTestServer(primary); primary = undefined;
+    // Publish a correctly hashed envelope with an incompatible patch version.
+    // A fresh replica must reject it before becoming ready; an active replica
+    // must keep serving its last compatible generation.
+    const latestKey = '/test/data/latest.json';
+    const savedLatest = store.objects.get(latestKey)!;
+    const pointer = JSON.parse(savedLatest.data.toString());
+    const savedManifest = store.objects.get(`/test/data/snapshots/${pointer.generation}/manifest.json`)!;
+    const manifest = JSON.parse(savedManifest.data.toString());
+    pointer.generation = manifest.generation = randomUUID();
+    pointer.sequence++;
+    const prefix = `/test/data/snapshots/${pointer.generation}`;
+    const manifestKey = `${prefix}/manifest.json`;
+    const [major, minor, patch] = protocolVersion.split('.').map(Number);
+    manifest.protocol = `${major}.${minor}.${patch + 1}`;
+    const data = Buffer.from(canonicalJson(manifest));
+    pointer.manifestHash = createHash('sha256').update(data).digest('hex');
+    const pointerData = Buffer.from(canonicalJson(pointer));
+    store.objects.set(manifestKey, { ...savedManifest, data });
+    store.objects.set(`${prefix}/COMMITTED`, { ...savedLatest, data: pointerData });
+    store.objects.set(latestKey, { ...savedLatest, data: pointerData });
+    wrong = await startTestServer(path.join(dir, 'wrong'), true, { ...env, AOI_REPLICATION_ROLE: 'replica' });
+    await eventually(async () => Boolean((await status(wrong!)).lastError?.includes('Replication protocol mismatch')), 'patch mismatch not rejected');
+    assert.equal((await fetch(`${wrong.url}/api/packs`)).status, 503);
+    await eventually(async () => Boolean((await status(replica!)).lastError?.includes('Replication protocol mismatch')), 'active replica did not reject incompatible patch');
+    assert.equal((await status(replica)).ready, true);
+    assert.equal(await (await fetch(`${replica.url}/api/packs/pack1/download`)).text(), 'ZIPDATA');
+    await stopTestServer(wrong); wrong = undefined;
+    store.objects.delete(manifestKey);
+    store.objects.delete(`${prefix}/COMMITTED`);
+    store.objects.set(latestKey, savedLatest);
     const savedBlob = store.objects.get(blobsBefore[0])!;
     store.objects.delete(blobsBefore[0]);
     wrong = await startTestServer(path.join(dir, 'missing'), true, { ...env, AOI_REPLICATION_ROLE: 'replica' });
