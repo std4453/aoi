@@ -1,4 +1,4 @@
-import { serverWritable } from '../lib/connection';
+import { serverWritable, serverCanDownloadArchive } from '../lib/connection';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -429,8 +429,12 @@ export default function PackDetailPage() {
         </div>
       )}
 
+      <button onClick={() => setShowFileTree('view')} className="mb-4 flex items-center gap-2 text-sm text-blue-400">
+        <FolderTree size={16} />浏览文件
+      </button>
+
       {/* Compression config */}
-      <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+      {serverCanDownloadArchive && <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
         <h3 className="text-sm font-medium text-white mb-4">压缩图包</h3>
 
         {/* Preset selector */}
@@ -613,7 +617,7 @@ export default function PackDetailPage() {
             </button>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Rename modal */}
       {renaming && (
@@ -731,14 +735,8 @@ export default function PackDetailPage() {
               })()
             : undefined}
           onImageSelect={(imagePath) => {
-            // Find the thumbnail index matching this image path
-            // imagePath is relative to images dir (e.g. "NR/scene.png")
-            // thumbnail.name is the relative path in thumbnails dir (e.g. "NR/scene.jpg")
-            const stem = imagePath.replace(/\.[^.]+$/, '');
-            const index = thumbnails.findIndex(t => {
-              const thumbStem = t.name.replace(/\.jpg$/, '');
-              return thumbStem === stem;
-            });
+            const imageUrl = `/api/packs/${id}/images/${imagePath.split('/').map(encodeURIComponent).join('/')}`;
+            const index = thumbnails.findIndex(thumb => thumb.imageUrl === imageUrl);
             if (index >= 0) setSearchParams({ image: String(index) }, { replace: viewerIndex !== null });
           }}
           onConfirm={showFileTree === 'select' ? (selection) => {

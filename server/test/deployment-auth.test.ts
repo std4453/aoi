@@ -19,7 +19,7 @@ test('auth protects APIs, resources and tus before parsing, and supports cross-o
     assert.equal(capability.service, 'aoi');
     assert.equal(capability.authRequired, true);
     assert.equal(capability.writable, true);
-    assert.equal(capability.role, 'off');
+    assert.equal(capability.role, 'standalone');
     assert.equal(fs.existsSync(path.join(dir, 'replication')), false);
     for (const route of ['/api/packs', '/api/system/disk-space', '/api/packs/missing/cover', '/api/packs/missing/images/a.jpg', '/api/packs/missing/download', '/api/jobs/missing/events']) {
       assert.equal((await fetch(server.url + route)).status, 401, route);
@@ -61,7 +61,7 @@ test('auth protects APIs, resources and tus before parsing, and supports cross-o
 test('frontend-only mode exposes runtime flags without initializing any data or API', async () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-frontend-'));
   const dir = path.join(parent, 'unused');
-  const server = await startTestServer(dir, true, { FRONTEND_ONLY: 'true', SERVER_SELECTION_ENABLED: 'true', AUTH_KEY: 'never-expose', AOI_REPLICATION_ROLE: 'primary' });
+  const server = await startTestServer(dir, true, { FRONTEND_ONLY: 'true', SERVER_SELECTION_ENABLED: 'true', AUTH_KEY: 'never-expose', AOI_REPLICA_SOURCE_URL: 'http://127.0.0.1:1', AOI_REPLICA_SOURCE_KEY: 'never-expose-source' });
   try {
     const config = await fetch(`${server.url}/runtime-config.json`);
     assert.equal(config.headers.get('cache-control'), 'no-store');

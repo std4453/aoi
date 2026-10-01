@@ -81,7 +81,7 @@ interface BlurhashResult {
   height: number;
 }
 
-async function computeBlurhash(imagePath: string): Promise<BlurhashResult | null> {
+export async function computeBlurhash(imagePath: string): Promise<BlurhashResult | null> {
   try {
     const metadata = await openImage(imagePath).metadata();
     const origWidth = metadata.width;
@@ -109,14 +109,14 @@ async function computeBlurhash(imagePath: string): Promise<BlurhashResult | null
   }
 }
 
-async function generateThumbnail(inputPath: string, outputPath: string): Promise<void> {
+export async function generateThumbnail(inputPath: string, outputPath: string): Promise<void> {
   await openImage(inputPath)
     .resize(THUMB_SIZE, THUMB_SIZE, { fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
     .toFile(outputPath);
 }
 
-async function generateCover(inputPath: string, outputPath: string): Promise<void> {
+export async function generateCover(inputPath: string, outputPath: string): Promise<void> {
   await openImage(inputPath)
     .resize(COVER_WIDTH, COVER_HEIGHT, { fit: 'cover' })
     .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })

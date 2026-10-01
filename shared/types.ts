@@ -114,6 +114,7 @@ export interface FileTreeNode {
   size?: number;
   thumbUrl?: string;
   imageUrl?: string;
+  videoUrl?: string;
   children?: FileTreeNode[];
 }
 
@@ -177,10 +178,29 @@ export interface ServerHealth {
   service: 'aoi';
   authRequired: boolean;
   writable?: boolean;
-  role?: 'off' | 'primary' | 'replica';
+  role?: 'standalone' | 'replica';
+  capabilities?: { generatedArchiveDownload: boolean; snapshots: boolean };
   replicationProtocol?: string;
 }
 
 export interface LoginResponse {
   token: string;
+}
+
+
+// Public snapshot wire contract; version matching is enforced by the backend.
+export interface SnapshotFile { path: string; hash: string; size: number }
+export interface PackSnapshot {
+  protocol: string;
+  scope: string;
+  metadata: Pick<Pack, 'id' | 'name' | 'originalFilename' | 'originalSize' | 'originalFormat' | 'sourceType' | 'createdAt' | 'updatedAt' | 'tags'>;
+  contentHash: string;
+  revision: string;
+  files: SnapshotFile[];
+}
+export interface PackSnapshotIndex {
+  protocol: string;
+  scope: string;
+  datasetId: string;
+  packs: Array<{ id: string; state: 'ready'; revision: string } | { id: string; state: 'pending' }>;
 }

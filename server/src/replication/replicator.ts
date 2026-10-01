@@ -1,58 +1,51 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import Database from 'better-sqlite3';
-import { z } from 'zod';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
 import { resolveWithin } from '../services/safe-path.js';
-import { activateGeneration, currentGeneration } from './state.js';
-import { protocolVersion, dataScope } from '../version.js';
-import { canonicalJson, createSnapshot, durableFile, durableJson, hashFile, validateManifest, columns, type BlobInfo, type Manifest } from './protocol.js';
-import { S3Store, type ObjectStore } from './s3.js';
+import { activateVersion, getActiveVersion, clearVersions, removeVersion, referencedRoots } from './state.js';
+import { canonicalJson, contractValues, durableFile, hashFile, manifestPack, safeContentFile, syncTree, validateIndex, validateManifest, type FileInfo, type Manifest, type SnapshotIndex } from './protocol.js';
+import { readState, writeState, SnapshotPublisher } from './snapshots.js';
+import { warmCache, drainCaches } from './cache.js';
 
-const pointerSchema = z.object({ generation: z.string().uuid(), sequence: z.number().int().positive().safe(), manifestHash: z.string().regex(/^[a-f0-9]{64}$/), owner: z.string().uuid() }).strict();
-type Pointer = z.infer<typeof pointerSchema>;
-const root = path.join(config.dataDir, 'replication');
+export const publisher = new SnapshotPublisher();
 export const replicationStatus = {
-  role: config.replicationRole,
-  ready: config.replicationRole !== 'replica',
-  running: false,
-  generation: null as string | null,
-  snapshotAt: null as string | null,
-  lastSuccess: null as string | null,
-  lastError: null as string | null,
-  uploadedBlobs: 0,
-  downloadedBlobs: 0,
-  protocol: protocolVersion,
-  scope: dataScope,
+  role: config.isReplica ? 'replica' : 'standalone', ...contractValues(),
+  ready: !config.isReplica, running: false, lastCheck: null as string | null,
+  lastSuccess: null as string | null, lastError: null as string | null,
+  pendingPacks: 0, failedPacks: 0, downloadedFiles: 0,
 };
-const blobKey = (hash: string) => `blobs/sha256/${hash.slice(0, 2)}/${hash}`;
-
+const root = path.join(config.dataDir, 'replica');
 export class Replicator {
   private timer?: NodeJS.Timeout;
   private pending?: Promise<void>;
   private stopped = false;
-  private readonly abort = new AbortController();
-  constructor(private readonly store: ObjectStore = new S3Store()) {}
-
+  private abort = new AbortController();
+  private token = '';
   async initialize(): Promise<void> {
-    fs.mkdirSync(root, { recursive: true });
-    if (config.replicationRole === 'replica') {
-      const pointerPath = path.join(root, 'current.json');
-      if (fs.existsSync(pointerPath)) {
-        const pointer = pointerSchema.parse(JSON.parse(fs.readFileSync(pointerPath, 'utf8')));
-        try { await this.activate(pointer, false); }
-        catch (error) {
-          replicationStatus.lastError = error instanceof Error ? error.message : 'Cannot load local snapshot';
-          console.error(`[replication] ${replicationStatus.lastError}`);
-        }
+    if (!config.isReplica) { publisher.initialize(); return; }
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    await durableFile(config.dataDir);
+    const rows = getDb().prepare('SELECT manifest,root FROM replica_packs').all() as { manifest: string; root: string }[];
+    for (const row of rows) {
+      const manifest = validateManifest(JSON.parse(row.manifest));
+      const expected = this.versionRoot(manifest);
+      if (row.root !== expected) throw new Error('Invalid local version root');
+      for (const file of manifest.files) {
+        const filename = await safeContentFile(path.join(expected, 'extracted', manifest.metadata.id), file.path);
+        const actual = await hashFile(filename);
+        if (actual.hash !== file.hash || actual.size !== file.size) throw new Error('Local snapshot is corrupt');
       }
+      this.activate(manifest);
     }
+    replicationStatus.ready = rows.length > 0 || readState('replicaEmpty') === 'true';
+    await this.collect(true);
   }
   start(): void {
     void this.run();
-    this.timer = setInterval(() => void this.run(), config.replicationInterval * 1000);
+    this.timer = setInterval(() => void this.run(), config.isReplica ? config.replicationInterval * 1000 : 1000);
     this.timer.unref();
   }
   run(): Promise<void> {
@@ -61,155 +54,207 @@ export class Replicator {
     replicationStatus.running = true;
     this.pending = (async () => {
       try {
-        if (config.replicationRole === 'primary') await this.publish();
-        else await this.pull();
-        replicationStatus.lastSuccess = new Date().toISOString();
-        replicationStatus.lastError = null;
+        if (config.isReplica) await this.pull(); else await publisher.run(this.abort.signal);
+        replicationStatus.lastSuccess = new Date().toISOString(); replicationStatus.lastError = null;
       } catch (error) {
-        // Never log SDK requests/credentials. Status carries only the error message.
-        replicationStatus.lastError = error instanceof Error ? error.message : 'Replication failed';
-        console.error(`[replication] ${replicationStatus.lastError}`);
+        replicationStatus.lastError = error instanceof Error ? error.message : 'Snapshot synchronization failed';
       } finally {
-        replicationStatus.running = false;
-        this.pending = undefined;
+        replicationStatus.lastCheck = new Date().toISOString(); replicationStatus.running = false; this.pending = undefined;
       }
     })();
     return this.pending;
   }
   async stop(): Promise<void> {
-    this.stopped = true;
-    this.abort.abort();
-    clearInterval(this.timer);
-    this.store.close();
-    await this.pending;
+    this.stopped = true; this.abort.abort(); clearInterval(this.timer);
+    await this.pending; await drainCaches(); clearVersions();
   }
-  private async publish(): Promise<void> {
-    const ownerPath = path.join(root, 'publisher.json');
-    if (!fs.existsSync(ownerPath)) durableJson(ownerPath, { id: randomUUID() });
-    const owner = z.object({ id: z.string().uuid() }).parse(JSON.parse(fs.readFileSync(ownerPath, 'utf8'))).id;
-    const claim = await this.store.json('publisher.json');
-    if (!claim) await this.store.putJson('publisher.json', { id: owner });
-    else if (z.object({ id: z.string().uuid() }).parse(claim.value).id !== owner) throw new Error('S3 prefix belongs to another primary');
-    const previous = await this.store.json('latest.json');
-    const prior = previous ? pointerSchema.parse(previous.value) : undefined;
-    if (prior && prior.owner !== owner) throw new Error('Publisher identity mismatch');
-    const staging = path.join(root, 'export');
-    // Only this serial exporter owns this directory; it never contains live data.
-    await fs.promises.rm(staging, { recursive: true, force: true });
-    try {
-      const manifest = await createSnapshot(getDb(), config.dataDir, staging, this.abort.signal);
-      if (this.stopped) return;
-      let uploaded = 0;
-      for (const file of new Map(manifest.files.map(file => [file.hash, file])).values()) {
-        if (this.stopped) return;
-        if (await this.store.upload(blobKey(file.hash), path.join(staging, 'blobs', file.hash), file)) uploaded++;
-      }
-      const prefix = `snapshots/${manifest.generation}`;
-      await this.store.upload(`${prefix}/catalog.sqlite`, path.join(staging, 'catalog.sqlite'), manifest.catalog);
-      await this.store.putJson(`${prefix}/manifest.json`, manifest);
-      const manifestHash = (await hashFile(path.join(staging, 'manifest.json'))).hash;
-      const pointer: Pointer = { generation: manifest.generation, sequence: (prior?.sequence ?? 0) + 1, manifestHash, owner };
-      await this.store.putJson(`${prefix}/COMMITTED`, pointer);
-      await this.store.putJson('latest.json', pointer, previous?.etag);
-      replicationStatus.uploadedBlobs = uploaded;
-      replicationStatus.generation = manifest.generation;
-      replicationStatus.snapshotAt = manifest.createdAt;
-    } finally { await fs.promises.rm(staging, { recursive: true, force: true }); }
+  private async request(endpoint: string, headers: Record<string, string> = {}, retry = true): Promise<Response> {
+    const response = await fetch(`${config.replicaSourceUrl}${endpoint}`, {
+      headers: { ...headers, ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
+      redirect: 'error', signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(120_000)]),
+    });
+    if (response.status === 401 && retry) {
+      await response.body?.cancel(); await this.login(); return this.request(endpoint, headers, false);
+    }
+    return response;
   }
-  private async receive(key: string, destination: string, info: BlobInfo): Promise<boolean> {
+  private async login(): Promise<void> {
+    const response = await fetch(`${config.replicaSourceUrl}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: config.replicaSourceKey }), redirect: 'error',
+      signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(10_000)]),
+    });
+    if (!response.ok) { await response.body?.cancel(); throw new Error(`Upstream login failed: HTTP ${response.status}`); }
+    const result = await response.json() as { token?: unknown };
+    if (typeof result.token !== 'string') throw new Error('Invalid upstream login');
+    this.token = result.token;
+  }
+  private async json(response: Response): Promise<unknown> {
+    if (!response.ok) { await response.body?.cancel(); throw new Error(`Upstream returned HTTP ${response.status}`); }
+    // Limit metadata bodies independently of the file streaming path.
+    if (!response.body) throw new Error('Empty upstream response');
+    const chunks: Buffer[] = []; let bytes = 0;
+    for await (const chunk of Readable.fromWeb(response.body as never)) {
+      bytes += chunk.length;
+      if (bytes > 64 * 1024 * 1024) throw new Error('Snapshot metadata exceeds limit');
+      chunks.push(chunk);
+    }
+    try { return JSON.parse(Buffer.concat(chunks).toString()); }
+    catch { throw new Error('Invalid upstream JSON'); }
+  }
+  private versionRoot(manifest: Manifest): string {
+    return path.join(root, 'versions', manifest.metadata.id, manifest.contentHash);
+  }
+  private activate(manifest: Manifest): void {
+    const version = { id: manifest.revision, root: this.versionRoot(manifest), pack: manifestPack(manifest), readers: 0 };
+    activateVersion(version); warmCache(version);
+  }
+  private async receive(manifest: Manifest, file: FileInfo): Promise<void> {
+    const blobs = path.join(root, 'blobs'); await fs.promises.mkdir(blobs, { recursive: true });
+    const destination = path.join(blobs, file.hash);
     if (fs.existsSync(destination)) {
       const existing = await hashFile(destination, this.abort.signal);
-      if (existing.hash === info.hash && existing.size === info.size) return false;
-      // Never modify blobs already linked into a serving generation.
-      throw new Error('Local immutable object is corrupt; repair the replica cache offline');
+      if (existing.hash !== file.hash || existing.size !== file.size) throw new Error('Local immutable file is corrupt');
+      return;
     }
-    await fs.promises.mkdir(path.dirname(destination), { recursive: true });
-    const temp = `${destination}.${randomUUID()}.tmp`;
-    try {
-      await this.store.download(key, temp, info.size);
-      const actual = await hashFile(temp, this.abort.signal);
-      if (actual.hash !== info.hash || actual.size !== info.size) throw new Error('Downloaded object checksum mismatch');
-      await durableFile(temp);
-      await fs.promises.rename(temp, destination);
-      return true;
-    } finally { await fs.promises.rm(temp, { force: true }); }
+    const temp = `${destination}.part`;
+    let offset = fs.existsSync(temp) ? (await fs.promises.stat(temp)).size : 0;
+    if (offset > file.size) { await fs.promises.truncate(temp, 0); offset = 0; }
+    if (offset < file.size || !fs.existsSync(temp)) {
+      const url = `/api/packs/${encodeURIComponent(manifest.metadata.id)}/snapshot/files/${file.path.split('/').map(encodeURIComponent).join('/')}?contentHash=${manifest.contentHash}`;
+      const response = await this.request(url, offset ? { Range: `bytes=${offset}-`, 'If-Range': `"${file.hash}"` } : {});
+      if (![200, 206].includes(response.status) || !response.body) {
+        await response.body?.cancel(); throw new Error(`File download failed: HTTP ${response.status}`);
+      }
+      if (response.status === 200) offset = 0;
+      else if (response.headers.get('content-range') !== `bytes ${offset}-${file.size - 1}/${file.size}`) {
+        await response.body.cancel(); throw new Error('Invalid download range');
+      }
+      let received = offset;
+      await pipeline(Readable.fromWeb(response.body as never), new Transform({
+        transform(chunk: Buffer, _encoding, done) {
+          received += chunk.length;
+          done(received > file.size ? new Error('Downloaded file exceeds declared size') : null, chunk);
+        },
+      }), fs.createWriteStream(temp, { flags: offset ? 'a' : 'w', mode: 0o600 }), { signal: this.abort.signal });
+    }
+    const actual = await hashFile(temp, this.abort.signal);
+    if (actual.hash !== file.hash || actual.size !== file.size) {
+      await fs.promises.rm(temp, { force: true }); throw new Error('Downloaded file checksum mismatch');
+    }
+    await durableFile(temp); await fs.promises.rename(temp, destination); await durableFile(blobs);
+    replicationStatus.downloadedFiles++;
+  }
+  private async install(manifest: Manifest): Promise<void> {
+    const directory = this.versionRoot(manifest);
+    if (!fs.existsSync(path.join(directory, 'manifest.json'))) {
+      await fs.promises.rm(directory, { recursive: true, force: true });
+      await fs.promises.mkdir(directory, { recursive: true });
+      // Group identical hashes so concurrent workers never append to the same part file.
+      const files = [...new Map(manifest.files.map(file => [file.hash, file])).values()];
+      let cursor = 0;
+      const worker = async () => { while (cursor < files.length) await this.receive(manifest, files[cursor++]); };
+      const results = await Promise.allSettled([worker(), worker()]);
+      const failure = results.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+      for (const file of manifest.files) {
+        const target = resolveWithin(path.join(directory, 'extracted', manifest.metadata.id), file.path);
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        await fs.promises.link(path.join(root, 'blobs', file.hash), target);
+      }
+      await fs.promises.writeFile(path.join(directory, 'manifest.json'), canonicalJson(manifest), { mode: 0o600 });
+      await durableFile(path.join(directory, 'manifest.json')); await syncTree(directory);
+      await durableFile(path.dirname(directory)); await durableFile(path.join(root, 'versions'));
+      await durableFile(root);
+    }
+    // A previous failed installation may have written its marker before fsync
+    // failed. Never commit such a directory solely because the marker exists.
+    if (getActiveVersion(manifest.metadata.id)?.root !== directory) {
+      for (const file of manifest.files) {
+        const filename = await safeContentFile(path.join(directory, 'extracted', manifest.metadata.id), file.path);
+        const actual = await hashFile(filename, this.abort.signal);
+        if (actual.hash !== file.hash || actual.size !== file.size) throw new Error('Incomplete local candidate');
+        await durableFile(filename);
+      }
+      await durableFile(path.join(directory, 'manifest.json')); await syncTree(directory);
+      await durableFile(path.dirname(directory)); await durableFile(path.join(root, 'versions')); await durableFile(root);
+    }
+    const pack = manifestPack(manifest); const db = getDb();
+    db.transaction(() => {
+      db.prepare(`INSERT INTO packs(id,name,original_filename,original_size,original_format,source_type,status,image_count,video_count,total_images_size,total_videos_size,created_at,updated_at)
+        VALUES (@id,@name,@originalFilename,@originalSize,@originalFormat,@sourceType,'extracted',@imageCount,@videoCount,@totalImagesSize,@totalVideosSize,@createdAt,@updatedAt)
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,original_filename=excluded.original_filename,original_size=excluded.original_size,
+        original_format=excluded.original_format,source_type=excluded.source_type,status='extracted',image_count=excluded.image_count,video_count=excluded.video_count,
+        total_images_size=excluded.total_images_size,total_videos_size=excluded.total_videos_size,updated_at=excluded.updated_at,compressed_size=0,error_message=NULL`).run(pack);
+      // Per-pack manifests own their tag names: partially synchronized packs may
+      // legitimately refer to different revisions of the same upstream tag.
+      db.prepare(`INSERT INTO replica_packs(pack_id,manifest,root) VALUES (?,?,?)
+        ON CONFLICT(pack_id) DO UPDATE SET manifest=excluded.manifest,root=excluded.root`).run(pack.id, canonicalJson(manifest), directory);
+    })();
+    this.activate(manifest); replicationStatus.ready = true;
   }
   private async pull(): Promise<void> {
-    const latest = await this.store.json('latest.json');
-    if (!latest) throw new Error('Waiting for the first published snapshot');
-    const pointer = pointerSchema.parse(latest.value);
-    const currentPath = path.join(root, 'current.json');
-    if (fs.existsSync(currentPath)) {
-      const old = pointerSchema.parse(JSON.parse(fs.readFileSync(currentPath, 'utf8')));
-      if (old.owner !== pointer.owner) throw new Error('Publisher changed; explicit replica reseeding is required');
-      if (old.generation === pointer.generation && currentGeneration()?.id === pointer.generation) return;
-      if (pointer.sequence < old.sequence || (pointer.sequence === old.sequence && pointer.generation !== old.generation)) throw new Error('Refusing snapshot rollback');
-    }
-    const prefix = `snapshots/${pointer.generation}`;
-    const committed = await this.store.json(`${prefix}/COMMITTED`);
-    if (!committed || JSON.stringify(pointerSchema.parse(committed.value)) !== JSON.stringify(pointer)) throw new Error('Snapshot is not committed');
-    const object = await this.store.json(`${prefix}/manifest.json`);
-    if (!object) throw new Error('Missing manifest');
-    const manifest = validateManifest(object.value);
-    const { createHash } = await import('node:crypto');
-    if (manifest.generation !== pointer.generation || createHash('sha256').update(canonicalJson(object.value)).digest('hex') !== pointer.manifestHash) {
-      throw new Error('Manifest checksum mismatch');
-    }
-    const directory = path.join(root, 'generations', pointer.generation);
-    // Failed installation directories are safe to replace; the active one was
-    // handled above and is never mutated.
-    await fs.promises.rm(directory, { recursive: true, force: true });
-    await fs.promises.mkdir(directory, { recursive: true });
-    await this.receive(`${prefix}/catalog.sqlite`, path.join(directory, 'catalog.sqlite'), manifest.catalog);
-    let downloaded = 0;
-    for (const file of manifest.files) {
-      if (this.stopped) return;
-      const blob = path.join(root, 'blobs', file.hash);
-      if (await this.receive(blobKey(file.hash), blob, file)) downloaded++;
-      const target = resolveWithin(directory, file.path);
-      await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      await fs.promises.link(blob, target);
-    }
-    durableJson(path.join(directory, 'manifest.json'), manifest);
-    async function syncDirectories(dir: string): Promise<void> {
-      for (const entry of await fs.promises.readdir(dir, { withFileTypes: true })) {
-        if (entry.isDirectory()) await syncDirectories(path.join(dir, entry.name));
+    const health = await this.json(await this.request('/api/health')) as { service?: string; writable?: boolean; replicationProtocol?: string; capabilities?: { snapshots?: boolean } };
+    if (health.service !== 'aoi' || health.writable !== true || !health.capabilities?.snapshots || health.replicationProtocol !== contractValues().protocol) throw new Error('Upstream must be a writable snapshot server with the same protocol');
+    const previous = readState('replicaIndex'); const etag = readState('replicaEtag');
+    const response = await this.request('/api/packs/snapshot', previous && etag ? { 'If-None-Match': etag } : {});
+    const index = response.status === 304 && previous ? validateIndex(JSON.parse(previous)) : validateIndex(await this.json(response));
+    const bound = readState('replicaDataset');
+    if (bound && bound !== index.datasetId) throw new Error('Upstream dataset changed; use a new replica DATA_DIR');
+    const db = getDb();
+    db.transaction(() => {
+      writeState('replicaDataset', index.datasetId); writeState('replicaIndex', canonicalJson(index));
+      if (response.status !== 304) writeState('replicaEtag', response.headers.get('etag') ?? '');
+    })();
+    replicationStatus.failedPacks = 0; replicationStatus.downloadedFiles = 0; replicationStatus.pendingPacks = 0;
+    for (const entry of index.packs) {
+      if (entry.state === 'pending') { replicationStatus.pendingPacks++; continue; }
+      const stored = db.prepare('SELECT manifest FROM replica_packs WHERE pack_id=?').pluck().get(entry.id) as string | undefined;
+      if (stored && validateManifest(JSON.parse(stored)).revision === entry.revision) continue;
+      try {
+        const manifest = validateManifest(await this.json(await this.request(`/api/packs/${encodeURIComponent(entry.id)}/snapshot?revision=${entry.revision}`)));
+        if (manifest.metadata.id !== entry.id || manifest.revision !== entry.revision) throw new Error('Snapshot identity mismatch');
+        await this.install(manifest);
+      } catch {
+        // Do not include remote bodies or URLs (which could expose credentials).
+        replicationStatus.failedPacks++; replicationStatus.pendingPacks++;
       }
-      await durableFile(dir);
     }
-    await syncDirectories(directory);
-    await durableFile(path.join(root, 'generations'));
-    if (manifest.files.length) await durableFile(path.join(root, 'blobs'));
-    await this.activate(pointer, true);
-    replicationStatus.downloadedBlobs = downloaded;
+    const ids = new Set(index.packs.map(pack => pack.id));
+    const removed: string[] = [];
+    db.transaction(() => {
+      for (const row of db.prepare('SELECT pack_id FROM replica_packs').all() as { pack_id: string }[]) {
+        if (!ids.has(row.pack_id)) { db.prepare('DELETE FROM packs WHERE id=?').run(row.pack_id); removed.push(row.pack_id); }
+      }
+      writeState('replicaEmpty', String(index.packs.length === 0));
+    })();
+    for (const id of removed) removeVersion(id);
+    replicationStatus.ready = index.packs.length === 0 || Boolean(db.prepare('SELECT 1 FROM replica_packs LIMIT 1').get());
+    await this.collect();
+    if (replicationStatus.failedPacks) throw new Error(`${replicationStatus.failedPacks} pack snapshots could not be synchronized`);
   }
-  private async activate(pointer: Pointer, save: boolean): Promise<void> {
-    const directory = path.join(root, 'generations', pointer.generation);
-    const manifest = validateManifest(JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json'), 'utf8')));
-    const { createHash } = await import('node:crypto');
-    if (manifest.generation !== pointer.generation || createHash('sha256').update(canonicalJson(manifest)).digest('hex') !== pointer.manifestHash) throw new Error('Local manifest mismatch');
-    const catalog = await hashFile(path.join(directory, 'catalog.sqlite'), this.abort.signal);
-    if (catalog.hash !== manifest.catalog.hash || catalog.size !== manifest.catalog.size) throw new Error('Local catalog checksum mismatch');
-    for (const file of manifest.files) {
-      const actual = await hashFile(resolveWithin(directory, file.path), this.abort.signal);
-      if (actual.hash !== file.hash || actual.size !== file.size) throw new Error('Local content checksum mismatch');
-    }
-    const db = new Database(path.join(directory, 'catalog.sqlite'), { readonly: true, fileMustExist: true });
-    try {
-      db.pragma('query_only = ON');
-      if (db.pragma('quick_check', { simple: true }) !== 'ok' || (db.pragma('foreign_key_check') as unknown[]).length) throw new Error('Replica database integrity check failed');
-      const tableColumns = db.prepare('SELECT name FROM pragma_table_info(?)').pluck();
-      for (const [table, fields] of Object.entries(columns)) {
-        const actual = new Set(tableColumns.all(table));
-        if (fields.some(field => !actual.has(field))) throw new Error(`Missing content schema: ${table}`);
+  private async collect(startup = false): Promise<void> {
+    const protectedRoots = referencedRoots();
+    const keepHashes = new Set<string>();
+    const desired = readState('replicaIndex');
+    const desiredIds = new Set(desired ? validateIndex(JSON.parse(desired)).packs.map(pack => pack.id) : []);
+    const versions = path.join(root, 'versions');
+    if (fs.existsSync(versions)) for (const id of await fs.promises.readdir(versions)) {
+      const packDir = resolveWithin(versions, id);
+      for (const hash of await fs.promises.readdir(packDir)) {
+        const dir = resolveWithin(packDir, hash);
+        if (protectedRoots.has(dir)) {
+          const manifest = validateManifest(JSON.parse(await fs.promises.readFile(path.join(dir, 'manifest.json'), 'utf8')));
+          for (const file of manifest.files) keepHashes.add(file.hash);
+        } else await fs.promises.rm(dir, { recursive: true, force: true });
       }
-      // Persist before swapping the in-memory context. All referenced objects
-      // have been fsynced; a restart can safely reopen the selected generation.
-      if (save) durableJson(path.join(root, 'current.json'), pointer);
-      activateGeneration({ id: pointer.generation, root: directory, db, readers: 0, retired: false });
-      replicationStatus.ready = true;
-      replicationStatus.generation = pointer.generation;
-      replicationStatus.snapshotAt = manifest.createdAt;
-    } catch (error) { db.close(); throw error; }
+    }
+    // Retain partial files across retries. Completed unreferenced blobs are also
+    // retained while any pack is pending so a failed install can reuse them.
+    if (startup || replicationStatus.pendingPacks || desiredIds.size && !replicationStatus.ready) return;
+    const blobs = path.join(root, 'blobs');
+    if (fs.existsSync(blobs)) for (const name of await fs.promises.readdir(blobs)) {
+      if (!keepHashes.has(name)) await fs.promises.rm(resolveWithin(blobs, name), { force: true });
+    }
   }
 }

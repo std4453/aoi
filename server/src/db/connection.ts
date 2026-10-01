@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
-import { readContext, currentGeneration, closeGenerations } from '../replication/state.js';
+
 import { runMigrations } from './migrations.js';
 
 const DEFAULT_COMPRESSION_OPTIONS = {
@@ -25,8 +25,6 @@ let db: Database.Database | null = null;
 let lockDb: Database.Database | null = null;
 
 export function getDb(): Database.Database {
-  const replica = readContext.getStore() ?? currentGeneration();
-  if (replica) return replica.db;
   if (!db || !db.open) {
     throw new Error('Database is not initialized');
   }
@@ -139,7 +137,6 @@ export async function initDb(): Promise<void> {
   fs.mkdirSync(config.dirs.db, { recursive: true });
   fs.mkdirSync(config.dirs.backups, { recursive: true });
   acquireInstanceLock();
-  if (config.replicationRole === 'replica') return;
 
   const dbPath = getDbPath();
   const existed = fs.existsSync(dbPath);
@@ -161,7 +158,7 @@ export async function initDb(): Promise<void> {
 
     if (existed) {
       assertIntegrity(database, dbPath);
-      await backupDb('startup');
+      if (!config.isReplica) await backupDb('startup');
     }
 
     const schema = readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
@@ -170,7 +167,7 @@ export async function initDb(): Promise<void> {
       runMigrations(database);
 
       const row = database.prepare('SELECT COUNT(*) AS count FROM presets').get() as { count: number };
-      if (row.count === 0) {
+      if (!config.isReplica && row.count === 0) {
         database.prepare(
           'INSERT INTO presets (id, name, is_default, options) VALUES (?, ?, ?, ?)'
         ).run(uuidv4(), '默认', 1, JSON.stringify(DEFAULT_COMPRESSION_OPTIONS));
@@ -208,7 +205,6 @@ export async function backupDb(reason = 'manual'): Promise<string> {
 }
 
 export function closeDb(): void {
-  closeGenerations();
   if (db?.open) {
     try {
       db.pragma('wal_checkpoint(TRUNCATE)');

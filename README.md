@@ -354,25 +354,19 @@ npm --prefix client audit
 
 MIT
 
-### 可选 S3 主备复制
+### 直连只读备机
 
-默认 `AOI_REPLICATION_ROLE=off`，不会运行主备同步。设置 `primary` / `replica` 可通过
-S3-compatible 对象存储异步复制已发布内容；两端无需互通或同时在线。备机仅允许浏览和下载，
-前端连接备机时写操作置灰。这与独立前端部署、服务器选择开关相互独立。
+普通后端默认提供图包快照，后台维护解压后图片/视频的 SHA-256 和展示元数据，不复制
+原始压缩包或生成 ZIP。设置 `AOI_SNAPSHOT_ENABLED=false` 可关闭 hash/清单工作及接口。
 
-主备必须使用相同的备份协议版本（SemVer 完整匹配，包含 patch），各自挂载独立
-`DATA_DIR`，并配置
-`AOI_S3_BUCKET`、`AOI_S3_ACCESS_KEY`、`AOI_S3_SECRET_KEY`；MinIO 等还需配置
-`AOI_S3_ENDPOINT`。`AOI_S3_PREFIX` 默认 `aoi`，同步间隔 `AOI_REPLICATION_INTERVAL`
-默认 300 秒。bucket 需预先创建，密钥只放部署环境，不放前端或仓库。
+备机配置 `AOI_REPLICA_SOURCE_URL=https://主机地址`、`AOI_REPLICA_SOURCE_KEY=主机的AUTH_KEY`，
+挂载独立空 `DATA_DIR`。默认每 300 秒拉取一次，可用 `AOI_REPLICATION_INTERVAL` 调整（最小 5）。
+备机自己的 `AUTH_KEY` 独立控制用户访问；上游 key 只存后端，绝不传给前端。
 
-```sh
-# 两个后端分别配置；其余 S3 参数指向相同 bucket/prefix
-AOI_REPLICATION_ROLE=primary  # 主后端，正常读写
-AOI_REPLICATION_ROLE=replica  # 备后端，只读；首次同步前读 API 返回 503
-```
+主备只要求备机能出站访问主机 HTTP(S)，不需要对象存储或反向连接。同步按文件 hash 增量，
+按图包原子切换；主机离线时备机仍可浏览已同步内容。缩略图由备机本地生成，不提供整包
+下载、压缩、业务写入、级联复制或自动切主。与独立前端部署及服务器选择开关正交。
 
-v1 是内容副本：不复制上传会话、处理中/失败的未发布图包、任务历史或未来新增的本机数据。
-网络传输按 blob 增量，数据库按表/列白名单导出；不自动清理历史版本，不支持自动切主。
-主机导出期间若发生业务写入会延期重试，服务无需停机。请监控复制滞后和存储空间。
-完整协议、边界、环境变量及升级方式见 [主备设计文档](docs/replication-design.md)。
+协议为 `1.0.0`，要求完整版本一致（包括 patch），不依赖构建 commit。可读取的接口位于
+`/api/packs/snapshot` 和 `/api/packs/:id/snapshot`。边界、配置、故障与升级约定见
+[主备设计文档](docs/replication-design.md)。

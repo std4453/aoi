@@ -1,3 +1,4 @@
+import { registerSnapshotRoutes } from './routes/snapshots.js';
 import { Replicator } from './replication/replicator.js';
 import { registerReplicationHooks } from './replication/http.js';
 import { scheduleVerification, getVerification, resumeHistoricalVerification } from './services/content-verification.js';
@@ -195,7 +196,7 @@ function installShutdownHandlers(app: FastifyInstance, replicator?: Replicator):
 
       await closePromise;
       try {
-        const backupPath = config.replicationRole === 'replica' ? null : await backupDb('shutdown');
+        const backupPath = config.isReplica ? null : await backupDb('shutdown');
         app.log.info({ backupPath }, 'Database backup completed');
       } catch (error) {
         app.log.error({ error }, 'Database backup during shutdown failed');
@@ -250,22 +251,23 @@ async function main() {
   if (!config.frontendOnly) {
     registerAuth(app);
     registerReplicationHooks(app);
-    if (config.replicationRole !== 'replica') await app.register(tusPlugin);
+    if (!config.isReplica) await app.register(tusPlugin);
 
     await initDb();
     app.log.info({ database: getDbPath(), dataDir: config.dataDir }, 'Database initialized');
 
+    await app.register(registerSnapshotRoutes);
     await app.register(registerPackRoutes);
     await app.register(registerPresetRoutes);
     await app.register(registerProcessingRoutes);
     await app.register(registerDownloadRoutes);
     await app.register(registerSystemRoutes);
 
-    if (config.replicationRole !== 'replica') {
+    if (!config.isReplica) {
       recoverJobs();
       jobQueue.start();
     }
-    if (config.replicationRole !== 'off') {
+    if (config.isReplica || config.snapshotEnabled) {
       replicator = new Replicator();
       await replicator.initialize();
       replicator.start();

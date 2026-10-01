@@ -1,3 +1,4 @@
+import { serverWritable } from '../lib/connection';
 import { useState, useEffect, useCallback } from 'react';
 import { fetchPresets, createPreset, updatePreset, removePreset, setDefaultPreset } from '../api/presets';
 import type { Preset, CompressionOptions } from '../../../shared/types.js';
@@ -8,6 +9,7 @@ export function usePresets() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    if (!serverWritable) { setLoading(false); return; }
     try {
       const data = await fetchPresets();
       setPresets(data);

@@ -5,8 +5,10 @@ export let runtime: RuntimeConfig = { serverSelectionEnabled: false };
 export let activeServer: ServerConnection | null = null;
 let token = '';
 export let serverWritable = true;
+export let serverCanDownloadArchive = true;
 export function setServerCapabilities(health: ServerHealth): void {
   serverWritable = health.writable !== false;
+  serverCanDownloadArchive = health.capabilities?.generatedArchiveDownload ?? serverWritable;
 }
 
 export function savedServers(): ServerConnection[] {

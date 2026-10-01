@@ -1,206 +1,135 @@
-# AoI 主备与对象存储复制协议 1.0.0
+# AoI 直连主备：图包快照协议 1.0.0
 
-## 目标与部署矩阵
+## 定位与部署
 
-主服务正常读写；备服务只读、使用完全独立的本地存储。双方不需要同时在线，
-也不需要互相连接，只需各自访问同一个 S3-compatible bucket/prefix。
-复制不暂停主服务，也不因对象存储故障阻塞业务。它是最终一致的内容副本，
-不提供自动切主、同步提交、上传会话恢复或零数据丢失保证。
+普通后端默认正常读写，并维护图包 hash 和快照读取接口。不需要开启 primary 角色，
+不复制一份原始文件备份，也不主动向外发送内容。备机通过 HTTP(S) 定期拉取，只允许用户读取。
+这是一份可浏览的内容副本，不是完整进程备份，不支持自动切主、级联复制或整包下载。
 
-`AOI_REPLICATION_ROLE` 为 `off`（默认）、`primary` 或 `replica`：
-
-- off：不创建复制目录、不实例化 S3 客户端、不导出/上传同步快照。原有启动/退出
-  SQLite 安全备份仍保留，它不是主备复制；不会新增整库/文件备份工作。
-- primary：正常读写，定时发布。
-- replica：业务数据库只读，不迁移、不补默认预设、不恢复任务、不启动任务队列，
-  不注册 TUS。复制进程可写本地副本，但业务请求不可写。
-- `FRONTEND_ONLY=true`：完全不初始化后端或复制，主备配置不产生工作。
-  `SERVER_SELECTION_ENABLED` 仅控制前端服务器选择，与主备角色独立。
-- 前端从实际连接的 `/api/health` 获取 `writable`，同源和独立部署一致。上传入口、
-  图包删除/重命名/标签/校验/压缩、预设写入、标签写入置灰。浏览、下载、服务器切换
-  和本地设置仍可用。只读标记仅显示在设置页服务器名称后，以及切换服务器列表地址后；
-  不显示常驻横幅。列表异步探测能力，离线时沿用上次成功连接记录。API 客户端也拒绝发送业务写操作；服务器是最终权限边界。
-
-## 数据边界：明确选择，默认不复制
-
-scope 固定为 `aoi-content-v1`。数据库使用表和列双重白名单，代码位于
-`server/src/replication/catalog.sql` 的显式列投影和行过滤条件。新表、新字段不会自动复制其值。
-未来浏览历史、用户会话、节点偏好应放独立本机数据库；不要放进可被整体替换的内容库。
-若必须共用主数据库，新表仍默认排除；备机的本地历史不能写在副本 catalog 中。
-
-同步内容：
-
-- 状态为 `extracted` / `generated` 的已发布图包及公开内容元数据。
-- 标签、图包标签关系、压缩预设、已发布图包的校验数据和迁移版本记录。
-- 这些图包的 `archives/`、`extracted/`、`generated/`、`thumbnails/` 文件。
-- 数据库 schema 保留读取 API 所需的空 `jobs` / `uploads` / `pack_files` 表，
-  但不复制其行。历史任务和上传会话不属于内容同步。
-
-排除内容：上传中/失败/处理中的未发布图包、压缩包密码、校验结果里的匹配缓存、
-上传文件与会话、`_staging` / `temp` / `.tmp` 工作文件、实例锁、鉴权密钥、日志、
-已有备份、复制控制状态，以及所有未列入白名单的表和字段。
-
-因此这是内容副本，不是完整进程灾备。不要将备机目录直接改成 primary 继续跑任务。
-未来新增数据域应新增显式 scope/导出器，并定义表、列、文件依赖和恢复策略；未知 scope
-必须拒绝，不允许“尽量导入”。当前 API 暂不暴露任意表名过滤配置，避免破坏引用完整性。
-
-## 对象布局与兼容性
-
-```text
-<prefix>/publisher.json                         # 唯一发布者 UUID
-<prefix>/blobs/sha256/<前两位>/<完整 SHA-256>     # 不可变文件内容
-<prefix>/snapshots/<UUID>/catalog.sqlite        # 选择性导出的数据库
-<prefix>/snapshots/<UUID>/manifest.json
-<prefix>/snapshots/<UUID>/COMMITTED
-<prefix>/latest.json
-```
-
-manifest 示例：
-
-```json
-{
-  "protocol": "1.0.0",
-  "scope": "aoi-content-v1",
-  "generation": "<UUID>",
-  "createdAt": "2026-10-01T00:00:00.000Z",
-  "catalog": { "hash": "<sha256>", "size": 12345 },
-  "files": [
-    { "path": "generated/<pack-id>/compressed.zip", "hash": "<sha256>", "size": 123 }
-  ]
-}
-```
-
-`latest.json` 和 `COMMITTED` 包含相同的 `generation`、单调递增 `sequence`、
-`manifestHash`、`owner`。哈希使用 canonical JSON：递归按对象键的字典序排序、数组保持顺序，再用
-JSON.stringify 无空白序列化成 UTF-8（不转义 Unicode）。传输对象的键顺序不影响校验。
-
-主备必须同时满足 **protocol、scope 完全一致**。协议版本在 `server/src/version.ts`
-中维护，当前为 SemVer `1.0.0`。比较的是完整版本号：major、minor、patch 都必须相同，
-例如 `1.0.0` 与 `1.0.1` 不能同步；不使用 SemVer 范围或仅比较 major/minor。
-不同应用 commit 可以同步，只要它们遵守同一份协议契约；构建不再注入 revision，
-启用复制也不需要构建标识环境变量。
-
-修改 manifest、对象布局、数据 scope、catalog 表/列/约束或读取语义等协议契约时，
-必须同步修改代码中的协议版本和本文档，并更新兼容性回归测试。破坏性变更提升 major，
-增加契约能力提升 minor，协议修正提升 patch；无论提升哪一级，主备均须更新到同一完整
-协议版本。只改 UI 或其他不影响协议的实现不需要升版本。新增本机数据应继续排除；
-若它改变导出的 schema，也属于 catalog 契约变更，须评估并提升版本。
-
-协议升级时部署支持同一新协议的主备。旧备机拒绝新协议快照但继续服务旧本地版本；
-升级后的备机不打开不兼容旧数据库，等待新版本同步（此时读 API 返回 503）。
-此前带数字 protocol 和 build 字段的开发快照不兼容；须由主机重新发布，不能修改 manifest
-绕过检查。生产仍建议固定镜像 digest，方便追踪和回退，但镜像 digest 不参与兼容性判断。
-独立前端无需拥有 S3 凭据；保持前后端同版本是推荐部署方式。
-
-## 不停服的一致性导出
-
-第一版保留主机现有工作文件布局，不侵入全部解压/压缩处理链。**不可变 blob 位于
-复制层**，而不是把业务所有读写立即改为 CAS。导出使用乐观写入栅栏：
-
-1. 业务写请求（包括 TUS）和后台任务记录开始/结束 revision 及活跃写入数。
-2. 有活跃写入或 pending/running job 时，本轮延期，不阻塞写方。
-3. 取得 revision 和 SQLite `total_changes()`，在线 backup 到临时本机数据库。
-4. 用 SQLite `ATTACH` 挂载临时快照（只从该库读取），在事务中执行 `catalog.sql` 的
-   `INSERT … SELECT`，按表/列和已发布状态批量复制到全新 catalog；保留所需表的约束，
-   校验外键，不经 JavaScript 逐行搬运数据。不上传原始全库 backup。
-5. 把所选图包文件流式复制到本轮私有目录，计算 SHA-256 并形成不可变 blob。
-6. 再检查 revision、活跃写入和 total_changes；有变化则丢弃候选，下轮重试。
-7. 检查通过后，catalog、文件和 manifest 都已与主机工作目录分离。此后主机修改或
-   删除数据不会影响待上传版本；网络上传不需要保持无写入。
-
-这不是仅比较 mtime，也不是边扫描活跃目录边直接发布。所有新业务写入口/后台任务
-必须纳入栅栏；外部程序直接修改 DATA_DIR 不受支持（本来就违反单实例数据所有权）。
-同一进程数据库变更有附加检查，外部数据库连接修改不属于支持场景。
-
-代价：持续写入、持续长任务可能让快照一直延期；一次本地扫描/复制期间需要没有写入，
-但服务始终在线且随时接受写请求。状态接口暴露延期原因，不承诺固定 RPO。该取舍针对
-低更新频率场景；若日后要求持续写入下也及时发布，应改为业务文件不可变版本+事务引用
-或使用一致性文件系统快照，而不能去掉栅栏。
-
-第一版每次在本地重新读取/散列/复制文件，网络按文件哈希增量；catalog 每轮全量。
-重新生成的大 ZIP 若哈希不同会整文件上传，不提供块级去重。主机需额外容纳一次完整
-候选副本的空间。写入结束时间和开始/结束状态检查间没有异步业务操作插入窗口。
-
-## 发布与下载
-
-主机 DATA_DIR 中持久化 publisher UUID。首次通过 `If-None-Match: *` 抢占 prefix；
-不同 UUID 的主机不能继续向该 prefix 发布。保留该文件才能恢复原发布者身份。
-这不是选主租约，不支持自动抢占，禁止复制 publisher 身份同时运行两个主机。
-
-单主串行发布：
-
-1. 读取 latest/ETag。
-2. 上传缺失 blob；HEAD 比较大小和 SHA-256 元数据，已有内容复用。
-3. 上传 catalog 和 manifest。
-4. 最后写 COMMITTED。
-5. 用 `If-Match`（首次为 `If-None-Match`）更新 latest；冲突时失败，不能覆盖新指针。
-
-使用 AWS SDK v3、path-style S3、流式传输和 multipart 上传大对象，校验与上传失败
-不会更新 latest。SDK 有限重试，调度器下轮继续；已完成对象复用。进程重启不恢复
-半个 multipart 或半个下载对象：该对象重新传输。不是字节级断点续传。
-
-备机读取 latest，检查发布标记、manifest 哈希、协议/scope、发布者和递增序号；
-下载 catalog 和本地缺失 blob，检查每个大小/SHA-256、路径及数据库完整性。目录穿越、
-重复路径、符号链接、未知根目录被拒绝。所有内容从暂存区形成独立 generation，文件
-通过硬链接共享本机 blob，不允许原地覆盖。已有本地 blob 损坏会报错，不修改正在服务
-的历史版本；需要运维修复或用新的 DATA_DIR 重新拉取。
-
-完整校验并 fsync 文件/目录后才持久化 current 指针并切换进程内上下文。每个读请求
-通过 AsyncLocalStorage 固定 database+root；旧请求/下载结束后释放旧连接。新请求
-使用新版本，整个过程无需停服。下载提供 ETag/If-Range，避免续传错误拼接新旧成品。
-
-## 保留、删除、故障
-
-v1 **不自动删除远端版本/blob或本地已安装 generation/blob**。删除图包通过新 catalog
-传播，但旧内容保留以支持离线备机和回退取证。空间会增长，需监控磁盘与 bucket。
-失败的主机候选下次重建；备机同一失败候选下次重建，已校验 blob 可复用。旧失败 UUID
-目录也可能留下，v1 不在服务中清理它们。
-
-不可给 blobs 设置简单的“创建 N 天后删除”规则：最新快照可能仍引用非常旧的内容。
-未来 GC 必须以所有保留 manifest 引用为标记集，考虑进行中发布和离线节点；不能把
-latest 目录以外全部当作垃圾。可单独设置中止未完成 multipart 的生命周期规则。
-
-- 主机离线：已发布版本仍可获取，无法发布未上传数据。
-- 备机离线：主机照常发布；恢复后可直接跳到最新版本。
-- S3 故障：两端本地服务继续；旧版继续可读，新版暂不传播。
-- 同步失败/磁盘不足/缺 blob/校验失败：不切换当前版本。
-- 备机首次启动无快照：health/login/status 可用，业务读 API 503，业务写 API 403。
-- 备机本地版本有效、S3 离线：重启后验证并打开本地版本，继续读。
-- 备机严格拒绝回退 sequence 或更换 owner；切换数据集须使用新 DATA_DIR/prefix。
-- 健康接口表明进程可用，不表示数据最新；监控复制状态的 snapshotAt/lastError。
-
-当前实现不做自动主备提升，不保证未发布内容灾备。异步 RPO 是最后成功发布快照以来
-的变化量，不等于定时器间隔。
-
-## 配置、权限和网络
-
-| 环境变量 | 默认值 / 用途 |
+| 配置 | 默认值 / 用途 |
 | --- | --- |
-| AOI_REPLICATION_ROLE | off / primary / replica |
-| AOI_REPLICATION_INTERVAL | 300，秒，最小 5；启动时也尝试一次 |
-| AOI_S3_ENDPOINT | 可选；MinIO 等填写 http(s) URL，AWS 可省略 |
-| AOI_S3_REGION | us-east-1 |
-| AOI_S3_BUCKET | 启用时必填；需预先创建 |
-| AOI_S3_PREFIX | aoi；每个独立数据集一个 prefix |
-| AOI_S3_ACCESS_KEY | 启用时必填 |
-| AOI_S3_SECRET_KEY | 启用时必填；不要提交仓库 |
+| AOI_SNAPSHOT_ENABLED | true；普通后端设 false 后不填充 hash、清单或数据集状态，不注册快照接口 |
+| AOI_REPLICA_SOURCE_URL | 未配置时普通后端；配置为 http(s)://host:port 后成为备机，不支持 URL 内凭据、路径、查询参数 |
+| AOI_REPLICA_SOURCE_KEY | 上游 AUTH_KEY，默认空；只保存在后端部署配置 |
+| AOI_REPLICATION_INTERVAL | 300 秒，最小 5；备机启动立即拉取 |
 
-主机需要 prefix 下 GetObject/HeadObject、PutObject、multipart 上传/中止权限；备机
-仅需 GetObject（不需要 ListBucket/PutObject/DeleteObject）。主机 HEAD 判断对象不存在
-通常需要 prefix 对应的 ListBucket 权限，否则 S3 可能返回 403 而不是 404。服务不自动
-建 bucket、不修改权限，不需要 DeleteObject。对象存储必须支持原子对象 PUT、条件 PUT
-及一致的读写语义。TLS 生产必须启用；不提供跳过证书验证的开关。
+备机的拉取不受 AOI_SNAPSHOT_ENABLED 影响。备机自己的 AUTH_KEY 控制用户访问，与上游 key
+独立。复用现有 POST /api/auth/login 和 Bearer token，401 后重新登录一次；错误 key 下轮重试。
+第一版不引入专用只读 key，上游 key 本身仍有写权限。上游响应体及 key 不写入状态或日志。
+请求禁止跟随重定向，避免凭据发送到其他目标。
 
-两端仅需出站访问 S3 HTTPS（通常 TCP 443；私有 MinIO 按实际端口），无需开放同步入站
-端口、无需 SSH、数据库端口或共享盘。用户访问备机的业务入口是独立网络需求。
+FRONTEND_ONLY=true 完全不初始化数据库、快照或拉取任务。服务器选择功能与主备配置正交。
+两端 DATA_DIR 独立，每个目录只由一个实例使用。备机必须使用新的、专用的数据目录；
+不要把可写实例的数据目录改作备机。
 
-状态：`GET /api/system/replication`，沿用现有 AUTH_KEY 鉴权。包含 role、ready、running、
-generation、snapshotAt、lastSuccess、lastError、最近上传/下载 blob 数、protocol/scope。
-它是节点运行状态，不属于备份。lastSuccess 为本轮成功检查时间，snapshotAt 才是内容时间。
+网络只要求备机出站访问主机 HTTP(S) 端口，主机无需反向访问备机。生产沿用 TLS 与正常证书
+验证，不支持跳过验证。双方需要同时在线才能推进同步；主机离线时备机继续服务本地内容。
 
-## 验证
+## 同步边界
 
-`npm run check`：包含选择性导出、并发写栅栏、路径和版本拒绝、真实 SDK 对接测试 S3
-wire server 的主备跨进程同步、元数据修改零新增 blob、只读/TUS 防护、删除传播、
-缺失 blob 恢复、S3 离线重启、本地下载及 Range 一致性。发布后还需用同一 GHCR digest
-和独立 MinIO 实测上传、预览、生成、下载以及独立前端连接只读备机。
+scope 为 aoi-extracted-v1，显式允许：
+
+- extracted/<packId>/images/ 和 videos/ 下的文件、相对目录结构。
+- id、名称、来源文件名/大小/格式、来源类型、创建/更新时间、关联标签 id/name。
+- 图像/视频数量及字节数由清单计算，备机状态统一为 extracted（内容可用）。
+
+排除原上传 archive、generated ZIP、预设、任务、上传会话、密码、校验过程与匹配缓存，
+以及未来未声明的表/字段。不能直接复制 extracted：其中的 thumbnails、_staging、
+_temp_extract 等均不在允许的两个根目录中。源文件只能是普通文件，不接受符号链接。
+
+备机独立维护数据库，只有同步内容及内部版本指针被更新；浏览历史等本机数据不被替换。
+HTTP 写 API 统一返回 403 READ_ONLY_REPLICA，内部同步与缓存生成允许写。
+备机不提供生成 ZIP 下载、上传、压缩、预设编辑或自动切主。
+
+缩略图、封面和 BlurHash 在备机本地生成，按 contentHash 和 cache-v1 算法版本隔离。
+图包安装后后台预热，访问时按需补齐；全局最多 2 个图片处理任务。缓存失败回退原图，
+不阻止内容安装。图片列表依据原图清单，不依赖缩略图是否已经存在。
+视频接口与原图接口支持单文件读取；视频支持 Range。前端显示文件浏览入口，隐藏整包
+下载/压缩预设入口。只读标记仅在设置页名称后、服务器列表地址后，不显示常驻横幅。
+
+## API 与版本
+
+普通后端注册下列接口，沿用现有业务鉴权。备机不作为同步源，拉取前校验 health 的
+writable、snapshots 能力和协议号。禁用快照接口时返回 404。
+
+| 接口 | 行为 |
+| --- | --- |
+| GET /api/packs/snapshot | 完整索引；ETag / If-None-Match，未变返回 304 |
+| GET /api/packs/:id/snapshot?revision=… | 精确版本 manifest；过期或 pending 返回 409 SNAPSHOT_CHANGED |
+| GET /api/packs/:id/snapshot/files/*?contentHash=… | 仅读取该清单中存在的文件；ETag 为文件 SHA-256，支持 Range/If-Range |
+| GET /api/system/replication | 同步角色、协议、ready、运行状态、最近检查/成功时间、待处理/失败数、最近新增下载数及错误 |
+
+health 暴露 writable、role=standalone/replica、replicationProtocol 和 capabilities：
+generatedArchiveDownload、snapshots。它表示进程能力，不承诺备机数据是最新的。
+
+索引包含 protocol、scope、datasetId 和完整 packs 数组。每个图包为
+{id,state:"ready",revision} 或 {id,state:"pending"}。pending 仍存在，不能删除本地旧版；
+仅从完整有效索引中消失才表示删除。数据读取错误绝不能转换成成功的空索引。
+第一版不分页、不复用业务列表；响应超过元数据上限（64 MiB）则失败，不能截断后应用。
+
+manifest 包含 protocol、scope、metadata、contentHash、revision、files。files 的每项是
+{path,size,hash}，path 必须以 images/ 或 videos/ 开始，使用相对 POSIX 路径。
+拒绝穿越、重复路径、文件/目录冲突、重复 ID，以及同 hash 不同大小。路径使用 safe-path
+并逐层 lstat，文件响应从已经打开且检查过的文件描述符发送。
+
+版本在 server/src/version.ts 中维护，当前为 1.0.0。主备 major/minor/patch 都须一致。
+修改协议、数据范围或读取契约必须更新版本、文档和测试。不依赖 commit，也不注入构建号。
+PR 尚未合并，已删除的 S3 开发协议不占用版本号，不保留兼容逻辑。
+
+hash 规则：
+
+1. 文件用原始字节 SHA-256，size 为字节数。
+2. files 按路径的确定性字符串顺序排序。contentHash=SHA256(canonicalJson(files))。
+3. revision=SHA256(canonicalJson({protocol,scope,metadata,contentHash,files}))。
+4. tags 按 id 排序。canonicalJson 递归按键排序、数组保持顺序，无空白 JSON UTF-8 编码。
+5. 索引按图包 id 排序，ETag 是整个 canonicalJson 索引的 SHA-256，不含请求时间。
+
+## 普通后端索引
+
+有序迁移建立 snapshot_state、snapshot_manifests、replica_packs；初次部署且显式关闭时状态表为空；后续关闭保留旧索引但不再更新或提供接口。
+主机持久化 datasetId UUID、当前 manifest 和文件 stat 签名。没有备机也维护清单。
+后台每秒检查业务变更栅栏及数据库 total_changes；未变直接返回。首次/重启后台核验
+已有图包，按图包串行计算 hash；之后复用 size/mtime/ctime/inode 均未变的文件 hash。
+元数据/标签变化仅更新 manifest，不重读文件内容。请求内不做文件散列。
+
+正在上传、处理、校验或有待执行任务的图包为 pending。扫描前后检查业务写入栅栏与
+数据库变化，冲突时放弃候选、下轮重试，写方不等待。持久化新清单才标为 ready。
+单个坏图包保持 pending，不阻止其他稳定图包建立清单。持续写入可能延迟快照发布。
+运行目录只允许 AoI 修改，外部程序直接改动不受支持。
+
+主机只维护当前清单，没有历史内容副本。文件请求版本失效或 stat 签名变化返回 409，
+备机重取索引/manifest。传输期间的变化还会由备机完整大小和 hash 校验兜底。
+
+## 备机安装与恢复
+
+备机先确认上游能力，再条件读取索引。首次有效索引绑定 datasetId，同时持久化索引和
+ETag。地址改变可以连接相同数据集，datasetId 改变拒绝同步，须使用新 DATA_DIR。
+空索引只有在协议、身份、完整性均通过时才有效。401、超时、无效 JSON 等不会触发删除。
+
+按图包串行处理，文件最多并行 2 个；同 hash 合并为一次下载。目录为：
+
+- replica/blobs/<sha256>：已校验不可变文件。
+- replica/blobs/<sha256>.part：可续传部分文件。
+- replica/versions/<packId>/<contentHash>/：图包文件硬链接、manifest 与本地缓存。
+- replica_packs：数据库中的已提交图包 manifest 和文件根目录指针。
+
+失败的图包留待重试，不阻塞其他图包。索引返回 304 也继续处理本地待完成任务。
+Range 续传必须校验 Content-Range，服务器返回完整 200 时从头覆盖；无论是否续传，
+完成后必须核验全部 SHA-256 和大小。失败不改变已有可见版本。
+
+文件、manifest 及目录 fsync 后，事务更新图包内容字段、标签与版本指针，最后切换进程内
+读取上下文。每个图包请求固定元数据和文件版本。不同图包可处在不同同步时刻，不承诺
+整个库一起切换。崩溃在事务前继续旧版，事务后可重开新版；重启检查已提交文件完整性。
+
+后台任务、活动读取和当前图包版本都会固定文件根目录。无引用版本才回收；存在未完成
+任务时保留下载缓存，恢复后清理不再需要的 blob/part。清理仅作用于同步自有目录。
+SQLite 提交失败、缺文件、checksum 错误和 ENOSPC 都不切换版本。首次尚无内容返回 503；
+至少一个图包安装成功即可浏览该图包；确认源库为空则正常返回空列表。
+
+## 开发与验收
+
+npm run check 覆盖默认/禁用模式、范围、鉴权、ETag、精确版本、pending、离线、删除、
+304 重试、坏 hash、断流续传及重启、提交失败恢复、数据集变更和只读上游拒绝。
+发布后用同一 GHCR 镜像启动隔离主备，验证实际上传/预览、图片/视频读取和浏览器只读行为。
+临时脚本/截图不提交，测试数据在 /data；不使用 sudo，不改变线上 Kubernetes 资源。
+旧 S3 测试数据不会自动迁移或删除，新备机从独立空目录开始。

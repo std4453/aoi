@@ -25,7 +25,7 @@ export default function AppShell() {
     <div className="min-h-screen flex flex-col bg-gray-950">
       {/* Main content */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-4 pb-24">
-        {!serverWritable && location.pathname.replace(/\/+$/, '') === '/upload' ? <p className="text-gray-400">备服务器不支持上传，请连接主服务器。</p> : <Outlet />}
+        {!serverWritable && ['/upload', '/settings/presets'].includes(location.pathname.replace(/\/+$/, '')) ? <p className="text-gray-400">备服务器不支持此操作，请连接主服务器。</p> : <Outlet />}
       </main>
 
       {/* Bottom nav */}

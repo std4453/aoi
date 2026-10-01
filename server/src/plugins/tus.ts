@@ -26,7 +26,7 @@ export const tusPlugin = fp(async function (fastify) {
     const res = reply.raw;
 
     reply.hijack();
-    const end = config.replicationRole === 'primary' && !['GET', 'HEAD', 'OPTIONS'].includes(request.method) ? beginMutation() : () => {};
+    const end = config.snapshotEnabled && !config.isReplica && !['GET', 'HEAD', 'OPTIONS'].includes(request.method) ? beginMutation() : () => {};
     try { await tusServer.handle(req, res); } finally { end(); }
   });
 });

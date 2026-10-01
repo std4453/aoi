@@ -1,35 +1,34 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type Database from 'better-sqlite3';
+import type { StoredPack } from '../db/repositories.js';
 
-export interface ReadGeneration {
+export interface ReadVersion {
   id: string;
   root: string;
-  db: Database.Database;
+  pack: StoredPack;
   readers: number;
-  retired: boolean;
 }
-export const readContext = new AsyncLocalStorage<ReadGeneration>();
-let current: ReadGeneration | undefined;
-export const currentGeneration = () => current;
-export function activateGeneration(next: ReadGeneration): void {
-  const old = current;
-  current = next;
-  if (old) {
-    old.retired = true;
-    if (!old.readers) old.db.close();
-  }
+export const readContext = new AsyncLocalStorage<ReadVersion>();
+const active = new Map<string, ReadVersion>();
+const reading = new Set<ReadVersion>();
+export const getActiveVersion = (packId: string) => active.get(packId);
+export function activateVersion(version: ReadVersion): void { active.delete(version.pack.id); active.set(version.pack.id, version); }
+export function activePacks(): StoredPack[] { return [...active.values()].map(version => version.pack); }
+export function removeVersion(packId: string): void { active.delete(packId); }
+export function pinVersion(version: ReadVersion): () => void {
+  version.readers++;
+  reading.add(version);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--version.readers === 0) reading.delete(version);
+  };
 }
-export function releaseGeneration(generation: ReadGeneration): void {
-  generation.readers--;
-  if (generation.retired && !generation.readers) generation.db.close();
+export function referencedRoots(): Set<string> {
+  return new Set([...active.values(), ...reading].map(version => version.root));
 }
-export function closeGenerations(): void {
-  if (current?.db.open) current.db.close();
-  current = undefined;
-}
+export function clearVersions(): void { active.clear(); }
 
-// Optimistic snapshot fence: writers never wait for the exporter. A concurrent
-// write invalidates its candidate instead. Job and request lifetimes both count.
 let revision = 0;
 let writers = 0;
 export function beginMutation(): () => void {

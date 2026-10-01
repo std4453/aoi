@@ -1,3 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../config.js';
+import { getActiveVersion, activePacks } from '../replication/state.js';
+import { readContext } from '../replication/state.js';
 import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
 import { getDb } from './connection.js';
@@ -83,6 +88,7 @@ export function getTag(id: string): Tag | undefined {
 }
 
 export function listTags(): Tag[] {
+  if (config.isReplica) return [...new Map(activePacks().flatMap(pack => pack.tags.map(tag => [tag.id, tag] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
   return queryAll('SELECT * FROM tags ORDER BY name').map(row => ({
     id: row.id,
     name: row.name,
@@ -122,6 +128,7 @@ export function setPackTags(packId: string, tagIds: string[]): void {
 }
 
 export function getPackTags(packId: string): Tag[] {
+  if (config.isReplica) return getPack(packId)?.tags ?? [];
   const rows = queryAll(
     'SELECT t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.pack_id = ? ORDER BY t.name',
     [packId]
@@ -150,6 +157,9 @@ export function createPack(data: {
 }
 
 export function getPack(id: string): StoredPack | undefined {
+  const pinned = readContext.getStore();
+  if (pinned?.pack.id === id) return pinned.pack;
+  if (config.isReplica) return getActiveVersion(id)?.pack;
   const row = queryOne('SELECT * FROM packs WHERE id = ?', [id]);
   if (!row) return undefined;
   const tags = getPackTags(id);
@@ -157,6 +167,7 @@ export function getPack(id: string): StoredPack | undefined {
 }
 
 export function listPacks(): StoredPack[] {
+  if (config.isReplica) return activePacks().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const rows = queryAll('SELECT * FROM packs ORDER BY created_at DESC');
   // Batch load all tags for efficiency
   const allTags = rows.length > 0
@@ -175,6 +186,10 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
   const pageSize = Math.max(1, Math.min(100, params.pageSize ?? 20));
   const search = params.search?.trim() ?? '';
   const keywords = search.split(/\s+/).filter(Boolean);
+  if (config.isReplica) {
+    const matches = listPacks().filter(pack => !keywords.length || keywords.some(word => [pack.name, ...pack.tags.map(tag => tag.name)].some(value => value.toLowerCase().includes(word.toLowerCase()))));
+    return { items: matches.slice((page - 1) * pageSize, page * pageSize), total: matches.length, page, pageSize };
+  }
 
   let whereClause = '';
   const whereParams: string[] = [];
@@ -264,6 +279,10 @@ export function updatePackBlurhashes(id: string, blurhashes: Record<string, Blur
 }
 
 export function getPackBlurhashes(id: string): Record<string, BlurhashEntry> {
+  const version = readContext.getStore() ?? getActiveVersion(id);
+  if (version) {
+    try { return JSON.parse(fs.readFileSync(path.join(version.root, 'cache-v1', 'blurhashes.json'), 'utf8')); } catch { return {}; }
+  }
   const row = queryOne('SELECT blurhashes FROM packs WHERE id = ?', [id]);
   if (!row || !row.blurhashes) return {};
   try {

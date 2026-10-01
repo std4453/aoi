@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { readContext, currentGeneration } from '../replication/state.js';
+import { readContext, getActiveVersion } from '../replication/state.js';
 import { config } from '../config.js';
 import { resolveWithin, validateIdentifier } from './safe-path.js';
 
@@ -24,8 +24,8 @@ export function ensureDir(dir: string): void {
 
 export function getPath(type: 'archive' | 'extracted' | 'generated' | 'thumbnails' | 'uploads', packId: string): string {
   const directory = type === 'archive' ? 'archives' : type;
-  const generation = readContext.getStore() ?? currentGeneration();
-  const base = generation ? path.join(generation.root, directory) : config.dirs[directory];
+  const generation = readContext.getStore() ?? getActiveVersion(packId);
+  const base = generation ? path.join(generation.root, directory === 'thumbnails' ? 'cache-v1/covers' : directory) : config.dirs[directory];
   return resolveWithin(base, validateIdentifier(packId, 'pack id'), 'pack id');
 }
 
@@ -42,6 +42,8 @@ export function getExtractedVideosDir(packId: string): string {
 }
 
 export function getThumbnailsDir(packId: string): string {
+  const version = readContext.getStore() ?? getActiveVersion(packId);
+  if (version) return path.join(version.root, 'cache-v1', 'thumbnails');
   return resolveWithin(getPath('extracted', packId), 'thumbnails');
 }
 

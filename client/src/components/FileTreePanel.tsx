@@ -89,7 +89,7 @@ function TreeNode({
         className={`flex items-center py-1.5 rounded transition-colors ${
           isFolder ? 'sticky bg-gray-900 z-10 cursor-pointer hover:bg-gray-800' : ''
         } ${
-          mode === 'view' && node.type === 'image'
+          mode === 'view' && (node.type === 'image' || node.type === 'video')
             ? 'cursor-pointer hover:bg-gray-800'
             : mode === 'select'
               ? 'cursor-pointer hover:bg-gray-800'
@@ -101,6 +101,8 @@ function TreeNode({
             onToggleSelect(node);
           } else if (mode === 'view' && node.type === 'image') {
             onImageClick?.(node.path);
+          } else if (mode === 'view' && node.videoUrl) {
+            window.open(resourceUrl(node.videoUrl), '_blank', 'noopener,noreferrer');
           }
         }}
       >

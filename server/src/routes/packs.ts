@@ -1,3 +1,4 @@
+import { cachedImage, requestVersion } from '../replication/cache.js';
 import { scheduleVerification, getVerification, getLiveMatches, continueFolderVerification } from '../services/content-verification.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
@@ -670,10 +671,24 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     return reply.sendFile(path.basename(resolved), path.dirname(resolved));
   });
 
+  fastify.get<{ Params: { id: string; '*': string } }>('/api/packs/:id/videos/*', async (request, reply) => {
+    if (!getPack(request.params.id)) return reply.code(404).send({ error: 'Pack not found' });
+    let file: string;
+    try { file = resolveWithin(getExtractedVideosDir(request.params.id), request.params['*']); }
+    catch { return reply.code(403).send({ error: 'Forbidden' }); }
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return reply.code(404).send({ error: 'Video not found' });
+    return reply.sendFile(path.basename(file), path.dirname(file));
+  });
+
   // Serve thumbnail for a pack (supports subdirectory paths)
   fastify.get<{
     Params: { id: string; '*': string };
   }>('/api/packs/:id/thumbnails/*', async (request, reply) => {
+    const version = requestVersion(request.params.id);
+    if (version) {
+      const file = await cachedImage(version, request.params['*']);
+      return file ? reply.sendFile(path.basename(file), path.dirname(file)) : reply.code(404).send({ error: 'Thumbnail not found' });
+    }
     if (!getPack(request.params.id)) {
       reply.code(404).send({ error: 'Pack not found' });
       return;
@@ -688,8 +703,13 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       return;
     }
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-      reply.code(404).send({ error: 'Thumbnail not found' });
-      return;
+      const imagesDir = getExtractedImagesDir(request.params.id);
+      const original = fs.existsSync(imagesDir) ? [...buildJpegOutputPaths(walkDirForExt(imagesDir, null))].find(([, thumb]) => thumb === relPath)?.[0] : undefined;
+      if (original) {
+        const source = resolveWithin(imagesDir, original);
+        return reply.sendFile(path.basename(source), path.dirname(source));
+      }
+      return reply.code(404).send({ error: 'Thumbnail not found' });
     }
     return reply.sendFile(path.basename(resolved), path.dirname(resolved));
   });
@@ -698,6 +718,11 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string };
   }>('/api/packs/:id/cover', async (request, reply) => {
+    const version = requestVersion(request.params.id);
+    if (version) {
+      const file = await cachedImage(version, '', true);
+      return file ? reply.sendFile(path.basename(file), path.dirname(file)) : reply.code(404).send({ error: 'Cover not found' });
+    }
     if (!getPack(request.params.id)) {
       reply.code(404).send({ error: 'Pack not found' });
       return;
@@ -735,9 +760,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     }
     const thumbDir = getThumbnailsDir(request.params.id);
     const imagesDir = getExtractedImagesDir(request.params.id);
-    if (!fs.existsSync(thumbDir)) {
-      return [];
-    }
+    if (!fs.existsSync(imagesDir)) return [];
     // Load blurhashes from DB
     const blurhashMap = getPackBlurhashes(request.params.id);
 
@@ -759,7 +782,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       }
     }
 
-    const thumbFiles = walkDirForExt(thumbDir, '.jpg');
+    const thumbFiles = [...(originalByThumbnail?.keys() ?? [])];
 
     // Sort by path, segment by segment, with numeric awareness
     thumbFiles.sort((a, b) => {
@@ -897,9 +920,7 @@ function buildFileTree(
 
     const legacyThumbPath = normalized.replace(/\.[^.]+$/, '.jpg');
     const collisionSafeThumbPath = thumbnailPaths.get(normalized) ?? legacyThumbPath;
-    const thumbPath = thumbnailDir && fs.existsSync(path.join(thumbnailDir, ...collisionSafeThumbPath.split('/')))
-      ? collisionSafeThumbPath
-      : legacyThumbPath;
+    const thumbPath = collisionSafeThumbPath;
     const thumbUrl = thumbnailDir
       ? `/api/packs/${packId}/thumbnails/${encodeRelativePathForUrl(thumbPath)}`
       : undefined;
@@ -929,6 +950,7 @@ function buildFileTree(
     folder.set(name, {
       name,
       type: 'video',
+      videoUrl: `/api/packs/${packId}/videos/${encodeRelativePathForUrl(normalized)}`,
       path: normalized,
       size,
     });
