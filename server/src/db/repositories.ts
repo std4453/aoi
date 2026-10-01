@@ -83,7 +83,7 @@ export function getTag(id: string): Tag | undefined {
 }
 
 export function listTags(): Tag[] {
-  return queryAll('SELECT * FROM tags ORDER BY name').map(row => ({
+  return queryAll('SELECT id, MIN(name) AS name FROM (SELECT id,name FROM tags UNION SELECT id,name FROM pack_display_tags) GROUP BY id ORDER BY name').map(row => ({
     id: row.id,
     name: row.name,
   }));
@@ -123,7 +123,7 @@ export function setPackTags(packId: string, tagIds: string[]): void {
 
 export function getPackTags(packId: string): Tag[] {
   const rows = queryAll(
-    'SELECT t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.pack_id = ? ORDER BY t.name',
+    'SELECT id, name FROM pack_display_tags WHERE pack_id = ? ORDER BY name',
     [packId]
   );
   return rows.map(row => ({ id: row.id, name: row.name }));
@@ -160,7 +160,7 @@ export function listPacks(): StoredPack[] {
   const rows = queryAll('SELECT * FROM packs ORDER BY created_at DESC');
   // Batch load all tags for efficiency
   const allTags = rows.length > 0
-    ? queryAll('SELECT pt.pack_id, t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id')
+    ? queryAll('SELECT pack_id, id, name FROM pack_display_tags')
     : [];
   const tagMap = new Map<string, Tag[]>();
   for (const row of allTags) {
@@ -191,7 +191,7 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
 
   // Count query
   const countSql = keywords.length > 0
-    ? `SELECT COUNT(DISTINCT p.id) as cnt FROM packs p LEFT JOIN pack_tags pt ON pt.pack_id = p.id LEFT JOIN tags t ON pt.tag_id = t.id ${whereClause}`
+    ? `SELECT COUNT(DISTINCT p.id) as cnt FROM packs p LEFT JOIN pack_display_tags t ON t.pack_id = p.id ${whereClause}`
     : 'SELECT COUNT(*) as cnt FROM packs p';
   const countRow = queryOne(countSql, whereParams.length > 0 ? whereParams : undefined);
   const total = (countRow?.cnt as number) ?? 0;
@@ -199,7 +199,7 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
   // Data query
   const offset = (page - 1) * pageSize;
   const dataSql = keywords.length > 0
-    ? `SELECT p.* FROM packs p LEFT JOIN pack_tags pt ON pt.pack_id = p.id LEFT JOIN tags t ON pt.tag_id = t.id ${whereClause} GROUP BY p.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
+    ? `SELECT p.* FROM packs p LEFT JOIN pack_display_tags t ON t.pack_id = p.id ${whereClause} GROUP BY p.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?`
     : 'SELECT * FROM packs p ORDER BY p.created_at DESC LIMIT ? OFFSET ?';
   const dataParams = keywords.length > 0
     ? [...whereParams, pageSize, offset]
@@ -210,7 +210,7 @@ export function listPacksPaginated(params: PackListParams): PaginatedResponse<St
   const packIds = rows.map(r => r.id as string);
   const tagPlaceholders = packIds.map(() => '?').join(',');
   const allTags = packIds.length > 0
-    ? queryAll(`SELECT pt.pack_id, t.id, t.name FROM pack_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.pack_id IN (${tagPlaceholders})`, packIds)
+    ? queryAll(`SELECT pack_id, id, name FROM pack_display_tags WHERE pack_id IN (${tagPlaceholders})`, packIds)
     : [];
   const tagMap = new Map<string, Tag[]>();
   for (const row of allTags) {

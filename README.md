@@ -353,3 +353,22 @@ npm --prefix client audit
 ## License
 
 MIT
+
+### 直连只读备机
+
+普通后端默认提供图包快照，后台维护解压后图片/视频的 SHA-256 和展示元数据，不复制
+原始压缩包或生成 ZIP。设置 `AOI_SNAPSHOT_ENABLED=false` 可关闭 hash/清单工作及接口。
+
+备机配置 `AOI_REPLICA_SOURCE_URL=https://主机地址`、`AOI_REPLICA_SOURCE_KEY=主机的AUTH_KEY`，
+挂载独立空 `DATA_DIR`。默认每 300 秒拉取一次，可用 `AOI_REPLICATION_INTERVAL` 调整（最小 5）。
+备机自己的 `AUTH_KEY` 独立控制用户访问；上游 key 只存后端，绝不传给前端。
+
+主备只要求备机能出站访问主机 HTTP(S)，不需要对象存储或反向连接。同步按文件 hash 增量，
+下载时继续读取旧图包，安装和缩略图处理期间暂时不可浏览，完成后恢复；主机离线时
+仍可浏览本地已处理内容。主备复用原有缩略图任务和目录，不提供整包
+下载、压缩、业务写入、级联复制或自动切主。与独立前端部署及服务器选择开关正交。
+
+协议为 `1.0.0`，要求完整版本一致（包括 patch），不依赖构建 commit。可读取的接口位于
+`/api/packs/snapshot` 和 `/api/packs/:id/snapshot`。本 PR 仅新增数据库迁移 009，包含快照状态、
+安装恢复日志和同步内容变更计数；早期 PR 镜像的测试目录请重新创建。边界、配置、故障与升级约定见
+[主备设计文档](docs/replication-design.md)。

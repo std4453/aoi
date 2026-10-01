@@ -1,3 +1,4 @@
+import { serverWritable, serverCanDownloadArchive } from '../lib/connection';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -316,19 +317,19 @@ export default function PackDetailPage() {
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-xl font-bold text-white leading-tight mb-2">{pack.name}</h2>
           <div className="flex items-center gap-1 shrink-0">
-            <button
+            <button disabled={!serverWritable}
               onClick={() => setShowTagSelector('open')}
               className="p-2 text-gray-400 hover:text-white transition-colors"
             >
               <Tag size={16} />
             </button>
-            <button
+            <button disabled={!serverWritable}
               onClick={handleRename}
               className="p-2 text-gray-400 hover:text-white transition-colors"
             >
               <Pencil size={16} />
             </button>
-            <button
+            <button disabled={!serverWritable}
               onClick={() => setDeleteConfirm('open')}
               className="p-2 text-gray-400 hover:text-red-400 transition-colors"
             >
@@ -374,7 +375,7 @@ export default function PackDetailPage() {
         <div className="mb-4 text-sm text-red-400">
           <p>校验失败：{pack.verification.error}</p>
           {verificationActionError && <p role="alert">{verificationActionError}</p>}
-          <button className="underline mt-2 disabled:opacity-50" disabled={retryingVerification} onClick={async () => {
+          <button className="underline mt-2 disabled:opacity-50" disabled={!serverWritable || retryingVerification} onClick={async () => {
             setRetryingVerification(true);
             setVerificationActionError(null);
             try { await retryVerification(pack.id); await refreshPackStatus(); }
@@ -384,7 +385,7 @@ export default function PackDetailPage() {
         </div>
       )}
       {pack.sourceType === 'folder' && ['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) && !pack.verification?.allowsPreview && (
-        <button className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?folder=${pack.id}`)}>
+        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?folder=${pack.id}`)}>
           继续完成上传
         </button>
       )}
@@ -428,8 +429,12 @@ export default function PackDetailPage() {
         </div>
       )}
 
+      <button disabled={!isAvailable} onClick={() => setShowFileTree('view')} className="mb-4 flex items-center gap-2 text-sm text-blue-400">
+        <FolderTree size={16} />浏览文件
+      </button>
+
       {/* Compression config */}
-      <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+      {serverCanDownloadArchive && <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
         <h3 className="text-sm font-medium text-white mb-4">压缩图包</h3>
 
         {/* Preset selector */}
@@ -585,7 +590,7 @@ export default function PackDetailPage() {
         {/* Action buttons */}
         <div className="flex gap-3 mt-6">
           {canGenerate && !isProcessing && (
-            <button
+            <button disabled={!serverWritable}
               onClick={handleGenerate}
               className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-500 transition-colors"
             >
@@ -612,7 +617,7 @@ export default function PackDetailPage() {
             </button>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Rename modal */}
       {renaming && (
@@ -639,7 +644,7 @@ export default function PackDetailPage() {
               </button>
               <button
                 onClick={confirmRename}
-                disabled={!renameValue.trim()}
+                disabled={!serverWritable || !renameValue.trim()}
                 className="flex-1 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50"
               >
                 确认
@@ -662,7 +667,7 @@ export default function PackDetailPage() {
               确定要删除「{pack.name}」吗？删除后将同步清除文件系统中的源文件，此操作不可恢复。
             </p>
             <div className="flex gap-3">
-              <button
+              <button disabled={!serverWritable}
                 onClick={() => setDeleteConfirm('closing')}
                 className="flex-1 py-2 bg-gray-800 text-gray-300 font-medium rounded-lg hover:bg-gray-700 transition-colors"
               >
@@ -670,7 +675,7 @@ export default function PackDetailPage() {
               </button>
               <button
                 onClick={handleDelete}
-                disabled={deleting}
+                disabled={!serverWritable || deleting}
                 className="flex-1 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-500 transition-colors disabled:opacity-50"
               >
                 {deleting ? '删除中...' : '删除'}
@@ -730,14 +735,8 @@ export default function PackDetailPage() {
               })()
             : undefined}
           onImageSelect={(imagePath) => {
-            // Find the thumbnail index matching this image path
-            // imagePath is relative to images dir (e.g. "NR/scene.png")
-            // thumbnail.name is the relative path in thumbnails dir (e.g. "NR/scene.jpg")
-            const stem = imagePath.replace(/\.[^.]+$/, '');
-            const index = thumbnails.findIndex(t => {
-              const thumbStem = t.name.replace(/\.jpg$/, '');
-              return thumbStem === stem;
-            });
+            const imageUrl = `/api/packs/${id}/images/${imagePath.split('/').map(encodeURIComponent).join('/')}`;
+            const index = thumbnails.findIndex(thumb => thumb.imageUrl === imageUrl);
             if (index >= 0) setSearchParams({ image: String(index) }, { replace: viewerIndex !== null });
           }}
           onConfirm={showFileTree === 'select' ? (selection) => {

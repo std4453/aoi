@@ -1,3 +1,4 @@
+import { serverWritable } from '../lib/connection';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePresets } from '../hooks/usePresets';
@@ -87,7 +88,7 @@ export default function PresetsPage() {
 
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-white">压缩预设</h2>
-        <button
+        <button disabled={!serverWritable}
           onClick={startAdd}
           className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 transition-colors"
         >
@@ -196,7 +197,7 @@ export default function PresetsPage() {
           </div>
 
           <div className="flex gap-2 mt-6">
-            <button
+            <button disabled={!serverWritable}
               onClick={handleSave}
               className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-500 transition-colors"
             >
@@ -298,7 +299,7 @@ export default function PresetsPage() {
                 )}
 
                 <div className="flex gap-2">
-                  <button
+                  <button disabled={!serverWritable}
                     onClick={handleSave}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-500 transition-colors"
                   >
@@ -332,21 +333,21 @@ export default function PresetsPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button
+                  <button disabled={!serverWritable}
                     onClick={() => handleSetDefault(preset.id)}
                     className="p-2 text-gray-500 hover:text-yellow-400 rounded-lg hover:bg-gray-800 transition-colors"
                     title="设为默认"
                   >
                     {preset.isDefault ? <Star size={16} className="fill-current text-yellow-400" /> : <Star size={16} />}
                   </button>
-                  <button
+                  <button disabled={!serverWritable}
                     onClick={() => startEdit(preset.id)}
                     className="p-2 text-gray-500 hover:text-white rounded-lg hover:bg-gray-800 transition-colors"
                     title="编辑"
                   >
                     <Edit3 size={16} />
                   </button>
-                  <button
+                  <button disabled={!serverWritable}
                     onClick={() => handleDelete(preset.id, preset.name)}
                     className="p-2 text-gray-500 hover:text-red-400 rounded-lg hover:bg-gray-800 transition-colors"
                     title="删除"

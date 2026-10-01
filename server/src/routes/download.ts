@@ -1,37 +1,17 @@
+import { config } from '../config.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
 import { getGeneratedPath } from '../services/storage.js';
 import { getPack } from '../db/repositories.js';
 import { stat } from 'node:fs/promises';
 
-function parseRange(value: string, size: number): { start: number; end: number } | null {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
-  if (!match || (!match[1] && !match[2])) return null;
-
-  if (!match[1]) {
-    const suffixLength = Number(match[2]);
-    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
-    return { start: Math.max(0, size - suffixLength), end: size - 1 };
-  }
-
-  const start = Number(match[1]);
-  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
-  if (
-    !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(requestedEnd) ||
-    start < 0 ||
-    start >= size ||
-    requestedEnd < start
-  ) {
-    return null;
-  }
-  return { start, end: Math.min(requestedEnd, size - 1) };
-}
+import { parseRange } from '../services/file-range.js';
 
 export const registerDownloadRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{
     Params: { id: string };
   }>('/api/packs/:id/download', async (request, reply) => {
+    if (config.isReplica) return reply.code(404).send({ error: 'Generated archives are unavailable on replicas' });
     const pack = getPack(request.params.id);
     if (!pack) {
       reply.code(404).send({ error: 'Pack not found' });
@@ -51,7 +31,8 @@ export const registerDownloadRoutes: FastifyPluginAsync = async function (fastif
         `%${character.charCodeAt(0).toString(16).toUpperCase()}`
       );
 
-    const range = request.headers.range;
+    const etag = `"${`${fileStat.size}-${fileStat.mtimeMs}`}-${pack.id}"`;
+    const range = !request.headers['if-range'] || request.headers['if-range'] === etag ? request.headers.range : undefined;
     let start = 0;
     let end = fileStat.size - 1;
 
@@ -75,6 +56,7 @@ export const registerDownloadRoutes: FastifyPluginAsync = async function (fastif
     }
     reply.raw.writeHead(range ? 206 : 200, {
       'Content-Type': 'application/zip',
+      ETag: etag,
       'Content-Disposition': `attachment; filename="aoi-compressed.zip"; filename*=UTF-8''${encodedFileName}`,
       'Content-Length': chunkSize,
       'Accept-Ranges': 'bytes',

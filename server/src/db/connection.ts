@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
+
 import { runMigrations } from './migrations.js';
 
 const DEFAULT_COMPRESSION_OPTIONS = {
@@ -157,7 +158,7 @@ export async function initDb(): Promise<void> {
 
     if (existed) {
       assertIntegrity(database, dbPath);
-      await backupDb('startup');
+      if (!config.isReplica) await backupDb('startup');
     }
 
     const schema = readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
@@ -166,7 +167,7 @@ export async function initDb(): Promise<void> {
       runMigrations(database);
 
       const row = database.prepare('SELECT COUNT(*) AS count FROM presets').get() as { count: number };
-      if (row.count === 0) {
+      if (!config.isReplica && row.count === 0) {
         database.prepare(
           'INSERT INTO presets (id, name, is_default, options) VALUES (?, ?, ?, ?)'
         ).run(uuidv4(), '默认', 1, JSON.stringify(DEFAULT_COMPRESSION_OPTIONS));

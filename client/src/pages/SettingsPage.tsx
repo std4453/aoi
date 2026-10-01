@@ -1,4 +1,4 @@
-import { activeServer, returnToServers } from '../lib/connection';
+import { activeServer, returnToServers, serverWritable } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
@@ -26,7 +26,7 @@ export default function SettingsPage() {
         const [info, tags, presets] = await Promise.all([
           get<DiskInfo>('/system/disk-space'),
           fetchTags().catch(() => []),
-          fetchPresets().catch(() => []),
+          serverWritable ? fetchPresets().catch(() => []) : Promise.resolve([]),
         ]);
         setDiskInfo(info);
         setTagCount((tags as any[]).length);
@@ -53,7 +53,10 @@ export default function SettingsPage() {
             <Server size={18} className="text-blue-400" />
             <span className="text-sm font-medium text-white">服务器</span>
           </div>
-          <span className="min-w-0 ml-auto truncate text-sm text-gray-500">{activeServer?.alias}</span>
+          <span className="min-w-0 ml-auto flex text-sm text-gray-500">
+            <span className="truncate">{activeServer?.alias}</span>
+            {!serverWritable && <span className="shrink-0">（只读）</span>}
+          </span>
         </button>
         {/* System info */}
         <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
@@ -120,7 +123,7 @@ export default function SettingsPage() {
         </button>
 
         {/* Preset management entry */}
-        <button
+        {serverWritable && <button
           onClick={() => navigate('/settings/presets')}
           className="w-full bg-gray-900 rounded-xl p-4 border border-gray-800 flex items-center justify-between hover:border-gray-700 transition-colors text-left"
         >
@@ -129,7 +132,7 @@ export default function SettingsPage() {
             <span className="text-sm font-medium text-white">压缩预设</span>
           </div>
           <span className="text-sm text-gray-500">{presetCount} 个预设</span>
-        </button>
+        </button>}
       </div>
     </div>
   );

@@ -22,8 +22,8 @@ export function ensureDir(dir: string): void {
 }
 
 export function getPath(type: 'archive' | 'extracted' | 'generated' | 'thumbnails' | 'uploads', packId: string): string {
-  const base = config.dirs[type === 'archive' ? 'archives' : type];
-  return resolveWithin(base, validateIdentifier(packId, 'pack id'), 'pack id');
+  const directory = type === 'archive' ? 'archives' : type;
+  return resolveWithin(config.dirs[directory], validateIdentifier(packId, 'pack id'), 'pack id');
 }
 
 export function getArchivePath(packId: string, filename: string): string {

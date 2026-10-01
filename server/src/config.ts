@@ -13,6 +13,17 @@ const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(valu
 
 const configSchema = z.object({
   frontendOnly: flag,
+  snapshotEnabled: z.enum(['true', 'false', '1', '0']).default('true').transform(value => value === 'true' || value === '1'),
+  replicaSourceUrl: z.string().url().optional().transform(value => {
+    if (!value) return undefined;
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+      throw new Error('AOI_REPLICA_SOURCE_URL must be an http(s) origin');
+    }
+    return url.origin;
+  }),
+  replicaSourceKey: z.string().max(4096).default(''),
+  replicationInterval: z.coerce.number().int().min(5).default(300),
   serverSelectionEnabled: flag,
   authKey: z.string().max(4096).default(''),
   tlsCertFile: z.string().optional(),
@@ -35,6 +46,10 @@ const configSchema = z.object({
 
 const parsed = configSchema.parse({
   frontendOnly: process.env.FRONTEND_ONLY,
+  snapshotEnabled: process.env.AOI_SNAPSHOT_ENABLED,
+  replicaSourceUrl: process.env.AOI_REPLICA_SOURCE_URL,
+  replicaSourceKey: process.env.AOI_REPLICA_SOURCE_KEY,
+  replicationInterval: process.env.AOI_REPLICATION_INTERVAL,
   serverSelectionEnabled: process.env.SERVER_SELECTION_ENABLED,
   authKey: process.env.AUTH_KEY,
   tlsCertFile: process.env.TLS_CERT_FILE,
@@ -61,6 +76,7 @@ if (Boolean(parsed.tlsCertFile) !== Boolean(parsed.tlsKeyFile)) {
 
 export const config = {
   ...parsed,
+  isReplica: Boolean(parsed.replicaSourceUrl),
   dirs: {
     uploads: path.join(parsed.dataDir, 'uploads'),
     archives: path.join(parsed.dataDir, 'archives'),

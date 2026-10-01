@@ -670,6 +670,15 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     return reply.sendFile(path.basename(resolved), path.dirname(resolved));
   });
 
+  fastify.get<{ Params: { id: string; '*': string } }>('/api/packs/:id/videos/*', async (request, reply) => {
+    if (!getPack(request.params.id)) return reply.code(404).send({ error: 'Pack not found' });
+    let file: string;
+    try { file = resolveWithin(getExtractedVideosDir(request.params.id), request.params['*']); }
+    catch { return reply.code(403).send({ error: 'Forbidden' }); }
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return reply.code(404).send({ error: 'Video not found' });
+    return reply.sendFile(path.basename(file), path.dirname(file));
+  });
+
   // Serve thumbnail for a pack (supports subdirectory paths)
   fastify.get<{
     Params: { id: string; '*': string };
@@ -688,8 +697,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       return;
     }
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-      reply.code(404).send({ error: 'Thumbnail not found' });
-      return;
+      return reply.code(404).send({ error: 'Thumbnail not found' });
     }
     return reply.sendFile(path.basename(resolved), path.dirname(resolved));
   });
@@ -733,36 +741,15 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       reply.code(404).send({ error: 'Pack not found' });
       return;
     }
-    const thumbDir = getThumbnailsDir(request.params.id);
     const imagesDir = getExtractedImagesDir(request.params.id);
-    if (!fs.existsSync(thumbDir)) {
-      return [];
-    }
+    if (!fs.existsSync(imagesDir)) return [];
     // Load blurhashes from DB
     const blurhashMap = getPackBlurhashes(request.params.id);
 
-    // Build lookup from relative stem → original relative file
-    let originalFiles: Map<string, string> | null = null;
-    let originalByThumbnail: Map<string, string> | null = null;
-    if (fs.existsSync(imagesDir)) {
-      originalFiles = new Map();
-      const allImages = walkDirForExt(imagesDir, null);
-      originalByThumbnail = new Map(
-        [...buildJpegOutputPaths(allImages)].map(([original, thumbnail]) => [
-          thumbnail,
-          original,
-        ])
-      );
-      for (const rel of allImages) {
-        const stem = rel.replace(/\.[^.]+$/, '');
-        if (!originalFiles.has(stem)) originalFiles.set(stem, rel);
-      }
-    }
-
-    const thumbFiles = walkDirForExt(thumbDir, '.jpg');
+    const thumbFiles = [...buildJpegOutputPaths(walkDirForExt(imagesDir, null))];
 
     // Sort by path, segment by segment, with numeric awareness
-    thumbFiles.sort((a, b) => {
+    thumbFiles.sort(([, a], [, b]) => {
       const aParts = a.split(/[/\\]/);
       const bParts = b.split(/[/\\]/);
       for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
@@ -772,10 +759,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       return aParts.length - bParts.length;
     });
 
-    return thumbFiles.map(relPath => {
-      const stem = relPath.replace(/\.jpg$/, '');
-      const originalFile =
-        originalByThumbnail?.get(relPath) ?? originalFiles?.get(stem) ?? relPath;
+    return thumbFiles.map(([originalFile, relPath]) => {
       const bh = blurhashMap[relPath];
       return {
         name: relPath,
@@ -897,9 +881,7 @@ function buildFileTree(
 
     const legacyThumbPath = normalized.replace(/\.[^.]+$/, '.jpg');
     const collisionSafeThumbPath = thumbnailPaths.get(normalized) ?? legacyThumbPath;
-    const thumbPath = thumbnailDir && fs.existsSync(path.join(thumbnailDir, ...collisionSafeThumbPath.split('/')))
-      ? collisionSafeThumbPath
-      : legacyThumbPath;
+    const thumbPath = collisionSafeThumbPath;
     const thumbUrl = thumbnailDir
       ? `/api/packs/${packId}/thumbnails/${encodeRelativePathForUrl(thumbPath)}`
       : undefined;
@@ -929,6 +911,7 @@ function buildFileTree(
     folder.set(name, {
       name,
       type: 'video',
+      videoUrl: `/api/packs/${packId}/videos/${encodeRelativePathForUrl(normalized)}`,
       path: normalized,
       size,
     });
