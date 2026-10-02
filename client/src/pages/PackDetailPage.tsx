@@ -7,6 +7,7 @@ import { fetchPack, fetchThumbnails, fetchFileTree, startProcessing, removePack,
 import { usePresets } from '../hooks/usePresets';
 import { useJobProgress } from '../hooks/useJobProgress';
 import { formatBytes, statusLabels, statusColors } from '../lib/utils';
+import { shouldPollPack, shouldReloadPackPreview } from '../lib/packStatus';
 import { getLastHomeSearch, clearPacksCache } from '../lib/homeStore';
 import type { Pack, CompressionOptions, FileSelection, FileTreeNode, PackThumbnail } from '../../../shared/types.js';
 import { Download, Play, ArrowLeft, Loader2, Image, Video, HardDrive, Pencil, Trash2, Tag, FolderTree } from 'lucide-react';
@@ -116,10 +117,10 @@ export default function PackDetailPage() {
     }
   }, [id]);
 
-  // Load thumbnails and file tree when thumbnailing finishes (must run BEFORE prevStatus update)
+  // A poll may skip intermediate stages; load previews on any processing-to-ready transition.
   const prevStatus = useRef(pack?.status);
   useEffect(() => {
-    if (['thumbnailing', 'verifying'].includes(prevStatus.current ?? '') && (pack?.status === 'extracted' || pack?.status === 'generated')) {
+    if (shouldReloadPackPreview(prevStatus.current, pack?.status)) {
       loadThumbnails();
       loadFileTree();
     }
@@ -145,13 +146,13 @@ export default function PackDetailPage() {
     return closeLoading;
   }, [loading, isAvailable]);
 
-  // Archive packs can be waiting in the extraction queue after upload finishes.
+  // Archive queues and Pixiv downloads both run on the server while uploading.
+  const polling = shouldPollPack(pack);
   useEffect(() => {
-    const queuedArchive = pack?.status === 'uploading' && pack.sourceType === 'archive';
-    if (!queuedArchive && pack?.status !== 'extracting' && pack?.status !== 'thumbnailing' && pack?.status !== 'verifying' && pack?.status !== 'awaiting_confirmation') return;
+    if (!polling) return;
     const timer = setInterval(refreshPackStatus, 1000);
     return () => clearInterval(timer);
-  }, [pack?.status, pack?.sourceType, refreshPackStatus]);
+  }, [polling, refreshPackStatus]);
 
   // Initial load
   useEffect(() => {
