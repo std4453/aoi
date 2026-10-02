@@ -16,10 +16,12 @@ const requestSchema = z.object({
 }).strict();
 
 export const registerPixivRoutes: FastifyPluginAsync = async app => {
-  app.get('/api/settings/pixiv', async (_request, reply) => {
+  app.get<{ Querystring: { reveal?: string } }>('/api/settings/pixiv', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const { refreshToken, source } = readPixivSettings();
-    return { configured: Boolean(refreshToken), source } satisfies PixivSettings;
+    return { configured: Boolean(refreshToken), source,
+      ...(request.query.reveal === '1' ? { refreshToken } : {}),
+    } satisfies PixivSettings;
   });
   app.put('/api/settings/pixiv', async (request, reply) => {
     const input = z.object({ refreshToken: refreshTokenSchema }).strict().safeParse(request.body);

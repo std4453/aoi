@@ -188,6 +188,7 @@ export interface PixivMetadata {
 export interface PixivSettings {
   configured: boolean;
   source: 'settings' | 'environment' | 'none';
+  refreshToken?: string;
 }
 
 export interface UgoiraManifest {

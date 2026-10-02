@@ -59,7 +59,7 @@ test('token errors never echo upstream credentials and never downgrade to anonym
   } finally { await agent.close(); }
 });
 
-test('settings persist privately, never return the token, and metadata creates only the reusable author tag', async t => {
+test('settings reveal tokens only on explicit configuration reads and metadata creates only the author tag', async t => {
   t.mock.method(jobQueue, 'start', () => {});
   const app = Fastify(); await app.register(registerPixivRoutes);
   try {
@@ -67,6 +67,10 @@ test('settings persist privately, never return the token, and metadata creates o
     const saved = await app.inject({ method: 'PUT', url: '/api/settings/pixiv', payload: { refreshToken: 'test-secret' } });
     assert.equal(saved.json().configured, true);
     assert.ok(!saved.body.includes('test-secret'));
+    assert.ok(!(await app.inject('/api/settings/pixiv')).body.includes('test-secret'));
+    const revealed = await app.inject('/api/settings/pixiv?reveal=1');
+    assert.equal(revealed.json().refreshToken, 'test-secret');
+    assert.equal(revealed.headers['cache-control'], 'no-store');
     assert.equal(readPixivSettings().refreshToken, 'test-secret');
     if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dataDir, 'pixiv-settings.json')).mode & 0o777, 0o600);
     const invalid = await app.inject({ method: 'PUT', url: '/api/settings/pixiv', payload: { refreshToken: 'invalid secret' } });
