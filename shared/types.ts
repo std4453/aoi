@@ -175,10 +175,6 @@ export interface PixivImportRequest {
   tagIds?: string[];
 }
 
-export interface PixivImportStatus extends FolderUploadStatus {
-  progress: JobProgress | null;
-}
-
 export interface PixivMetadata {
   title: string;
   author: string;

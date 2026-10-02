@@ -109,11 +109,11 @@ test('interrupted Pixiv jobs are durable and requeued without duplicating a job'
   });
 });
 
-test('import routes validate input, atomically create tagged jobs, expose status and restrict retry', async t => {
+test('import routes validate input and atomically create tagged jobs', async t => {
   const { default: Fastify } = await import('fastify');
   const { registerPixivRoutes } = await import('../src/routes/pixiv.js');
   const { jobQueue } = await import('../src/services/job-queue.js');
-  const { createTag, listPacks, updatePackStatus, getLatestJob } = await import('../src/db/repositories.js');
+  const { createTag, listPacks } = await import('../src/db/repositories.js');
   t.mock.method(jobQueue, 'start', () => {});
   const app = Fastify();
   await app.register(registerPixivRoutes);
@@ -133,14 +133,5 @@ test('import routes validate input, atomically create tagged jobs, expose status
     assert.equal(pack.name, 'My favorite');
     assert.equal(pack.tags[0].id, tag.id);
     assert.equal(pack.originalFilename, 'https://www.pixiv.net/artworks/123');
-    const status = await app.inject(`/api/packs/${pack.id}/pixiv-import`);
-    assert.equal(status.json().progress.status, 'pending');
-    assert.equal(status.json().pack.archivePassword, undefined);
-    assert.equal((await app.inject({ method: 'POST', url: `/api/packs/${pack.id}/pixiv-retry` })).statusCode, 409);
-    updateJobStatus(getLatestJob(pack.id, 'pixiv')!.id, 'failed', 0, 'network');
-    updatePackStatus(pack.id, 'failed', 'network');
-    assert.equal((await app.inject({ method: 'POST', url: `/api/packs/${pack.id}/pixiv-retry` })).statusCode, 200);
-    assert.equal(getPack(pack.id)?.status, 'uploading');
-    assert.equal((await app.inject({ method: 'POST', url: `/api/packs/${pack.id}/pixiv-retry` })).statusCode, 409);
   } finally { await app.close(); }
 });

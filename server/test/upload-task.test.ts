@@ -42,9 +42,14 @@ test('retry preserves Pixiv defaults and rejects duplicate active retries; pendi
   try {
     const pack = makePack(); const job = createJob(pack.id, 'pixiv');
     getDb().prepare('UPDATE jobs SET options = ? WHERE id = ?').run('{"autoName":false,"autoTags":false}', job.id);
+    const status = (await app.inject(`/api/packs/${pack.id}/upload-task`)).json();
+    assert.equal(status.progress.status, 'pending');
+    assert.equal(status.pack.archivePassword, undefined);
+    assert.equal((await app.inject({ method: 'POST', url: `/api/packs/${pack.id}/upload-task/retry` })).statusCode, 409);
     updateJobStatus(job.id, 'failed'); updatePackStatus(pack.id, 'failed', 'login failed');
     assert.equal((await app.inject(`/api/packs/${pack.id}/upload-task`)).json().retryable, true);
     assert.equal((await app.inject({ method: 'POST', url: `/api/packs/${pack.id}/upload-task/retry` })).statusCode, 200);
+    assert.equal(getPack(pack.id)?.status, 'uploading');
     assert.equal(getLatestJob(pack.id, 'pixiv')?.options, '{"autoName":false,"autoTags":false}');
     assert.equal((await app.inject({ method: 'POST', url: `/api/packs/${pack.id}/upload-task/retry` })).statusCode, 409);
     const dir = getExtractedImagesDir(pack.id); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'test.part'), 'partial');
@@ -58,7 +63,7 @@ test('cancelling a running download aborts it before deleting its files and cann
   const pack = makePack(); const job = createJob(pack.id, 'pixiv');
   let began!: () => void;
   const started = new Promise<void>(resolve => { began = resolve; });
-  t.mock.method(getPixivClient(), 'artwork', async () => ({ metadata: { title: 'Title', userName: 'Author', illustType: 0, pageCount: 1 }, tagNames: [], pages: [{ urls: { original: 'https://i.pximg.net/test.jpg' } }], ugoira: undefined }));
+  t.mock.method(getPixivClient(), 'artwork', async () => ({ metadata: { title: 'Title', userName: 'Author', illustType: 0, pageCount: 1 }, pages: [{ urls: { original: 'https://i.pximg.net/test.jpg' } }], ugoira: undefined }));
   t.mock.method(getPixivClient(), 'download', async (_url, destination, _limit, _zip, signal) => {
     fs.writeFileSync(destination + '.part', 'partial'); began();
     await new Promise<void>((_resolve, reject) => {

@@ -16,7 +16,7 @@ export function registerReplicationHooks(app: FastifyInstance): void {
             '/api/packs/:id/folder-file-complete', '/api/packs/:id/folder-continue',
             '/api/packs/:id/retry-verification', '/api/packs/:id/cancel-upload',
             '/api/packs/:id/process',
-            '/api/packs/pixiv-import', '/api/packs/:id/pixiv-retry',
+            '/api/packs/pixiv-import',
             '/api/packs/:id/upload-task', '/api/packs/:id/upload-task/retry', '/api/packs/:id/upload-task/continue',
           ].includes(options.url)) return;
       const original = options.handler;

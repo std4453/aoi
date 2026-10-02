@@ -1,6 +1,6 @@
 import { forgetUploadTask } from '../lib/uploadTask';
 import { apiFetch } from '../lib/connection';
-import type { ArchiveUploadRequest, DuplicateArchiveResponse, FolderUploadStatus, PackThumbnail } from '../../../shared/types.js';
+import type { ArchiveUploadRequest, DuplicateArchiveResponse, PackThumbnail } from '../../../shared/types.js';
 import { get, post, patch, del, put } from './client';
 import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams, PackFile } from '../../../shared/types.js';
 
@@ -101,14 +101,6 @@ export function confirmFolderFileComplete(packId: string, data: {
 
 export function cancelFolderUpload(packId: string): Promise<{ ok: boolean }> {
   return del<{ ok: boolean }>(`/packs/${packId}/cancel-upload`);
-}
-
-export function fetchFolderUploadStatus(packId: string): Promise<FolderUploadStatus> {
-  return get<FolderUploadStatus>(`/packs/${packId}/folder-upload-status`);
-}
-
-export function continueFolderUpload(packId: string): Promise<{ ok: boolean }> {
-  return post<{ ok: boolean }>(`/packs/${packId}/folder-continue`, {});
 }
 
 export function retryVerification(packId: string): Promise<{ ok: boolean }> {

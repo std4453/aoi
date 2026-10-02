@@ -36,11 +36,10 @@ export function validatePixivImageUrl(value: string, zip = false): URL {
 const metadataSchema = z.object({
   title: z.string().min(1), userName: z.string(),
   illustType: z.number().int(), pageCount: z.number().int().positive().max(1000),
-  tags: z.object({ tags: z.array(z.object({ tag: z.string() })).max(1000) }).optional(),
 });
 const appArtworkSchema = z.object({ illust: z.object({
   title: z.string().min(1), user: z.object({ name: z.string() }), type: z.enum(['illust', 'manga', 'ugoira']),
-  page_count: z.number().int().positive().max(1000), tags: z.array(z.object({ name: z.string() })).max(1000),
+  page_count: z.number().int().positive().max(1000),
   meta_single_page: z.object({ original_image_url: z.string().optional() }),
   meta_pages: z.array(z.object({ image_urls: z.object({ original: z.string() }) })).max(1000),
 }) });
@@ -99,29 +98,28 @@ export class PixivClient {
       const { illust } = appArtworkSchema.parse(await this.auth.request('illust/detail', id, signal));
       return {
         metadata: { title: illust.title, userName: illust.user.name, illustType: illust.type === 'ugoira' ? 2 : illust.type === 'manga' ? 1 : 0, pageCount: illust.page_count },
-        tagNames: illust.tags.map(tag => tag.name),
         pages: illust.meta_pages.length ? illust.meta_pages.map(page => ({ urls: { original: page.image_urls.original } })) :
           illust.meta_single_page.original_image_url ? [{ urls: { original: illust.meta_single_page.original_image_url } }] : [],
       };
     }
     const metadata = metadataSchema.parse(await this.json(`https://www.pixiv.net/ajax/illust/${id}`, signal));
-    return { metadata, tagNames: metadata.tags?.tags.map(tag => tag.tag) ?? [], pages: undefined };
+    return { metadata, pages: undefined };
   }
 
   async artwork(id: string, signal?: AbortSignal) {
-    const { metadata, tagNames, pages: appPages } = await this.describe(id, signal);
+    const { metadata, pages: appPages } = await this.describe(id, signal);
     if (metadata.illustType === 2) {
       const raw = this.auth ? z.object({ ugoira_metadata: z.object({ zip_urls: z.object({ medium: z.string() }), frames: ugoiraFramesSchema }) }).parse(await this.auth.request('ugoira/metadata', id, signal)).ugoira_metadata :
         z.object({ originalSrc: z.string(), frames: ugoiraFramesSchema }).parse(await this.json(`https://www.pixiv.net/ajax/illust/${id}/ugoira_meta`, signal));
       const zipUrl = 'originalSrc' in raw ? raw.originalSrc : raw.zip_urls.medium.replace('_ugoira600x600.zip', '_ugoira1920x1080.zip');
       validatePixivImageUrl(zipUrl, true);
-      return { metadata, tagNames, pages: [], ugoira: { zipUrl, frames: raw.frames } };
+      return { metadata, pages: [], ugoira: { zipUrl, frames: raw.frames } };
     }
     if (![0, 1].includes(metadata.illustType)) throw new Error('不支持的 Pixiv 作品类型');
     const pages = pagesSchema.parse(appPages ?? await this.json(`https://www.pixiv.net/ajax/illust/${id}/pages`, signal));
     if (pages.length !== metadata.pageCount) throw new Error('Pixiv 原图列表不完整，请稍后重试');
     for (const page of pages) validatePixivImageUrl(page.urls.original);
-    return { metadata, tagNames, pages, ugoira: undefined };
+    return { metadata, pages, ugoira: undefined };
   }
 
   async download(url: string, destination: string, limit: number, zip = false, signal?: AbortSignal): Promise<number> {

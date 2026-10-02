@@ -19,7 +19,7 @@ await initDb();
 test.after(() => { closeDb(); fs.rmSync(dataDir, { recursive: true, force: true }); });
 
 const work = { illust: { title: 'Title', user: { name: 'Author' }, type: 'illust', page_count: 1,
-  tags: [{ name: 'favorite' }], meta_single_page: { original_image_url: 'https://i.pximg.net/image.png' }, meta_pages: [] } };
+  meta_single_page: { original_image_url: 'https://i.pximg.net/image.png' }, meta_pages: [] } };
 
 test('refresh tokens authenticate the app API, coalesce refreshes and renew on 401 without leaking to CDN', async () => {
   const agent = new MockAgent(); agent.disableNetConnect();
@@ -31,7 +31,6 @@ test('refresh tokens authenticate the app API, coalesce refreshes and renew on 4
       .reply(200, work).times(2);
     const descriptions = await Promise.all([client.describe('123'), client.describe('123')]);
     assert.equal(descriptions[0].metadata.userName, 'Author');
-    assert.deepEqual(descriptions[1].tagNames, ['favorite']);
     agent.get('https://app-api.pixiv.net').intercept({ path: '/v1/illust/detail?illust_id=123' }).reply(401, 'expired');
     agent.get('https://oauth.secure.pixiv.net').intercept({ path: '/auth/token', method: 'POST' }).reply(200, { response: { access_token: 'access-two', expires_in: 3600 } });
     agent.get('https://app-api.pixiv.net').intercept({ path: '/v1/illust/detail?illust_id=123', headers: headers => headers.authorization === 'Bearer access-two' }).reply(200, work);
@@ -77,7 +76,7 @@ test('settings reveal tokens only on explicit configuration reads and metadata c
     assert.equal(invalid.statusCode, 400); assert.ok(!invalid.body.includes('invalid secret'));
     await app.inject({ method: 'PUT', url: '/api/settings/pixiv', payload: { refreshToken: '' } });
     assert.equal(readPixivSettings().refreshToken, '');
-    t.mock.method(getPixivClient(), 'describe', async () => ({ metadata: { title: 'Title', userName: 'Author', illustType: 0, pageCount: 1 }, tagNames: ['favorite', 'favorite'], pages: undefined }));
+    t.mock.method(getPixivClient(), 'describe', async () => ({ metadata: { title: 'Title', userName: 'Author', illustType: 0, pageCount: 1 }, pages: undefined }));
     const metadata = await app.inject({ method: 'POST', url: '/api/packs/pixiv-metadata', payload: { url: 'https://www.pixiv.net/artworks/123' } });
     assert.equal(metadata.statusCode, 200);
     assert.deepEqual(metadata.json().tags.map((tag: { name: string }) => tag.name), ['Author']);

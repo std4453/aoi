@@ -23,7 +23,6 @@ export default function UploadPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [restoredTask, setRestoredTask] = useState(readUploadTask);
-  const serverFolder = useRef(false);
   // Retire legacy task URLs; task ownership is scoped to this browser session.
   useEffect(() => { if (location.search) navigate('/upload', { replace: true }); }, [location.search, navigate]);
 
@@ -31,7 +30,7 @@ export default function UploadPage() {
   const { matches: duplicateMatches, continueUpload: continueArchive, progress: archiveProgress, status: archiveStatus, error: archiveError, packId: archivePackId, startUpload: startArchiveUpload, pause: pauseArchive, resume: resumeArchive, cancel: cancelArchive, reset: resetArchive } = useUpload();
 
   // Folder upload
-  const { matches: folderMatches, continueUpload: continueFolder, retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
+  const { retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
 
   const [mode, setMode] = useState<UploadMode>(null);
   const [cancelConfirm, setCancelConfirm] = useState<null | 'open' | 'closing'>(null);
@@ -261,7 +260,6 @@ export default function UploadPage() {
 
   const resetToIdle = () => {
     forgetUploadTask(); setRestoredTask(null);
-    serverFolder.current = false;
     clearPacksCache();
     setMode(null);
     setFile(null);
@@ -290,8 +288,7 @@ export default function UploadPage() {
 
   // --- Derived states ---
 
-  if (['checking', 'duplicate', 'thumbnailing', 'done'].includes(folderPhase) && folderPackId) serverFolder.current = true;
-  const serverTaskId = archivePackId || (serverFolder.current ? folderPackId : null) || restoredTask;
+  const serverTaskId = archivePackId || (folderPhase === 'transferred' ? folderPackId : null) || restoredTask;
 
   return (
     <div className="max-w-lg mx-auto">
@@ -302,11 +299,11 @@ export default function UploadPage() {
       {serverTaskId && <UploadTask key={serverTaskId} packId={serverTaskId} onDone={resetToIdle} />}
 
       <DuplicateUploadModal
-        matches={serverTaskId ? [] : mode === 'folder' ? folderMatches : duplicateMatches}
-        busy={mode === 'folder' ? ['confirming', 'cancelling'].includes(folderPhase) : ['checking', 'confirming', 'cancelling'].includes(archiveStatus)}
+        matches={serverTaskId || mode === 'folder' ? [] : duplicateMatches}
+        busy={['checking', 'confirming', 'cancelling'].includes(archiveStatus)}
         error={mode === 'folder' ? folderError : archiveError}
         onCancel={() => { void handleDuplicateCancel(); }}
-        onContinue={() => { void (mode === 'folder' ? continueFolder() : continueArchive()); }}
+        onContinue={() => { void continueArchive(); }}
         onSelect={id => { void handleDuplicateCancel(id); }}
       />
 
@@ -503,7 +500,7 @@ export default function UploadPage() {
             {folderPhase === 'uploading' && <button className={taskActionClass} onClick={pauseFolder}>暂停</button>}
             {folderPhase === 'paused' && <button className={taskActionClass} onClick={resumeFolder}>继续</button>}
             {(folderPhase === 'error' || folderError) && <button className={taskActionClass} onClick={() => void retryFolder()}>重试</button>}
-            <button disabled={['creating', 'scanning', 'confirming', 'cancelling'].includes(folderPhase)} className={`${taskActionClass} text-red-300`} onClick={handleCancelClick}>{folderPhase === 'error' || folderError ? '删除任务' : '取消并删除'}</button>
+            <button disabled={['creating', 'scanning', 'cancelling'].includes(folderPhase)} className={`${taskActionClass} text-red-300`} onClick={handleCancelClick}>{folderPhase === 'error' || folderError ? '删除任务' : '取消并删除'}</button>
           </UploadTaskStatus>}
           {(folderPhase === 'uploading' || folderPhase === 'paused' || folderPhase === 'error') && (
             <div className="mt-3">
