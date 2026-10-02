@@ -1,3 +1,4 @@
+import { rememberUploadTask } from '../lib/uploadTask';
 import { serverWritable, serverCanDownloadArchive } from '../lib/connection';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -386,7 +387,7 @@ export default function PackDetailPage() {
         </div>
       )}
       {pack.sourceType === 'folder' && (['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) || (pack.originalFormat === 'pixiv' && pack.status === 'failed')) && !pack.verification?.allowsPreview && (
-        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?${pack.originalFormat === 'pixiv' ? 'pixiv' : 'folder'}=${pack.id}`)}>
+        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => { rememberUploadTask(pack.id); navigate('/upload'); }}>
           {pack.originalFormat === 'pixiv' ? '查看导入进度' : '继续完成上传'}
         </button>
       )}

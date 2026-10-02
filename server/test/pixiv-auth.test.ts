@@ -59,7 +59,7 @@ test('token errors never echo upstream credentials and never downgrade to anonym
   } finally { await agent.close(); }
 });
 
-test('settings persist privately, never return the token, and metadata creates reusable author and work tags', async t => {
+test('settings persist privately, never return the token, and metadata creates only the reusable author tag', async t => {
   t.mock.method(jobQueue, 'start', () => {});
   const app = Fastify(); await app.register(registerPixivRoutes);
   try {
@@ -76,9 +76,9 @@ test('settings persist privately, never return the token, and metadata creates r
     t.mock.method(getPixivClient(), 'describe', async () => ({ metadata: { title: 'Title', userName: 'Author', illustType: 0, pageCount: 1 }, tagNames: ['favorite', 'favorite'], pages: undefined }));
     const metadata = await app.inject({ method: 'POST', url: '/api/packs/pixiv-metadata', payload: { url: 'https://www.pixiv.net/artworks/123' } });
     assert.equal(metadata.statusCode, 200);
-    assert.deepEqual(metadata.json().tags.map((tag: { name: string }) => tag.name), ['Author', 'favorite']);
+    assert.deepEqual(metadata.json().tags.map((tag: { name: string }) => tag.name), ['Author']);
     await app.inject({ method: 'POST', url: '/api/packs/pixiv-metadata', payload: { url: 'https://www.pixiv.net/artworks/123' } });
-    assert.equal(listTags().length, 2); // Tags survive closing the form without an import.
+    assert.equal(listTags().length, 1); // Tags survive closing the form without an import.
     const immediate = (await app.inject({ method: 'POST', url: '/api/packs/pixiv-import', payload: { url: 'https://www.pixiv.net/artworks/123' } })).json();
     assert.deepEqual(JSON.parse(getLatestJob(immediate.id, 'pixiv')!.options!), { autoName: true, autoTags: true });
     updateJobStatus(getLatestJob(immediate.id, 'pixiv')!.id, 'completed');

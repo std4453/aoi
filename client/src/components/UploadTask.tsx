@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { UploadTaskStatus as Task } from '../../../shared/types';
-import { get, post, del } from '../api/client';
+import type { UploadTaskStatus as Task, PackThumbnail } from '../../../shared/types';
+import { ApiError, get, post, del } from '../api/client';
+import { fetchThumbnails } from '../api/packs';
+import { resourceUrl } from '../lib/connection';
 import { clearPacksCache } from '../lib/homeStore';
 import { rememberUploadTask, forgetUploadTask } from '../lib/uploadTask';
 import UploadTaskStatus, { taskActionClass } from './UploadTaskStatus';
@@ -21,8 +23,11 @@ export default function UploadTask({ packId, onDone }: { packId: string; onDone:
   const [revision, setRevision] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [thumbnails, setThumbnails] = useState<PackThumbnail[]>([]);
   const acting = useRef(false);
   const removed = useRef(false);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
   const finish = () => { forgetUploadTask(); onDone(); };
   useEffect(() => {
     rememberUploadTask(packId);
@@ -37,6 +42,9 @@ export default function UploadTask({ packId, onDone }: { packId: string; onDone:
         if (['extracted', 'generated', 'failed'].includes(result.pack.status) && !acting.current) return;
       } catch (err) {
         if (controller.signal.aborted || removed.current) return;
+        if (err instanceof ApiError && err.status === 404) {
+          removed.current = true; forgetUploadTask(packId); onDoneRef.current(); return;
+        }
         if (!acting.current) setError(`无法更新处理状态：${err instanceof Error ? err.message : String(err)}`);
       }
       if (!controller.signal.aborted) timer = setTimeout(poll, 1000);
@@ -59,12 +67,24 @@ export default function UploadTask({ packId, onDone }: { packId: string; onDone:
   };
   const pack = task?.pack;
   const done = Boolean(pack && ['extracted', 'generated'].includes(pack.status));
+  useEffect(() => {
+    if (!done) return;
+    let active = true;
+    void fetchThumbnails(packId).then(items => { if (active) setThumbnails(items.slice(0, 6)); }).catch(() => {});
+    return () => { active = false; };
+  }, [packId, done]);
   const failed = pack?.status === 'failed';
   const duplicate = pack?.status === 'awaiting_confirmation';
   const activeProgress = task?.progress && ['pending', 'running'].includes(task.progress.status) ? task.progress : null;
   const progress = pack?.status === 'verifying' ? pack.verification?.percentage : activeProgress?.total ? activeProgress.percentage : undefined;
   return <section className="bg-gray-900 rounded-2xl border border-gray-800 p-4">
     <h3 className="text-lg font-medium text-white mb-4 break-words">{pack?.name ?? '正在读取任务…'}</h3>
+    {thumbnails.length > 0 && <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-4" aria-label="图包预览">
+      {thumbnails.map(item => <button key={item.name} type="button" onClick={() => { finish(); navigate(`/packs/${packId}`); }} className="relative aspect-square overflow-hidden rounded-lg bg-gray-800" aria-label={`预览 ${item.name}`}>
+        <img src={resourceUrl(item.thumbUrl)} crossOrigin="anonymous" alt={item.name} className="w-full h-full object-cover" />
+        {item.mediaType === 'ugoira' && <span className="absolute bottom-0 right-0 bg-black/70 px-1 text-xs text-white">动图</span>}
+      </button>)}
+    </div>}
     <UploadTaskStatus stage={busy && confirmDelete ? '正在取消并清理文件…' : pack?.status === 'uploading' && pack.originalFormat !== 'pixiv' ? '等待上传完成' : pack ? stages[pack.status] : '正在读取任务'}
       done={done} paused={duplicate} error={error || (failed ? pack.errorMessage || '处理失败，请重试或删除后重新上传' : null)} progress={progress}
       detail={done ? `${pack!.imageCount} 张图片 · ${pack!.videoCount} 个视频，可以预览` : failed && !task?.retryable ? '请删除此任务，检查源文件或压缩包密码后重新上传。' : activeProgress?.total ? `${activeProgress.completed} / ${activeProgress.total} 个文件` : undefined}>
@@ -73,7 +93,7 @@ export default function UploadTask({ packId, onDone }: { packId: string; onDone:
       {duplicate && !task?.matches.length && <button disabled={busy} className={taskActionClass} onClick={() => void act(async () => { await post(`/packs/${packId}/upload-task/continue`); })}>继续处理</button>}
       {done ? <>
         <button className={taskActionClass} onClick={() => { finish(); navigate(`/packs/${packId}`); }}>查看图包</button>
-        <button className={taskActionClass} onClick={finish}>继续上传</button>
+        <button className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-500" onClick={finish}>继续上传</button>
       </> : <button disabled={busy} className={`${taskActionClass} text-red-300`} onClick={() => setConfirmDelete(true)}>{failed ? '删除任务' : '取消并删除'}</button>}
       {error && <><button disabled={busy} className={taskActionClass} onClick={() => { setError(''); setRevision(value => value + 1); }}>刷新状态</button><button disabled={busy} className={taskActionClass} onClick={finish}>返回上传</button></>}
     </UploadTaskStatus>

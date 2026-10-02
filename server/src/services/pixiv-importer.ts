@@ -184,7 +184,7 @@ export async function importPixivPack(
   const pack = getPack(packId);
   if (!pack || pack.originalFormat !== 'pixiv') throw new Error('Pixiv 图包不存在');
   const { id } = parsePixivUrl(pack.originalFilename);
-  const { metadata, tagNames, pages, ugoira } = await pixiv.artwork(id, signal);
+  const { metadata, pages, ugoira } = await pixiv.artwork(id, signal);
   signal?.throwIfAborted();
   const directory = getExtractedImagesDir(packId);
   ensureDir(directory);
@@ -220,7 +220,7 @@ export async function importPixivPack(
     const options = JSON.parse(getLatestJob(packId, 'pixiv')?.options ?? '{}') as { autoName?: boolean; autoTags?: boolean };
     const name = (options.autoName ?? pack.name === `Pixiv ${id}`) ? metadata.title.replace(/[\0\r\n]/g, ' ').slice(0, 200) : pack.name;
     if (options.autoTags ?? true) {
-      const tags = ensurePixivTags([metadata.userName, ...tagNames]);
+      const tags = ensurePixivTags([metadata.userName]);
       setPackTags(packId, [...new Set([...pack.tags.map(tag => tag.id), ...tags.map(tag => tag.id)])].slice(0, 1000));
     }
     getDb().prepare('UPDATE packs SET name = ?, original_size = ? WHERE id = ?').run(name, bytes, packId);

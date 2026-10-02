@@ -15,7 +15,7 @@ export function PixivSettingsDialog({ onClose }: { onClose: () => void }) {
 export default function ExternalSourcesSettings() {
   const [selected, setSelected] = useState(false);
   return <>
-    <ImportSources title="外部来源" onSelect={() => setSelected(true)} />
+    <ImportSources card title="外部来源" onSelect={() => setSelected(true)} />
     {selected && <PixivSettingsDialog onClose={() => setSelected(false)} />}
   </>;
 }

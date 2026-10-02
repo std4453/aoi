@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useUpload } from '../hooks/useUpload';
 import { useFolderUpload } from '../hooks/useFolderUpload';
 import { clearPacksCache } from '../lib/homeStore';
@@ -21,18 +21,19 @@ const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 export default function UploadPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [restoredTask, setRestoredTask] = useState(() => searchParams.size ? null : readUploadTask());
-  const initialFolderId = useRef(searchParams.get('folder'));
-  const serverFolder = useRef(Boolean(initialFolderId.current));
+  const location = useLocation();
+  const [restoredTask, setRestoredTask] = useState(readUploadTask);
+  const serverFolder = useRef(false);
+  // Retire legacy task URLs; task ownership is scoped to this browser session.
+  useEffect(() => { if (location.search) navigate('/upload', { replace: true }); }, [location.search, navigate]);
 
   // Archive upload
   const { matches: duplicateMatches, continueUpload: continueArchive, progress: archiveProgress, status: archiveStatus, error: archiveError, packId: archivePackId, startUpload: startArchiveUpload, pause: pauseArchive, resume: resumeArchive, cancel: cancelArchive, reset: resetArchive } = useUpload();
 
   // Folder upload
-  const { matches: folderMatches, restoreUpload: restoreFolder, continueUpload: continueFolder, retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
+  const { matches: folderMatches, continueUpload: continueFolder, retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
 
-  const [mode, setMode] = useState<UploadMode>(searchParams.has('pixiv') ? 'pixiv' : null);
+  const [mode, setMode] = useState<UploadMode>(null);
   const [cancelConfirm, setCancelConfirm] = useState<null | 'open' | 'closing'>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -55,21 +56,6 @@ export default function UploadPage() {
   const fileDetailsRef = useRef<HTMLDivElement>(null);
   const lastUserScrollRef = useRef(0);
   const prevUploadingIdsRef = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    const id = initialFolderId.current;
-    if (!id) return;
-    initialFolderId.current = null;
-    setMode('folder');
-    setPackName('文件夹上传');
-    restoreFolder(id);
-  }, [restoreFolder]);
-
-  useEffect(() => {
-    if (mode === 'folder' && folderPackId && !serverFolder.current) {
-      setSearchParams({ folder: folderPackId }, { replace: true });
-    }
-  }, [mode, folderPackId, setSearchParams]);
 
   // Auto-scroll file details when a new file starts uploading
   useEffect(() => {
@@ -276,7 +262,6 @@ export default function UploadPage() {
   const resetToIdle = () => {
     forgetUploadTask(); setRestoredTask(null);
     serverFolder.current = false;
-    setSearchParams({}, { replace: true });
     clearPacksCache();
     setMode(null);
     setFile(null);
@@ -306,10 +291,7 @@ export default function UploadPage() {
   // --- Derived states ---
 
   if (['checking', 'duplicate', 'thumbnailing', 'done'].includes(folderPhase) && folderPackId) serverFolder.current = true;
-  const serverTaskId = searchParams.get('task') || archivePackId || (serverFolder.current ? folderPackId : null) || restoredTask;
-  useEffect(() => {
-    if (serverTaskId && !searchParams.has('task')) setSearchParams({ task: serverTaskId }, { replace: true });
-  }, [serverTaskId, searchParams, setSearchParams]);
+  const serverTaskId = archivePackId || (serverFolder.current ? folderPackId : null) || restoredTask;
 
   return (
     <div className="max-w-lg mx-auto">

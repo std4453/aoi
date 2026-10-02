@@ -1,4 +1,4 @@
-FROM node:22-slim AS build
+FROM node:22-bookworm-slim AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 \
@@ -18,7 +18,7 @@ COPY server ./server
 COPY client ./client
 RUN npm run build
 
-FROM node:22-slim AS production-dependencies
+FROM node:22-bookworm-slim AS production-dependencies
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 \
@@ -27,12 +27,16 @@ WORKDIR /app
 COPY server/package*.json ./
 RUN npm ci --omit=dev
 
-FROM node:22-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/std4453/aoi"
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends p7zip-full \
+# Debian separates the RAR codecs into its non-free archive.
+RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends p7zip-full p7zip-rar \
+    && 7z i | grep -q ' Rar ' \
+    && 7z i | grep -q ' Rar5 ' \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -31,11 +31,11 @@ export const registerPixivRoutes: FastifyPluginAsync = async app => {
     try {
       const input = z.object({ url: z.string().max(2048) }).strict().parse(request.body);
       const { id } = parsePixivUrl(input.url);
-      const { metadata, tagNames } = await getPixivClient().describe(id);
+      const { metadata } = await getPixivClient().describe(id);
       const end = beginMutation();
       try {
         return { title: metadata.title.replace(/[\0\r\n]/g, ' ').slice(0, 200), author: metadata.userName,
-          tags: ensurePixivTags([metadata.userName, ...tagNames]), mediaType: metadata.illustType === 2 ? 'ugoira' : 'image' } satisfies PixivMetadata;
+          tags: ensurePixivTags([metadata.userName]), mediaType: metadata.illustType === 2 ? 'ugoira' : 'image' } satisfies PixivMetadata;
       } finally { end(); }
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : '无法识别 Pixiv 作品' });

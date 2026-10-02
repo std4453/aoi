@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Tag as TagIcon } from 'lucide-react';
 import { startPixivImport, fetchPixivMetadata } from '../api/pixiv';
 import { fetchTags } from '../api/packs';
@@ -11,8 +10,7 @@ import { PixivSettingsDialog } from './ExternalSourcesSettings';
 import TagSelector from './TagSelector';
 
 export default function PixivImport({ onBack }: { onBack: () => void }) {
-  const [params, setParams] = useSearchParams();
-  const packId = params.get('pixiv');
+  const [packId, setPackId] = useState<string | null>(null);
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [tagIds, setTagIds] = useState<string[]>([]);
@@ -62,9 +60,9 @@ export default function PixivImport({ onBack }: { onBack: () => void }) {
     let pack;
     try { pack = await startPixivImport(input); }
     catch (error) { started.current = false; throw error; }
-    setParams({ pixiv: pack.id }, { replace: true });
+    setPackId(pack.id);
   });
-  const leave = () => { clearPacksCache(); setParams({}, { replace: true }); onBack(); };
+  const leave = () => { clearPacksCache(); setPackId(null); onBack(); };
 
   if (packId) return <UploadTask key={packId} packId={packId} onDone={leave} />;
 

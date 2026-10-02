@@ -28,7 +28,7 @@ test('only accepts Pixiv artwork URLs and original image hosts', () => {
 
 function mockArtwork(agent: MockAgent, count = 2, type = 0) {
   agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123' }).reply(200, {
-    error: false, body: { title: 'A work', userName: 'Artist', pageCount: count, illustType: type },
+    error: false, body: { title: 'A work', userName: 'Artist', pageCount: count, illustType: type, tags: { tags: [{ tag: 'Do not import' }] } },
   });
   if (type !== 2) agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123/pages' }).reply(200, {
     error: false, body: Array.from({ length: count }, (_, index) => ({ urls: { original: `https://i.pximg.net/123_p${index}.png` } })),
