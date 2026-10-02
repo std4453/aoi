@@ -8,6 +8,7 @@ import {
   ensureDir,
 } from './storage.js';
 import type { CompressionOptions, FileSelection } from '../types.js';
+import { isUgoira } from './ugoira.js';
 
 function walkFiles(dir: string, root?: string): { fullPath: string; relativePath: string }[] {
   const base = root ?? dir;
@@ -47,7 +48,7 @@ export const archiveGenerator = {
     const compressedImages = walkFiles(tempDir).filter(f => {
       // The compressor recreates tempDir for every job, so it contains exactly
       // the selected images and no additional filtering is necessary here.
-      return f.relativePath.endsWith('.jpg');
+      return f.relativePath.endsWith('.jpg') || isUgoira(f.relativePath);
     });
 
     // Collect all files to archive

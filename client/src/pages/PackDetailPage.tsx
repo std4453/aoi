@@ -7,7 +7,7 @@ import { usePresets } from '../hooks/usePresets';
 import { useJobProgress } from '../hooks/useJobProgress';
 import { formatBytes, statusLabels, statusColors } from '../lib/utils';
 import { getLastHomeSearch, clearPacksCache } from '../lib/homeStore';
-import type { Pack, CompressionOptions, FileSelection, FileTreeNode } from '../../../shared/types.js';
+import type { Pack, CompressionOptions, FileSelection, FileTreeNode, PackThumbnail } from '../../../shared/types.js';
 import { Download, Play, ArrowLeft, Loader2, Image, Video, HardDrive, Pencil, Trash2, Tag, FolderTree } from 'lucide-react';
 import ImageViewer from '../components/ImageViewer';
 import BlurhashPlaceholder, { blurhashToDataUrl } from '../components/BlurhashPlaceholder';
@@ -28,7 +28,7 @@ export default function PackDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [pack, setPack] = useState<Pack | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ name: string; thumbUrl: string; imageUrl: string; blurhash: string | null; width: number | null; height: number | null }[]>([]);
+  const [thumbnails, setThumbnails] = useState<PackThumbnail[]>([]);
   const [loading, setLoading] = useState(true);
   const [jobId, setJobId] = useState<string | null>(null);
   const [options, setOptions] = useState<CompressionOptions>(DEFAULT_OPTIONS);
@@ -161,6 +161,7 @@ export default function PackDetailPage() {
     name: t.name,
     thumbUrl: t.thumbUrl,
     fullUrl: t.imageUrl,
+    ugoiraUrl: t.ugoiraUrl,
     blurhash: t.blurhash,
     width: t.width,
     height: t.height,
@@ -423,6 +424,7 @@ export default function PackDetailPage() {
                     <span className="text-white text-lg font-medium">+{thumbnails.length - 9}</span>
                   </div>
                 )}
+                {thumb.mediaType === 'ugoira' && <span className="absolute bottom-1 right-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">ugoira</span>}
               </div>
             ))}
           </div>

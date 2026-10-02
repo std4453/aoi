@@ -6,6 +6,7 @@ import { fetchTags } from '../api/packs';
 import { fetchPresets } from '../api/presets';
 import { formatBytes } from '../lib/utils';
 import { HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
+import PixivSettings from '../components/PixivSettings';
 
 interface DiskInfo {
   disk: { free: number; size: number; used: number };
@@ -44,6 +45,7 @@ export default function SettingsPage() {
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">设置</h2>
 
       <div className="space-y-3">
+        {serverWritable && <PixivSettings />}
         <button
           type="button"
           onClick={returnToServers}

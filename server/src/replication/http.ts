@@ -39,7 +39,7 @@ export function registerReplicationHooks(app: FastifyInstance): void {
     const id = (request.params as { id?: string })?.id;
     const pack = id ? getPack(id) : undefined;
     if (pack && !['extracted', 'generated'].includes(pack.status) &&
-        /^\/api\/packs\/[^/]+\/(images|videos|thumbnails|cover|file-tree)(?:\/|$)/.test(pathname)) {
+        /^\/api\/packs\/[^/]+\/(images|videos|ugoira|thumbnails|cover|file-tree)(?:\/|$)/.test(pathname)) {
       void reply.code(409).send({ code: 'PACK_PROCESSING', error: '图包正在处理，请稍后刷新' }); return;
     }
     done();

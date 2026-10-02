@@ -1,5 +1,5 @@
 import { apiFetch } from '../lib/connection';
-import type { ArchiveUploadRequest, DuplicateArchiveResponse, FolderUploadStatus } from '../../../shared/types.js';
+import type { ArchiveUploadRequest, DuplicateArchiveResponse, FolderUploadStatus, PackThumbnail } from '../../../shared/types.js';
 import { get, post, patch, del, put } from './client';
 import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams, PackFile } from '../../../shared/types.js';
 
@@ -65,8 +65,8 @@ export function updatePackTags(packId: string, tagIds: string[]): Promise<Pack> 
   return put<Pack>(`/packs/${packId}/tags`, { tagIds });
 }
 
-export function fetchThumbnails(packId: string): Promise<{ name: string; thumbUrl: string; imageUrl: string; blurhash: string | null; width: number | null; height: number | null }[]> {
-  return get<{ name: string; thumbUrl: string; imageUrl: string; blurhash: string | null; width: number | null; height: number | null }[]>(`/packs/${packId}/thumbnails`);
+export function fetchThumbnails(packId: string): Promise<PackThumbnail[]> {
+  return get<PackThumbnail[]>(`/packs/${packId}/thumbnails`);
 }
 
 export function startProcessing(

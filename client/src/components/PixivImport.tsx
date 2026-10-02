@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Download, ArrowLeft, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, LoaderCircle, Tag as TagIcon } from 'lucide-react';
 import { del, post } from '../api/client';
-import { startPixivImport, fetchPixivImport, retryPixivImport } from '../api/pixiv';
-import type { PixivImportRequest, PixivImportStatus } from '../../../shared/types';
+import { startPixivImport, fetchPixivImport, retryPixivImport, fetchPixivMetadata } from '../api/pixiv';
+import { fetchTags } from '../api/packs';
+import type { PixivImportRequest, PixivImportStatus, Tag } from '../../../shared/types';
+import { PixivIcon } from './ImportSources';
 import { clearPacksCache } from '../lib/homeStore';
 import DuplicateUploadModal from './DuplicateUploadModal';
 import TagSelector from './TagSelector';
@@ -19,6 +21,35 @@ export default function PixivImport({ onBack }: { onBack: () => void }) {
   const [state, setState] = useState<PixivImportStatus | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [recognizing, setRecognizing] = useState(false);
+  const [metadataReady, setMetadataReady] = useState(false);
+  const [metadataError, setMetadataError] = useState('');
+  const [knownTags, setKnownTags] = useState<Tag[]>([]);
+  const nameEdited = useRef(false);
+  const tagsEdited = useRef(false);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (packId) return;
+    let cancelled = false;
+    setMetadataReady(false); setMetadataError(''); setRecognizing(false);
+    if (!nameEdited.current) setName('');
+    if (!tagsEdited.current) setTagIds([]);
+    if (!/^https:\/\/(www\.)?pixiv\.net\/(?:[a-z]{2}\/)?artworks\/[1-9]\d*(?:[/?#].*)?$/.test(url.trim())) return;
+    setRecognizing(true);
+    const timer = setTimeout(() => {
+      void fetchPixivMetadata(url.trim()).then(metadata => {
+        if (cancelled || started.current) return;
+        if (!nameEdited.current) setName(metadata.title);
+        if (!tagsEdited.current) setTagIds(metadata.tags.map(tag => tag.id));
+        setKnownTags(metadata.tags);
+        setMetadataReady(true);
+      }).catch(() => {
+        if (!cancelled && !started.current) setMetadataError('暂未识别，可直接导入');
+      }).finally(() => { if (!cancelled) setRecognizing(false); });
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [url, packId]);
 
   useEffect(() => {
     if (!packId) return;
@@ -46,8 +77,12 @@ export default function PixivImport({ onBack }: { onBack: () => void }) {
     finally { setBusy(false); }
   };
   const start = () => act(async () => {
-    const input: PixivImportRequest = { url: url.trim(), packName: name.trim() || undefined, tagIds };
-    const pack = await startPixivImport(input);
+    started.current = true;
+    const input: PixivImportRequest = { url: url.trim(), packName: name.trim() || undefined,
+      tagIds: metadataReady || tagsEdited.current ? tagIds : undefined };
+    let pack;
+    try { pack = await startPixivImport(input); }
+    catch (error) { started.current = false; throw error; }
     setState({ pack, progress: null, matches: [] });
     setParams({ pixiv: pack.id }, { replace: true });
   });
@@ -56,19 +91,25 @@ export default function PixivImport({ onBack }: { onBack: () => void }) {
   const leave = () => { clearPacksCache(); setParams({}, { replace: true }); onBack(); };
 
   return (
-    <section className="rounded-2xl border border-gray-700 bg-gray-900 p-6">
-      <button onClick={leave} className="text-gray-400 text-sm flex items-center gap-2 mb-5"><ArrowLeft size={16} />返回上传方式</button>
-      <div className="flex items-center gap-3 mb-2"><Download className="text-blue-400" /><h3 className="text-lg font-semibold text-white">从 Pixiv 导入</h3></div>
-      <p className="text-sm text-gray-400 mb-5">粘贴作品网址，由服务器下载全部原图并保存为本地图包。支持插画、漫画。</p>
+    <section className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={leave} aria-label="返回上传方式" className="text-gray-400 p-1"><ArrowLeft size={18} /></button>
+        <PixivIcon className="w-6 h-6" /><h3 className="font-medium text-white">Pixiv</h3>
+      </div>
       {!packId ? (
         <form onSubmit={event => { event.preventDefault(); void start(); }} className="space-y-4">
           <label className="block text-sm text-gray-300">作品网址
+            {recognizing && <span aria-hidden="true" className="ml-2 text-xs text-gray-500">识别中…</span>}
             <input type="url" required maxLength={2048} value={url} onChange={e => setUrl(e.target.value)} placeholder="https://www.pixiv.net/artworks/150150651" className="mt-2 w-full rounded-xl bg-gray-800 border border-gray-700 p-3 text-white text-sm" />
           </label>
-          <label className="block text-sm text-gray-300">图包名称（可选）
-            <input maxLength={200} value={name} onChange={e => setName(e.target.value)} placeholder="默认使用作品标题和作者" className="mt-2 w-full rounded-xl bg-gray-800 border border-gray-700 p-3 text-white text-sm" />
+          {metadataError && <p className="text-xs text-gray-500">{metadataError}</p>}
+          <label className="block text-sm text-gray-300">图包名称
+            <input maxLength={200} value={name} onChange={e => { nameEdited.current = true; setName(e.target.value); }} placeholder="默认使用作品标题" className="mt-2 w-full rounded-xl bg-gray-800 border border-gray-700 p-3 text-white text-sm" />
           </label>
-          <button type="button" onClick={() => setTagsOpen(true)} className="text-sm text-gray-300">选择标签{tagIds.length ? `（${tagIds.length}）` : ''}</button>
+          <button type="button" onClick={() => setTagsOpen(true)} className="w-full flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-left">
+            <TagIcon size={16} className="text-gray-500 shrink-0" />
+            {tagIds.length ? <span className="flex flex-wrap gap-1">{tagIds.map(id => <span key={id} className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300">{knownTags.find(tag => tag.id === id)?.name ?? '标签'}</span>)}</span> : <span className="text-sm text-gray-500">选择标签</span>}
+          </button>
           <button disabled={busy || !url.trim()} className="w-full rounded-xl bg-blue-600 hover:bg-blue-500 p-3 text-white disabled:opacity-50">{busy ? '正在创建任务…' : '开始导入'}</button>
         </form>
       ) : (
@@ -79,18 +120,20 @@ export default function PixivImport({ onBack }: { onBack: () => void }) {
           }</div>}
           {state?.pack.status === 'uploading' && <progress className="w-full accent-blue-500" max={100} value={state.progress?.percentage ?? 0} />}
           {state?.pack.status === 'awaiting_confirmation' && state.matches.length === 0 && <button disabled={busy} className="text-blue-400" onClick={() => void act(async () => { await post(`/packs/${packId}/folder-continue`); })}>继续导入</button>}
-          {!done && !failed && <p className="text-xs text-gray-400">离开页面后服务器仍会继续导入，可从图包详情返回查看进度。</p>}
           {failed && <p className="text-red-400 text-sm">{state.pack.errorMessage}</p>}
           {failed && <button disabled={busy} className="text-blue-400" onClick={() => void act(async () => {
             if (state.pack.verification?.status === 'failed') await post(`/packs/${packId}/retry-verification`);
             else await retryPixivImport(packId!);
           })}>重试</button>}
-          {done && <p className="text-green-400">导入完成，已保存 {state.pack.imageCount} 张原图。</p>}
+          {done && <p className="text-green-400">导入完成 · {state.pack.imageCount} 个作品文件</p>}
           <button className="w-full rounded-xl bg-blue-600 p-3 text-white" onClick={() => navigate(`/packs/${packId}`)}>查看图包</button>
         </div>
       )}
       {error && <p role="alert" className="mt-4 text-sm text-red-400 break-words">{error}</p>}
-      {tagsOpen && <TagSelector visible selectedIds={tagIds} onConfirm={ids => { setTagIds(ids); setTagsOpen(false); }} onClose={() => setTagsOpen(false)} onClosed={() => setTagsOpen(false)} />}
+      {tagsOpen && <TagSelector visible selectedIds={tagIds} onConfirm={ids => {
+        tagsEdited.current = true; setTagIds(ids); setTagsOpen(false);
+        void fetchTags().then(setKnownTags).catch(() => {});
+      }} onClose={() => setTagsOpen(false)} onClosed={() => setTagsOpen(false)} />}
       <DuplicateUploadModal matches={state?.pack.status === 'awaiting_confirmation' ? state.matches : []} busy={busy} error={error || null}
         onContinue={() => void act(async () => { await post(`/packs/${packId}/folder-continue`); })}
         onCancel={() => void act(async () => { await del(`/packs/${packId}/cancel-upload`); leave(); })}

@@ -114,6 +114,7 @@ export interface FileTreeNode {
   size?: number;
   thumbUrl?: string;
   imageUrl?: string;
+  mediaType?: 'image' | 'ugoira';
   videoUrl?: string;
   children?: FileTreeNode[];
 }
@@ -168,6 +169,35 @@ export interface PixivImportRequest {
 
 export interface PixivImportStatus extends FolderUploadStatus {
   progress: JobProgress | null;
+}
+
+export interface PixivMetadata {
+  title: string;
+  author: string;
+  tags: Tag[];
+  mediaType: 'image' | 'ugoira';
+}
+
+export interface PixivSettings {
+  configured: boolean;
+  source: 'settings' | 'environment' | 'none';
+}
+
+export interface UgoiraManifest {
+  format: 'aoi-ugoira';
+  version: 1;
+  frames: Array<{ file: string; delay: number }>;
+}
+
+export interface PackThumbnail {
+  name: string;
+  thumbUrl: string;
+  imageUrl: string;
+  ugoiraUrl?: string;
+  mediaType?: 'image' | 'ugoira';
+  blurhash: string | null;
+  width: number | null;
+  height: number | null;
 }
 
 // Runtime deployment and browser connection contracts.

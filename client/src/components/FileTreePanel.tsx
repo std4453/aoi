@@ -168,6 +168,7 @@ function TreeNode({
         {node.type === 'video' && <Video size={16} className="shrink-0 text-gray-400" />}
 
         {/* Name + size */}
+        {node.mediaType === 'ugoira' && <span className="text-[10px] text-gray-500">ugoira</span>}
         <div className="flex items-baseline min-w-0 ml-2 leading-8">
           <span className="text-sm text-gray-300 truncate">{node.name}</span>
           {node.size != null && (

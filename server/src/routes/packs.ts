@@ -36,6 +36,8 @@ import { jobQueue } from '../services/job-queue.js';
 import { normalizeRelativePath, resolveWithin } from '../services/safe-path.js';
 import { buildJpegOutputPaths } from '../services/jpeg-output-path.js';
 import { folderProcessor } from '../services/folder-processor.js';
+import { isUgoira, readUgoiraFrame, readUgoiraManifest } from '../services/ugoira.js';
+import { safeContentFile } from '../replication/protocol.js';
 
 const MAX_NAME_LENGTH = 200;
 const MAX_FILENAME_LENGTH = 255;
@@ -667,7 +669,33 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       reply.code(404).send({ error: 'Image not found' });
       return;
     }
+    if (isUgoira(resolved)) {
+      try {
+        await safeContentFile(imagesDir, relPath);
+        const manifest = await readUgoiraManifest(resolved);
+        const mime = path.extname(manifest.frames[0].file).slice(1).replace('jpg', 'jpeg');
+        return reply.type(`image/${mime}`).send(await readUgoiraFrame(resolved, 0));
+      } catch { return reply.code(400).send({ error: '无法读取 ugoira 预览' }); }
+    }
     return reply.sendFile(path.basename(resolved), path.dirname(resolved));
+  });
+
+  fastify.get<{ Params: { id: string; '*': string }; Querystring: { frame?: string; download?: string } }>('/api/packs/:id/ugoira/*', async (request, reply) => {
+    if (!getPack(request.params.id)) return reply.code(404).send({ error: 'Pack not found' });
+    try {
+      const file = await safeContentFile(getExtractedImagesDir(request.params.id), request.params['*']);
+      if (!isUgoira(file)) return reply.code(400).send({ error: 'Not a ugoira file' });
+      if (request.query.download === '1') {
+        return reply.type('application/zip').header('Content-Disposition', `attachment; filename="animation.ugoira"`).send(fs.createReadStream(file));
+      }
+      const manifest = await readUgoiraManifest(file);
+      if (request.query.frame === undefined) return manifest;
+      if (!/^\d+$/.test(request.query.frame)) return reply.code(400).send({ error: 'Invalid frame' });
+      const index = Number(request.query.frame);
+      if (!manifest.frames[index]) return reply.code(404).send({ error: 'Frame not found' });
+      const mime = path.extname(manifest.frames[index].file).slice(1).replace('jpg', 'jpeg');
+      return reply.header('Cache-Control', 'private, max-age=3600').type(`image/${mime}`).send(await readUgoiraFrame(file, index));
+    } catch { return reply.code(400).send({ error: '无法读取 ugoira 文件' }); }
   });
 
   fastify.get<{ Params: { id: string; '*': string } }>('/api/packs/:id/videos/*', async (request, reply) => {
@@ -762,9 +790,10 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     return thumbFiles.map(([originalFile, relPath]) => {
       const bh = blurhashMap[relPath];
       return {
-        name: relPath,
+        name: isUgoira(originalFile) ? originalFile : relPath,
         thumbUrl: `/api/packs/${request.params.id}/thumbnails/${encodeRelativePathForUrl(relPath)}`,
         imageUrl: `/api/packs/${request.params.id}/images/${encodeRelativePathForUrl(originalFile)}`,
+        ...(isUgoira(originalFile) ? { mediaType: 'ugoira', ugoiraUrl: `/api/packs/${request.params.id}/ugoira/${encodeRelativePathForUrl(originalFile)}` } : {}),
         blurhash: bh?.hash ?? null,
         width: bh?.width ?? null,
         height: bh?.height ?? null,
@@ -895,6 +924,7 @@ function buildFileTree(
       size,
       thumbUrl,
       imageUrl,
+      ...(isUgoira(normalized) ? { mediaType: 'ugoira' as const } : {}),
     });
   }
 

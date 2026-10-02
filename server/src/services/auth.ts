@@ -19,7 +19,7 @@ export function registerAuth(app: FastifyInstance): void {
     if (!config.authKey) return;
     const bearer = request.headers.authorization?.replace(/^Bearer /, '') || '';
     // Query credentials are accepted only for read-only browser resources/SSE.
-    const resource = /^\/api\/(packs\/[^/]+\/(cover|images\/.*|videos\/.*|thumbnails\/.*|download)|jobs\/[^/]+\/events)$/.test(url.pathname);
+    const resource = /^\/api\/(packs\/[^/]+\/(cover|images\/.*|videos\/.*|ugoira\/.*|thumbnails\/.*|download)|jobs\/[^/]+\/events)$/.test(url.pathname);
     const credential = bearer || (['GET', 'HEAD'].includes(request.method) && resource ? url.searchParams.get('access_token') || '' : '');
     if (!matches(credential, token)) return reply.code(401).send({ error: 'Key 无效或登录已失效', code: 'UNAUTHORIZED' });
   });

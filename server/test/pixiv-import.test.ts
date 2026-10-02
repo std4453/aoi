@@ -54,7 +54,8 @@ test('downloads all original pages, persists stats, resumes a partial import and
     await importPixivPack(pack.id, completed => progress.push(completed), client);
     assert.deepEqual(progress, [0, 1, 2]);
     const imported = getPack(pack.id)!;
-    assert.equal(imported.name, 'A work - Artist');
+    assert.equal(imported.name, 'A work');
+    assert.deepEqual(imported.tags.map(tag => tag.name), ['Artist']);
     assert.equal(imported.imageCount, 2);
     assert.equal(imported.originalSize, image.length * 2);
     assert.equal(imported.status, 'verifying');
@@ -64,7 +65,7 @@ test('downloads all original pages, persists stats, resumes a partial import and
   } finally { await agent.close(); }
 });
 
-test('rejects redirects, login failures, animated works and unsafe page URLs', async () => {
+test('rejects redirects, login failures and unsafe page URLs', async () => {
   const agent = new MockAgent(); agent.disableNetConnect();
   const client = new PixivClient(agent, 'session=test');
   try {
@@ -72,8 +73,6 @@ test('rejects redirects, login failures, animated works and unsafe page URLs', a
     await assert.rejects(client.artwork('123'), /302/);
     agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123' }).reply(403, 'denied');
     await assert.rejects(client.artwork('123'), /PIXIV_COOKIE/);
-    mockArtwork(agent, 1, 2);
-    await assert.rejects(client.artwork('123'), /ugoira/);
     agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123' }).reply(200, { error: false, body: { title: 'x', userName: 'y', pageCount: 1, illustType: 0 } });
     agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123/pages' }).reply(200, { error: false, body: [{ urls: { original: 'https://127.0.0.1/a.jpg' } }] });
     await assert.rejects(client.artwork('123'), /原图地址/);
