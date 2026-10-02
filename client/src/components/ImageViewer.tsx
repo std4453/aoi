@@ -197,7 +197,9 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
               )}
               <div
                 ref={imgContainerRef}
-                className="max-w-full max-h-full relative z-10"
+                // A definite height makes the pooled image's max-height: 100% resolve
+                // against the viewport, keeping the image inside the transform bounds.
+                className="w-full h-full min-w-0 min-h-0 flex items-center justify-center relative z-10"
               />
             </div>
           </TransformComponent>
