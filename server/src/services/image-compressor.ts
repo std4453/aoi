@@ -11,9 +11,10 @@ import {
 } from './storage.js';
 import type { CompressionOptions, CompressionResult, FileSelection } from '../types.js';
 import { buildJpegOutputPaths } from './jpeg-output-path.js';
+import { isUgoira, readUgoiraManifest } from './ugoira.js';
 
 const IMAGE_EXTENSIONS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif',
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif', '.ugoira',
 ]);
 
 function openImage(imagePath: string): ReturnType<typeof sharp> {
@@ -142,12 +143,18 @@ export const imageCompressor = {
         limit(async () => {
           const relativePath = path.relative(imagesDir, fullPath);
           const portablePath = relativePath.split(path.sep).join('/');
-          const outputRelativePath = outputPaths.get(portablePath);
+          const outputRelativePath = isUgoira(portablePath) ? portablePath : outputPaths.get(portablePath);
           if (!outputRelativePath) throw new Error(`Missing output path for ${portablePath}`);
           const output = path.join(outputDir, ...outputRelativePath.split('/'));
           try {
             ensureDir(path.dirname(output));
-            const result = await compressImage(fullPath, output, options);
+            let result: CompressionResult;
+            if (isUgoira(fullPath)) {
+              await readUgoiraManifest(fullPath);
+              await fs.promises.copyFile(fullPath, output);
+              const size = (await fs.promises.stat(fullPath)).size;
+              result = { originalSize: size, compressedSize: size, savings: 0 };
+            } else result = await compressImage(fullPath, output, options);
             completed++;
             totalOriginalSize += result.originalSize;
             totalCompressedSize += result.compressedSize;

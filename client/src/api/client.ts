@@ -1,3 +1,7 @@
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
 import { apiFetch } from '../lib/connection';
 
 async function request<T>(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -7,7 +11,7 @@ async function request<T>(path: string, method: string, body?: unknown, signal?:
   });
   if (!res.ok) {
     const result = await res.json().catch(() => ({}));
-    throw new Error(result.error || `HTTP ${res.status}`);
+    throw new ApiError(result.error || `HTTP ${res.status}`, res.status);
   }
   return res.json();
 }

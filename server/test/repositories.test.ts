@@ -80,6 +80,48 @@ test('creates at most one active job of a given type per pack', () => {
   assert.equal(second, undefined);
 });
 
+test('active job exclusions respect job status and pack boundaries', () => {
+  const pack = repositories.createPack({ name: 'active jobs', originalFilename: 'pack.zip', originalSize: 1, originalFormat: 'zip' });
+  const other = repositories.createPack({ name: 'other jobs', originalFilename: 'other.zip', originalSize: 1, originalFormat: 'zip' });
+  repositories.createJob(pack.id, 'verify');
+  repositories.createJob(other.id, 'compress');
+  assert.equal(repositories.hasActiveJobOtherThan(pack.id, 'verify'), false);
+
+  const compression = repositories.createJob(pack.id, 'compress');
+  for (const status of ['pending', 'running', 'completed', 'failed', 'cancelled'] as const) {
+    repositories.updateJobStatus(compression.id, status);
+    const active = status === 'pending' || status === 'running';
+    assert.equal(repositories.hasActiveJobOtherThan(pack.id, 'verify'), active, status);
+    assert.equal(repositories.hasActiveJob(pack.id, 'compress'), active, status);
+  }
+});
+
+test('pending cancellation supports type filtering and a second pass without changing running or finished jobs', () => {
+  const pack = repositories.createPack({ name: 'cancel jobs', originalFilename: 'pack.zip', originalSize: 1, originalFormat: 'zip' });
+  const other = repositories.createPack({ name: 'untouched jobs', originalFilename: 'other.zip', originalSize: 1, originalFormat: 'zip' });
+  const verification = repositories.createJob(pack.id, 'verify');
+  const thumbnail = repositories.createJob(pack.id, 'thumbnail');
+  const otherJob = repositories.createJob(other.id, 'verify');
+  const untouched = ['running', 'completed', 'failed', 'cancelled'].map(status => {
+    const job = repositories.createJob(pack.id, 'verify');
+    repositories.updateJobStatus(job.id, status as 'running' | 'completed' | 'failed' | 'cancelled', 42);
+    return repositories.getJob(job.id)!;
+  });
+
+  assert.equal(repositories.cancelPendingJobs(pack.id, 'verify'), 1);
+  assert.equal(repositories.getJob(verification.id)?.status, 'cancelled');
+  assert.equal(repositories.getJob(thumbnail.id)?.status, 'pending');
+  assert.equal(repositories.cancelPendingJobs(pack.id), 1);
+  assert.equal(repositories.getJob(thumbnail.id)?.status, 'cancelled');
+  assert.equal(repositories.cancelPendingJobs(pack.id), 0);
+
+  const followUp = repositories.createJob(pack.id, 'verify');
+  assert.equal(repositories.cancelPendingJobs(pack.id), 1);
+  assert.equal(repositories.getJob(followUp.id)?.status, 'cancelled');
+  assert.equal(repositories.getJob(otherJob.id)?.status, 'pending');
+  for (const job of untouched) assert.deepEqual(repositories.getJob(job.id), job);
+});
+
 test('folder processing resumes after files were partially moved', async () => {
   const pack = repositories.createPack({
     name: 'folder recovery',

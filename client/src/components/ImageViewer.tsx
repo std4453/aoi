@@ -6,11 +6,13 @@ import type { ReactZoomPanPinchContentRef } from 'react-zoom-pan-pinch';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useImagePool } from '../hooks/useImagePool';
 import BlurhashPlaceholder from './BlurhashPlaceholder';
+import UgoiraPlayer from './UgoiraPlayer';
 
 interface ImageItem {
   name: string;
   thumbUrl: string;
   fullUrl: string;
+  ugoiraUrl?: string;
   blurhash?: string | null;
   width?: number | null;
   height?: number | null;
@@ -195,12 +197,18 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
               )}
               <div
                 ref={imgContainerRef}
-                className="max-w-full max-h-full relative z-10"
+                // A definite height makes the pooled image's max-height: 100% resolve
+                // against the viewport, keeping the image inside the transform bounds.
+                className="w-full h-full min-w-0 min-h-0 flex items-center justify-center relative z-10"
               />
             </div>
           </TransformComponent>
         </TransformWrapper>
       </div>
+
+      {currentImage.ugoiraUrl && <div className="absolute bottom-24 left-0 right-0 z-30 flex justify-center pointer-events-none">
+        <UgoiraPlayer key={currentImage.ugoiraUrl} url={currentImage.ugoiraUrl} image={currentImg} />
+      </div>}
 
       {/* Left/Right buttons (desktop) */}
       <button
@@ -218,10 +226,10 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
 
       {/* Top bar with gradient fade */}
       <div
-        className={`absolute top-0 left-0 right-0 z-20 transition-opacity duration-200 ${showUI ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`absolute top-0 left-0 right-0 z-20 pointer-events-none transition-opacity duration-200 ${showUI ? 'opacity-100' : 'opacity-0'}`}
       >
         <div className="bg-gradient-to-b from-black/70 via-black/50 to-transparent h-28" />
-        <div className="relative -mt-26 flex items-center justify-between px-3 py-2">
+        <div className={`relative -mt-26 flex items-center justify-between px-3 py-2 ${showUI ? 'pointer-events-auto' : ''}`}>
           <button
             onClick={onClose}
             className="p-2 text-white/80 hover:text-white transition-colors"
@@ -246,10 +254,10 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
 
       {/* Bottom thumbnail strip with gradient fade */}
       <div
-        className={`absolute bottom-0 left-0 right-0 z-20 transition-opacity duration-200 ${showUI ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`absolute bottom-0 left-0 right-0 z-20 pointer-events-none transition-opacity duration-200 ${showUI ? 'opacity-100' : 'opacity-0'}`}
       >
         <div className="bg-gradient-to-t from-black/70 via-black/50 to-transparent h-32" />
-        <div className="relative -mt-20 safe-bottom">
+        <div className={`relative -mt-20 safe-bottom ${showUI ? 'pointer-events-auto' : ''}`}>
           <div
             ref={thumbStripRef}
             className="flex gap-1.5 px-3 py-2 overflow-x-auto scrollbar-hide"

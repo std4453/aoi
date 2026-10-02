@@ -1,5 +1,6 @@
+import { forgetUploadTask } from '../lib/uploadTask';
 import { apiFetch } from '../lib/connection';
-import type { ArchiveUploadRequest, DuplicateArchiveResponse, FolderUploadStatus } from '../../../shared/types.js';
+import type { ArchiveUploadRequest, DuplicateArchiveResponse, PackThumbnail } from '../../../shared/types.js';
 import { get, post, patch, del, put } from './client';
 import type { Pack, CompressionOptions, Tag, FileSelection, FileTreeNode, PaginatedResponse, PackListParams, PackFile } from '../../../shared/types.js';
 
@@ -21,8 +22,9 @@ export function fetchPack(id: string): Promise<Pack> {
   return get<Pack>(`/packs/${id}`);
 }
 
-export function removePack(id: string): Promise<void> {
-  return del<void>(`/packs/${id}`);
+export async function removePack(id: string): Promise<void> {
+  await del<void>(`/packs/${id}`);
+  forgetUploadTask(id);
 }
 
 export function renamePack(id: string, name: string): Promise<Pack> {
@@ -65,8 +67,8 @@ export function updatePackTags(packId: string, tagIds: string[]): Promise<Pack> 
   return put<Pack>(`/packs/${packId}/tags`, { tagIds });
 }
 
-export function fetchThumbnails(packId: string): Promise<{ name: string; thumbUrl: string; imageUrl: string; blurhash: string | null; width: number | null; height: number | null }[]> {
-  return get<{ name: string; thumbUrl: string; imageUrl: string; blurhash: string | null; width: number | null; height: number | null }[]>(`/packs/${packId}/thumbnails`);
+export function fetchThumbnails(packId: string): Promise<PackThumbnail[]> {
+  return get<PackThumbnail[]>(`/packs/${packId}/thumbnails`);
 }
 
 export function startProcessing(
@@ -99,14 +101,6 @@ export function confirmFolderFileComplete(packId: string, data: {
 
 export function cancelFolderUpload(packId: string): Promise<{ ok: boolean }> {
   return del<{ ok: boolean }>(`/packs/${packId}/cancel-upload`);
-}
-
-export function fetchFolderUploadStatus(packId: string): Promise<FolderUploadStatus> {
-  return get<FolderUploadStatus>(`/packs/${packId}/folder-upload-status`);
-}
-
-export function continueFolderUpload(packId: string): Promise<{ ok: boolean }> {
-  return post<{ ok: boolean }>(`/packs/${packId}/folder-continue`, {});
 }
 
 export function retryVerification(packId: string): Promise<{ ok: boolean }> {

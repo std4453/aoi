@@ -174,7 +174,7 @@ export default function HomePage() {
 
   // Search box — always rendered regardless of loading state
   const searchBox = searching ? (
-    <div className="flex items-center gap-1.5">
+    <div className="flex w-full min-w-0 items-center gap-1.5">
       <div className="relative flex-1 min-w-0">
         <input
           type="text"
@@ -191,7 +191,7 @@ export default function HomePage() {
       </div>
       <button
         onClick={handleClearSearch}
-        className="p-1.5 text-gray-400 hover:text-white transition-colors"
+        className="shrink-0 p-1.5 text-gray-400 hover:text-white transition-colors"
       >
         <X size={16} />
       </button>
@@ -208,9 +208,9 @@ export default function HomePage() {
   if (error && packs.length === 0) {
     return (
       <div>
-        <div className="flex items-center justify-between mb-4 h-9">
-          <h2 className="text-xl font-bold text-white">我的图包</h2>
-          <div className="w-52 shrink-0 flex justify-end items-center h-full">{searchBox}</div>
+        <div className="flex items-center justify-between gap-3 mb-4 h-9">
+          <h2 className="shrink-0 whitespace-nowrap text-xl font-bold text-white">我的图包</h2>
+          <div className="min-w-0 max-w-52 flex-1 flex justify-end items-center h-full">{searchBox}</div>
         </div>
         <div className="text-center py-20 text-red-400">
           <p>加载失败: {error}</p>
@@ -221,9 +221,9 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-7rem)]">
-      <div className="flex items-center justify-between mb-4 h-9">
-        <h2 className="text-xl font-bold text-white">我的图包<span className="text-gray-500 font-normal text-base">（{total}）</span></h2>
-        <div className="w-52 shrink-0 flex justify-end items-center h-full">
+      <div className="flex items-center justify-between gap-3 mb-4 h-9">
+        <h2 className="shrink-0 whitespace-nowrap text-xl font-bold text-white">我的图包<span className="text-gray-500 font-normal text-base">（{total}）</span></h2>
+        <div className="min-w-0 max-w-52 flex-1 flex justify-end items-center h-full">
           {searchBox}
         </div>
       </div>

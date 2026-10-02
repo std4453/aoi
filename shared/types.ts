@@ -73,7 +73,7 @@ export interface Preset {
 export interface Job {
   id: string;
   packId: string;
-  type: 'extract' | 'thumbnail' | 'compress' | 'verify';
+  type: 'extract' | 'thumbnail' | 'compress' | 'verify' | 'pixiv';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   options: string | null;
@@ -88,12 +88,20 @@ export interface JobProgress {
   jobId: string;
   status: Job['status'];
   phase: string;
+  /** Verification counts bytes; download, thumbnail, compression and archiving count files. */
   completed: number;
   total: number;
   percentage: number;
   totalOriginalSize: number;
   totalCompressedSize: number;
   error: string | null;
+}
+
+export interface UploadTaskStatus {
+  pack: Pack;
+  progress: JobProgress | null;
+  matches: DuplicatePack[];
+  retryable: boolean;
 }
 
 export interface CompressionResult {
@@ -114,6 +122,7 @@ export interface FileTreeNode {
   size?: number;
   thumbUrl?: string;
   imageUrl?: string;
+  mediaType?: 'image' | 'ugoira';
   videoUrl?: string;
   children?: FileTreeNode[];
 }
@@ -158,6 +167,42 @@ export interface VerificationProgress {
 export interface FolderUploadStatus {
   pack: Pack;
   matches: DuplicatePack[];
+}
+
+export interface PixivImportRequest {
+  url: string;
+  packName?: string;
+  tagIds?: string[];
+}
+
+export interface PixivMetadata {
+  title: string;
+  author: string;
+  tags: Tag[];
+  mediaType: 'image' | 'ugoira';
+}
+
+export interface PixivSettings {
+  configured: boolean;
+  source: 'settings' | 'environment' | 'none';
+  refreshToken?: string;
+}
+
+export interface UgoiraManifest {
+  format: 'aoi-ugoira';
+  version: 1;
+  frames: Array<{ file: string; delay: number }>;
+}
+
+export interface PackThumbnail {
+  name: string;
+  thumbUrl: string;
+  imageUrl: string;
+  ugoiraUrl?: string;
+  mediaType?: 'image' | 'ugoira';
+  blurhash: string | null;
+  width: number | null;
+  height: number | null;
 }
 
 // Runtime deployment and browser connection contracts.

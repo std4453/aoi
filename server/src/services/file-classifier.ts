@@ -3,7 +3,7 @@ import path from 'node:path';
 import { ensureDir } from './storage.js';
 
 export const IMAGE_EXTENSIONS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif',
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif', '.ugoira',
 ]);
 export const VIDEO_EXTENSIONS = new Set([
   '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp',

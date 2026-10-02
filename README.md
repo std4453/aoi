@@ -9,12 +9,31 @@ AoI（Angel of Images），你的本地图片管家。
 ## 功能
 
 - **上传** — 支持 ZIP / RAR 格式，基于 tus 协议的可恢复上传
+- **Pixiv 导入** — 自动识别作品标题和标签，下载插画、漫画原图及 ugoira 动画，支持登录态、预览和打包下载
 - **解压** — 自动解压并检测目录结构（扁平 / 嵌套）
 - **缩略图** — 自动生成缩略图 + Blurhash 占位图
 - **压缩** — 可配置 JPEG 质量、最大尺寸、是否保留视频
 - **预设** — 保存常用压缩参数，一键应用
 - **标签** — 为图包添加标签，支持搜索过滤
 - **文件树** — 嵌套结构的图包可浏览和选择性压缩
+
+### 上传任务交互
+
+压缩包、文件夹和外部来源共用上传任务状态卡：传输 → 解包（压缩包）→ 校验与重复检测 → 生成预览 → 完成。传输结束不代表处理成功；上传页继续显示后续阶段、文件数进度和错误。未知进度不显示虚假的百分比，重复内容等待用户明确选择继续或取消。任务仅按服务器保存在页面内存中，切换 tab 可继续查看；刷新或退出后不恢复上传卡片，可从图包列表打开图包。上传页不使用 task/folder/pixiv 查询参数。
+
+失败任务直接显示原因，并可删除；下载、校验和预览生成失败可重试，解包失败需检查文件或密码后重新上传。取消须确认，服务端中止下载/校验或等待当前解包/预览步骤安全结束，再删除文件与任务，保留已创建的标签。外部来源设置采用与导入入口相同的图标，点击打开配置弹窗，Pixiv 访问失败时可在上传页直接配置登录态并重试。
+
+### Pixiv 导入配置
+
+上传区域下方的「导入自」选择 Pixiv，输入 `https://www.pixiv.net/artworks/150150651` 这类作品网址（支持语言前缀和分享参数）。服务端自动填写作品标题，仅作者名作为自动添加的本地标签，不导入作品标签；手动编辑不被识别结果覆盖。标签在识别时创建，退出表单后保留。识别未完成也能点击导入，后台会补齐默认名称和标签。下载、内容去重和缩略图处理均在服务端执行；服务重启后后台任务可以继续。从图包详情进入「查看导入进度」可恢复页面，下载失败可重试，重复内容需要确认后保存。
+
+- `PIXIV_PROXY_URL`：可选，服务端 HTTP/HTTPS 代理，例如 `http://127.0.0.1:8889`。容器内的 `127.0.0.1` 指向容器自身，需要填容器可访问的代理地址。
+- `PIXIV_REFRESH_TOKEN`：可选，兼容 `gallery-dl oauth:pixiv` 获取的 refresh-token。也可在「设置 → 外部来源 → Pixiv」中填写或清除；页面配置保存在 `DATA_DIR/pixiv-settings.json`，优先于环境变量，清除后使用匿名访问。服务器缓存 access-token 并在过期或 401 时刷新。token 仅在打开配置弹窗时按需回显，状态查询不返回 token；不进入图包和副本快照，也不发送给图片 CDN。使用 Node 原生实现的登录与下载流程，无需部署 Python / gallery-dl。获取方式见 [gallery-dl 配置说明](https://gdl-org.github.io/docs/configuration.html#extractor-pixiv-refresh-token)，协议兼容 [gallery-dl Pixiv App API](https://github.com/mikf/gallery-dl/blob/master/gallery_dl/extractor/pixiv.py)。
+- `PIXIV_COOKIE`：可选，未配置 refresh-token 时使用的 Pixiv 网页 Cookie。所有登录配置仅用于当前账号有权限访问的作品，请勿提交到仓库。
+
+默认无需登录即可导入公开作品；被删除、无访问权限或限流的作品会显示失败原因。每幅作品最多 1000 页，单张图片 / 动画源 ZIP 上限 100 MiB，总下载量受 `MAX_UPLOAD_SIZE` 限制，像素数受 `MAX_IMAGE_PIXELS` 限制。重试/重启恢复会重新下载，避免混用作品修改前后的页面。Pixiv 接口或访问策略发生变化可能影响导入。导入结果复用文件夹图包存储（`originalFormat: pixiv`），来源网址保存在 `originalFilename`，无需数据库迁移。
+
+ugoira 保存为独立 `.ugoira` 文件，属于逻辑图片媒体（API `mediaType: ugoira`），按一个作品文件统计。文件本身是 ZIP，包含原始帧文件和 `manifest.json`：`{"format":"aoi-ugoira","version":1,"frames":[{"file":"000000.jpg","delay":125}]}`，延迟单位为毫秒。最多 1000 帧、单帧 32 MiB、解压总量不超过 512 MiB 或 `MAX_EXTRACTED_SIZE`，不向文件系统解压不可信路径。图片列表用首帧生成封面，查看器提供播放/暂停；压缩打包保留完整 `.ugoira`，不会把动画转成单张 JPEG。下载的文件可通过文件夹或 ZIP 再次导入。副本同步完整动画文件，副本服务也需更新到支持此格式的版本。
 
 ## 技术栈
 
@@ -376,3 +395,9 @@ MIT
 `/api/packs/snapshot` 和 `/api/packs/:id/snapshot`。本 PR 仅新增数据库迁移 009，包含快照状态、
 安装恢复日志和同步内容变更计数；早期 PR 镜像的测试目录请重新创建。边界、配置、故障与升级约定见
 [主备设计文档](docs/replication-design.md)。
+
+### RAR 解压环境
+
+本地需安装完整 7-Zip，并将安装目录加入 PATH（Windows 默认 `C:\Program Files\7-Zip`），重启服务使其生效。Docker 运行镜像固定为 Node 22 / Debian Bookworm，安装 `p7zip-full` 和 non-free 仓库的 `p7zip-rar`，构建时检查 RAR/RAR5 格式支持；仅安装 `p7zip-full` 不足以提供 RAR 解码。`npm run check` 包含生成式 RAR 图片解压测试。
+
+界面与交互约定见 [设计系统规范](docs/design-system.md)。

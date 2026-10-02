@@ -16,6 +16,8 @@ export function registerReplicationHooks(app: FastifyInstance): void {
             '/api/packs/:id/folder-file-complete', '/api/packs/:id/folder-continue',
             '/api/packs/:id/retry-verification', '/api/packs/:id/cancel-upload',
             '/api/packs/:id/process',
+            '/api/packs/pixiv-import',
+            '/api/packs/:id/upload-task', '/api/packs/:id/upload-task/retry', '/api/packs/:id/upload-task/continue',
           ].includes(options.url)) return;
       const original = options.handler;
       options.handler = async function (request, reply) {
@@ -38,7 +40,7 @@ export function registerReplicationHooks(app: FastifyInstance): void {
     const id = (request.params as { id?: string })?.id;
     const pack = id ? getPack(id) : undefined;
     if (pack && !['extracted', 'generated'].includes(pack.status) &&
-        /^\/api\/packs\/[^/]+\/(images|videos|thumbnails|cover|file-tree)(?:\/|$)/.test(pathname)) {
+        /^\/api\/packs\/[^/]+\/(images|videos|ugoira|thumbnails|cover|file-tree)(?:\/|$)/.test(pathname)) {
       void reply.code(409).send({ code: 'PACK_PROCESSING', error: '图包正在处理，请稍后刷新' }); return;
     }
     done();

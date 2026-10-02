@@ -12,6 +12,7 @@ import {
   getPath,
 } from './storage.js';
 import { buildJpegOutputPaths } from './jpeg-output-path.js';
+import { imageInput } from './ugoira.js';
 
 /**
  * Blurhash 计算流程
@@ -46,10 +47,10 @@ const BLURHASH_COMPONENTS_X = 4;
 const BLURHASH_COMPONENTS_Y = 3;
 
 const IMAGE_EXTENSIONS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif',
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif', '.ugoira',
 ]);
 
-function openImage(imagePath: string): ReturnType<typeof sharp> {
+function openImage(imagePath: string | Buffer): ReturnType<typeof sharp> {
   return sharp(imagePath, {
     failOn: 'error',
     limitInputPixels: config.maxImagePixels,
@@ -83,12 +84,13 @@ interface BlurhashResult {
 
 export async function computeBlurhash(imagePath: string): Promise<BlurhashResult | null> {
   try {
-    const metadata = await openImage(imagePath).metadata();
+    const input = await imageInput(imagePath);
+    const metadata = await openImage(input).metadata();
     const origWidth = metadata.width;
     const origHeight = metadata.height;
     if (!origWidth || !origHeight) return null;
 
-    const { data, info } = await openImage(imagePath)
+    const { data, info } = await openImage(input)
       .resize(64, 64, { fit: 'inside', withoutEnlargement: true })
       .toColorspace('srgb')
       .raw()
@@ -110,14 +112,14 @@ export async function computeBlurhash(imagePath: string): Promise<BlurhashResult
 }
 
 export async function generateThumbnail(inputPath: string, outputPath: string): Promise<void> {
-  await openImage(inputPath)
+  await openImage(await imageInput(inputPath))
     .resize(THUMB_SIZE, THUMB_SIZE, { fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
     .toFile(outputPath);
 }
 
 export async function generateCover(inputPath: string, outputPath: string): Promise<void> {
-  await openImage(inputPath)
+  await openImage(await imageInput(inputPath))
     .resize(COVER_WIDTH, COVER_HEIGHT, { fit: 'cover' })
     .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
     .toFile(outputPath);
@@ -175,7 +177,7 @@ export const thumbnailGenerator = {
             console.error(`Failed to generate thumbnail for ${relativePath}:`, err);
             try {
               ensureDir(path.dirname(output));
-              await openImage(fullPath)
+              await openImage(await imageInput(fullPath))
                 .jpeg({ quality: THUMB_QUALITY })
                 .toFile(output);
             } catch {

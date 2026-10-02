@@ -6,6 +6,7 @@ import { fetchTags } from '../api/packs';
 import { fetchPresets } from '../api/presets';
 import { formatBytes } from '../lib/utils';
 import { HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
+import ExternalSourcesSettings from '../components/ExternalSourcesSettings';
 
 interface DiskInfo {
   disk: { free: number; size: number; used: number };
@@ -134,6 +135,7 @@ export default function SettingsPage() {
           <span className="text-sm text-gray-500">{presetCount} 个预设</span>
         </button>}
       </div>
+      {serverWritable && <ExternalSourcesSettings />}
     </div>
   );
 }

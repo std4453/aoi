@@ -1,8 +1,7 @@
 import { apiUrl, authHeaders } from '../lib/connection';
-import type { DuplicatePack } from '../../../shared/types.js';
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import * as tus from 'tus-js-client';
-import { createFolderPack, confirmFolderFileComplete, cancelFolderUpload, fetchFolderUploadStatus, continueFolderUpload, retryVerification } from '../api/packs';
+import { createFolderPack, confirmFolderFileComplete, cancelFolderUpload } from '../api/packs';
 
 export interface FolderUploadFile {
   packFileId: string;
@@ -13,7 +12,7 @@ export interface FolderUploadFile {
 }
 
 interface FolderUploadState {
-  phase: 'idle' | 'scanning' | 'ready' | 'uploading' | 'paused' | 'done' | 'error' | 'cancelled' | 'creating' | 'checking' | 'duplicate' | 'thumbnailing' | 'confirming' | 'cancelling';
+  phase: 'idle' | 'scanning' | 'ready' | 'uploading' | 'paused' | 'error' | 'creating' | 'transferred' | 'cancelling';
   packId: string | null;
   files: FolderUploadFile[];
   overallProgress: number;
@@ -31,11 +30,8 @@ export function useFolderUpload() {
     error: null,
   });
 
-  const [matches, setMatches] = useState<DuplicatePack[]>([]);
-  const [verificationProgress, setVerificationProgress] = useState(0);
   const generation = useRef(0);
   const busy = useRef(false);
-  const verificationFailed = useRef(false);
   const allUploadsRef = useRef(new Map<string, tus.Upload>());
   const failedIdsRef = useRef(new Set<string>());
   const uploadsRef = useRef<Map<string, tus.Upload>>(new Map());
@@ -97,6 +93,7 @@ export function useFolderUpload() {
             ...prev,
             files: newFiles,
             overallProgress: calculateOverallProgress(newFiles),
+            error: `文件 ${file.name} 上传失败：${_err.message}。可重试失败文件，或取消并删除任务。`,
           };
         });
         // Try next in queue
@@ -128,7 +125,7 @@ export function useFolderUpload() {
               ...prev,
               files: newFiles,
               overallProgress: calculateOverallProgress(newFiles),
-              phase: (allComplete || result.allComplete) ? 'checking' : prev.phase,
+              phase: (allComplete || result.allComplete) ? 'transferred' : prev.phase,
             };
           });
         } catch (err) {
@@ -225,8 +222,6 @@ export function useFolderUpload() {
     busy.current = true;
     const attempt = ++generation.current;
     setState(previous => ({ ...previous, phase: 'creating', error: null }));
-    setMatches([]);
-    verificationFailed.current = false;
     failedIdsRef.current.clear();
     allUploadsRef.current.clear();
     try {
@@ -339,7 +334,6 @@ export function useFolderUpload() {
       allUploadsRef.current.clear();
       fileMapRef.current.clear();
       packIdRef.current = null;
-      setMatches([]);
       setState({ phase: 'idle', packId: null, files: [], overallProgress: 0, error: null });
       return true;
     } catch (error) {
@@ -354,8 +348,6 @@ export function useFolderUpload() {
     ++generation.current;
     busy.current = false;
     setState({ phase: 'idle', packId: null, files: [], overallProgress: 0, error: null });
-    setMatches([]);
-    setVerificationProgress(0);
     uploadsRef.current.clear();
     allUploadsRef.current.clear();
     activeCountRef.current = 0;
@@ -367,79 +359,13 @@ export function useFolderUpload() {
     failedIdsRef.current.clear();
   }, []);
 
-  const restoreUpload = useCallback((id: string) => {
-    ++generation.current;
-    packIdRef.current = id;
-    setState({ phase: 'checking', packId: id, files: [], overallProgress: 100, error: null });
-  }, []);
-
-  const continueUpload = useCallback(async () => {
-    if (busy.current || !packIdRef.current) return;
-    busy.current = true;
-    const attempt = generation.current;
-    setState(previous => ({ ...previous, phase: 'confirming', error: null }));
-    try {
-      await continueFolderUpload(packIdRef.current);
-      if (attempt !== generation.current) return;
-      setMatches([]);
-      setState(previous => ({ ...previous, phase: 'checking' }));
-    } catch (error) {
-      if (attempt === generation.current) setState(previous => ({ ...previous, phase: 'error', error: String(error) }));
-    } finally {
-      if (attempt === generation.current) busy.current = false;
-    }
-  }, []);
-
-  const retry = useCallback(async () => {
-    if (verificationFailed.current && packIdRef.current) {
-      try {
-        await retryVerification(packIdRef.current);
-        verificationFailed.current = false;
-        setState(previous => ({ ...previous, phase: 'checking', error: null }));
-      } catch (error) {
-        setState(previous => ({ ...previous, error: String(error) }));
-      }
-    } else if (fileMapRef.current.size > 0) {
-      for (const id of failedIdsRef.current) if (!fileQueueRef.current.includes(id)) fileQueueRef.current.push(id);
-      failedIdsRef.current.clear();
-      resume();
-    } else if (packIdRef.current) {
-      setState(previous => ({ ...previous, phase: 'checking', error: null }));
-    }
+  // Once transferred, UploadTask exclusively owns processing, duplicate checks and retries.
+  const retry = useCallback(() => {
+    if (!fileMapRef.current.size) return;
+    for (const id of failedIdsRef.current) if (!fileQueueRef.current.includes(id)) fileQueueRef.current.push(id);
+    failedIdsRef.current.clear();
+    resume();
   }, [resume]);
 
-  useEffect(() => {
-    if (!state.packId || !['checking', 'thumbnailing', 'duplicate'].includes(state.phase)) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const attempt = generation.current;
-    const poll = async () => {
-      if (busy.current) { timer = setTimeout(poll, 500); return; }
-      try {
-        const result = await fetchFolderUploadStatus(state.packId!);
-        if (!active || attempt !== generation.current || busy.current) return;
-        const pack = result.pack;
-        setMatches(result.matches);
-        setVerificationProgress(pack.verification?.percentage ?? 0);
-        verificationFailed.current = pack.verification?.status === 'failed';
-        const phase = pack.status === 'awaiting_confirmation' ? 'duplicate'
-          : pack.status === 'thumbnailing' ? 'thumbnailing'
-          : pack.status === 'extracted' || pack.status === 'generated' ? 'done'
-          : pack.status === 'failed' || pack.status === 'uploading' ? 'error' : 'checking';
-        setState(previous => ({ ...previous, phase,
-          error: phase === 'error' ? pack.errorMessage || '上传未完成，请取消后重新选择文件夹' : null,
-        }));
-      } catch (error) {
-        if (active && attempt === generation.current) setState(previous => ({ ...previous, error: `查询处理状态失败：${String(error)}` }));
-      }
-      if (active) timer = setTimeout(poll, 1000);
-    };
-    void poll();
-    return () => { active = false; clearTimeout(timer); };
-  }, [state.packId, state.phase]);
-
-  return {
-    ...state, matches, verificationProgress, scanFiles, startUpload, pause,
-    resume, cancel, reset, restoreUpload, continueUpload, retry,
-  };
+  return { ...state, scanFiles, startUpload, pause, resume, cancel, reset, retry };
 }

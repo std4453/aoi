@@ -1,3 +1,4 @@
+import { rememberUploadTask } from '../lib/uploadTask';
 import { serverWritable, serverCanDownloadArchive } from '../lib/connection';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -6,8 +7,9 @@ import { fetchPack, fetchThumbnails, fetchFileTree, startProcessing, removePack,
 import { usePresets } from '../hooks/usePresets';
 import { useJobProgress } from '../hooks/useJobProgress';
 import { formatBytes, statusLabels, statusColors } from '../lib/utils';
+import { shouldPollPack, shouldReloadPackPreview } from '../lib/packStatus';
 import { getLastHomeSearch, clearPacksCache } from '../lib/homeStore';
-import type { Pack, CompressionOptions, FileSelection, FileTreeNode } from '../../../shared/types.js';
+import type { Pack, CompressionOptions, FileSelection, FileTreeNode, PackThumbnail } from '../../../shared/types.js';
 import { Download, Play, ArrowLeft, Loader2, Image, Video, HardDrive, Pencil, Trash2, Tag, FolderTree } from 'lucide-react';
 import ImageViewer from '../components/ImageViewer';
 import BlurhashPlaceholder, { blurhashToDataUrl } from '../components/BlurhashPlaceholder';
@@ -28,7 +30,7 @@ export default function PackDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [pack, setPack] = useState<Pack | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ name: string; thumbUrl: string; imageUrl: string; blurhash: string | null; width: number | null; height: number | null }[]>([]);
+  const [thumbnails, setThumbnails] = useState<PackThumbnail[]>([]);
   const [loading, setLoading] = useState(true);
   const [jobId, setJobId] = useState<string | null>(null);
   const [options, setOptions] = useState<CompressionOptions>(DEFAULT_OPTIONS);
@@ -115,10 +117,10 @@ export default function PackDetailPage() {
     }
   }, [id]);
 
-  // Load thumbnails and file tree when thumbnailing finishes (must run BEFORE prevStatus update)
+  // A poll may skip intermediate stages; load previews on any processing-to-ready transition.
   const prevStatus = useRef(pack?.status);
   useEffect(() => {
-    if (['thumbnailing', 'verifying'].includes(prevStatus.current ?? '') && (pack?.status === 'extracted' || pack?.status === 'generated')) {
+    if (shouldReloadPackPreview(prevStatus.current, pack?.status)) {
       loadThumbnails();
       loadFileTree();
     }
@@ -144,13 +146,13 @@ export default function PackDetailPage() {
     return closeLoading;
   }, [loading, isAvailable]);
 
-  // Archive packs can be waiting in the extraction queue after upload finishes.
+  // Archive queues and Pixiv downloads both run on the server while uploading.
+  const polling = shouldPollPack(pack);
   useEffect(() => {
-    const queuedArchive = pack?.status === 'uploading' && pack.sourceType === 'archive';
-    if (!queuedArchive && pack?.status !== 'extracting' && pack?.status !== 'thumbnailing' && pack?.status !== 'verifying' && pack?.status !== 'awaiting_confirmation') return;
+    if (!polling) return;
     const timer = setInterval(refreshPackStatus, 1000);
     return () => clearInterval(timer);
-  }, [pack?.status, pack?.sourceType, refreshPackStatus]);
+  }, [polling, refreshPackStatus]);
 
   // Initial load
   useEffect(() => {
@@ -161,6 +163,7 @@ export default function PackDetailPage() {
     name: t.name,
     thumbUrl: t.thumbUrl,
     fullUrl: t.imageUrl,
+    ugoiraUrl: t.ugoiraUrl,
     blurhash: t.blurhash,
     width: t.width,
     height: t.height,
@@ -384,9 +387,9 @@ export default function PackDetailPage() {
           }}>重试校验</button>
         </div>
       )}
-      {pack.sourceType === 'folder' && ['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) && !pack.verification?.allowsPreview && (
-        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?folder=${pack.id}`)}>
-          继续完成上传
+      {pack.sourceType === 'folder' && (['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) || (pack.originalFormat === 'pixiv' && pack.status === 'failed')) && !pack.verification?.allowsPreview && (
+        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => { rememberUploadTask(pack.id); navigate('/upload'); }}>
+          {pack.originalFormat === 'pixiv' ? '查看导入进度' : '继续完成上传'}
         </button>
       )}
 
@@ -423,6 +426,7 @@ export default function PackDetailPage() {
                     <span className="text-white text-lg font-medium">+{thumbnails.length - 9}</span>
                   </div>
                 )}
+                {thumb.mediaType === 'ugoira' && <span className="absolute bottom-1 right-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">动图</span>}
               </div>
             ))}
           </div>
