@@ -10,10 +10,19 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-rar-'));
 process.env.DATA_DIR = root;
 const { initDb, closeDb } = await import('../src/db/connection.js');
 const { createPack, getPack } = await import('../src/db/repositories.js');
-const { archiveExtractor } = await import('../src/services/archive-extractor.js');
+const { archiveExtractor, is7zLinkField } = await import('../src/services/archive-extractor.js');
 const { getArchivePath, getExtractedImagesDir } = await import('../src/services/storage.js');
 await initDb();
 test.after(() => { closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
+
+test('7z RAR listings distinguish empty link fields from actual links', () => {
+  for (const line of ['Symbolic Link = ', 'Hard Link = ', 'Copy Link = ', 'Attributes = A', 'Attributes = A -rw-r--r--']) {
+    assert.equal(is7zLinkField(line), false, line);
+  }
+  for (const line of ['Symbolic Link = ../outside', 'Hard Link = image.png', 'Copy Link = image.png', 'Attributes = l---------', 'Attributes = A lrwxrwxrwx']) {
+    assert.equal(is7zLinkField(line), true, line);
+  }
+});
 
 function crc32(bytes: Buffer): number {
   let crc = 0xffffffff;

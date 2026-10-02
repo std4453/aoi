@@ -206,7 +206,7 @@ function inspect7zArchive(
           }
           entries++;
         }
-        if (line.startsWith('Symbolic Link = ') || /^Attributes = .*l/.test(line)) {
+        if (is7zLinkField(line)) {
           reject(new ArchiveSafetyError('Archive contains a symbolic link'));
           return;
         }
@@ -231,6 +231,12 @@ function inspect7zArchive(
     // Background jobs must not wait for an interactive password prompt.
     child.stdin?.end();
   });
+}
+
+/** Modern 7-Zip prints empty link fields for ordinary RAR entries too. */
+export function is7zLinkField(line: string): boolean {
+  return /^(?:Symbolic|Hard|Copy) Link =\s*\S/.test(line)
+    || /^Attributes = (?:.*\s)?l[rwxstST-]{9}(?:\s|$)/.test(line);
 }
 
 // Extract using 7z — supports ZIP, RAR, 7z with password
