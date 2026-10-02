@@ -5,6 +5,7 @@ import { ApiError, get, post, del } from '../api/client';
 import { fetchThumbnails } from '../api/packs';
 import { resourceUrl } from '../lib/connection';
 import { clearPacksCache } from '../lib/homeStore';
+import { formatJobProgress } from '../lib/utils';
 import { rememberUploadTask, forgetUploadTask } from '../lib/uploadTask';
 import UploadTaskStatus, { taskActionClass } from './UploadTaskStatus';
 import DuplicateUploadModal from './DuplicateUploadModal';
@@ -87,7 +88,7 @@ export default function UploadTask({ packId, onDone }: { packId: string; onDone:
     </div>}
     <UploadTaskStatus stage={busy && confirmDelete ? '正在取消并清理文件…' : pack?.status === 'uploading' && pack.originalFormat !== 'pixiv' ? '等待上传完成' : pack ? stages[pack.status] : '正在读取任务'}
       done={done} paused={duplicate} error={error || (failed ? pack.errorMessage || '处理失败，请重试或删除后重新上传' : null)} progress={progress}
-      detail={done ? `${pack!.imageCount} 张图片 · ${pack!.videoCount} 个视频，可以预览` : failed && !task?.retryable ? '请删除此任务，检查源文件或压缩包密码后重新上传。' : activeProgress?.total ? `${activeProgress.completed} / ${activeProgress.total} 个文件` : undefined}>
+      detail={done ? `${pack!.imageCount} 张图片 · ${pack!.videoCount} 个视频，可以预览` : failed && !task?.retryable ? '请删除此任务，检查源文件或压缩包密码后重新上传。' : formatJobProgress(activeProgress)}>
       {failed && task?.retryable && <button disabled={busy} className={taskActionClass} onClick={() => void act(async () => { await post(`/packs/${packId}/upload-task/retry`); })}>重试</button>}
       {pack?.originalFormat === 'pixiv' && (failed || error) && <button disabled={busy} className={taskActionClass} onClick={() => setSettings(true)}>配置 Pixiv 登录</button>}
       {duplicate && !task?.matches.length && <button disabled={busy} className={taskActionClass} onClick={() => void act(async () => { await post(`/packs/${packId}/upload-task/continue`); })}>继续处理</button>}

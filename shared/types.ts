@@ -88,6 +88,7 @@ export interface JobProgress {
   jobId: string;
   status: Job['status'];
   phase: string;
+  /** Verification counts bytes; download, thumbnail, compression and archiving count files. */
   completed: number;
   total: number;
   percentage: number;
