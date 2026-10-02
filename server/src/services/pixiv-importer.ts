@@ -54,7 +54,13 @@ export class PixivClient {
     if (refreshToken) this.auth = new PixivAuth(refreshToken, dispatcher);
   }
 
-  async request(url: string, image = false, zip = false) {
+  private accessError(): Error {
+    return new Error(this.auth
+      ? 'Pixiv 拒绝访问：当前登录账号无权查看该作品，请检查作品权限，或在外部来源设置中更新 Pixiv refresh-token。'
+      : 'Pixiv 拒绝匿名访问，且未配置 refresh-token。该作品可能需要登录才能下载（也可能已删除或限制访问）。请打开「外部来源 → Pixiv」，使用 gallery-dl oauth:pixiv 获取 refresh-token，保存后重试。');
+  }
+
+  async request(url: string, image = false, zip = false, signal?: AbortSignal) {
     if (image) validatePixivImageUrl(url, zip);
     else if (!/^https:\/\/www\.pixiv\.net\/ajax\/illust\/[1-9]\d{0,19}(?:\/pages|\/ugoira_meta)?$/.test(url)) {
       throw new Error('Invalid Pixiv API URL');
@@ -62,7 +68,7 @@ export class PixivClient {
     let response;
     try {
       response = await fetch(url, {
-        dispatcher: this.dispatcher, redirect: 'manual', signal: AbortSignal.timeout(120_000),
+        dispatcher: this.dispatcher, redirect: 'manual', signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]),
         headers: {
           Referer: 'https://www.pixiv.net/', 'User-Agent': 'Mozilla/5.0 AoI/1.0',
           ...(!image && this.cookie ? { Cookie: this.cookie } : {}),
@@ -73,24 +79,24 @@ export class PixivClient {
     }
     if (!response.ok) {
       await response.body?.cancel();
-      if ([401, 403].includes(response.status)) throw new Error('Pixiv 拒绝访问，请检查服务端 PIXIV_COOKIE 或作品访问权限');
-      if (response.status === 404) throw new Error('Pixiv 作品或原图不存在，可能已被删除');
+      if ([401, 403].includes(response.status)) throw this.accessError();
+      if (response.status === 404) throw new Error(!image && !this.auth ? 'Pixiv 找不到作品，可能已删除或仅登录可见。当前未配置 refresh-token；请核对网址，或在「外部来源 → Pixiv」配置登录态后重试。' : 'Pixiv 作品或原图不存在，可能已被删除');
       if (response.status === 429) throw new Error('Pixiv 请求过于频繁，请稍后重试');
       throw new Error(`Pixiv 请求失败（HTTP ${response.status}）`);
     }
     return response;
   }
 
-  async json(url: string): Promise<unknown> {
-    const response = await this.request(url);
+  async json(url: string, signal?: AbortSignal): Promise<unknown> {
+    const response = await this.request(url, false, false, signal);
     const result = z.object({ error: z.boolean(), body: z.unknown() }).parse(await readPixivJson(response));
-    if (result.error) throw new Error('Pixiv 作品不可访问，请检查网址或在设置中配置登录态');
+    if (result.error) throw this.accessError();
     return result.body;
   }
 
-  async describe(id: string) {
+  async describe(id: string, signal?: AbortSignal) {
     if (this.auth) {
-      const { illust } = appArtworkSchema.parse(await this.auth.request('illust/detail', id));
+      const { illust } = appArtworkSchema.parse(await this.auth.request('illust/detail', id, signal));
       return {
         metadata: { title: illust.title, userName: illust.user.name, illustType: illust.type === 'ugoira' ? 2 : illust.type === 'manga' ? 1 : 0, pageCount: illust.page_count },
         tagNames: illust.tags.map(tag => tag.name),
@@ -98,28 +104,28 @@ export class PixivClient {
           illust.meta_single_page.original_image_url ? [{ urls: { original: illust.meta_single_page.original_image_url } }] : [],
       };
     }
-    const metadata = metadataSchema.parse(await this.json(`https://www.pixiv.net/ajax/illust/${id}`));
+    const metadata = metadataSchema.parse(await this.json(`https://www.pixiv.net/ajax/illust/${id}`, signal));
     return { metadata, tagNames: metadata.tags?.tags.map(tag => tag.tag) ?? [], pages: undefined };
   }
 
-  async artwork(id: string) {
-    const { metadata, tagNames, pages: appPages } = await this.describe(id);
+  async artwork(id: string, signal?: AbortSignal) {
+    const { metadata, tagNames, pages: appPages } = await this.describe(id, signal);
     if (metadata.illustType === 2) {
-      const raw = this.auth ? z.object({ ugoira_metadata: z.object({ zip_urls: z.object({ medium: z.string() }), frames: ugoiraFramesSchema }) }).parse(await this.auth.request('ugoira/metadata', id)).ugoira_metadata :
-        z.object({ originalSrc: z.string(), frames: ugoiraFramesSchema }).parse(await this.json(`https://www.pixiv.net/ajax/illust/${id}/ugoira_meta`));
+      const raw = this.auth ? z.object({ ugoira_metadata: z.object({ zip_urls: z.object({ medium: z.string() }), frames: ugoiraFramesSchema }) }).parse(await this.auth.request('ugoira/metadata', id, signal)).ugoira_metadata :
+        z.object({ originalSrc: z.string(), frames: ugoiraFramesSchema }).parse(await this.json(`https://www.pixiv.net/ajax/illust/${id}/ugoira_meta`, signal));
       const zipUrl = 'originalSrc' in raw ? raw.originalSrc : raw.zip_urls.medium.replace('_ugoira600x600.zip', '_ugoira1920x1080.zip');
       validatePixivImageUrl(zipUrl, true);
       return { metadata, tagNames, pages: [], ugoira: { zipUrl, frames: raw.frames } };
     }
     if (![0, 1].includes(metadata.illustType)) throw new Error('不支持的 Pixiv 作品类型');
-    const pages = pagesSchema.parse(appPages ?? await this.json(`https://www.pixiv.net/ajax/illust/${id}/pages`));
+    const pages = pagesSchema.parse(appPages ?? await this.json(`https://www.pixiv.net/ajax/illust/${id}/pages`, signal));
     if (pages.length !== metadata.pageCount) throw new Error('Pixiv 原图列表不完整，请稍后重试');
     for (const page of pages) validatePixivImageUrl(page.urls.original);
     return { metadata, tagNames, pages, ugoira: undefined };
   }
 
-  async download(url: string, destination: string, limit: number, zip = false): Promise<number> {
-    const response = await this.request(url, true, zip);
+  async download(url: string, destination: string, limit: number, zip = false, signal?: AbortSignal): Promise<number> {
+    const response = await this.request(url, true, zip, signal);
     const temporary = `${destination}.part`;
     let size = 0;
     try {
@@ -172,11 +178,14 @@ export async function importPixivPack(
   packId: string,
   onProgress: (completed: number, total: number, bytes: number) => void,
   pixiv = getPixivClient(),
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const pack = getPack(packId);
   if (!pack || pack.originalFormat !== 'pixiv') throw new Error('Pixiv 图包不存在');
   const { id } = parsePixivUrl(pack.originalFilename);
-  const { metadata, tagNames, pages, ugoira } = await pixiv.artwork(id);
+  const { metadata, tagNames, pages, ugoira } = await pixiv.artwork(id, signal);
+  signal?.throwIfAborted();
   const directory = getExtractedImagesDir(packId);
   ensureDir(directory);
   let bytes = 0;
@@ -184,7 +193,7 @@ export async function importPixivPack(
   if (ugoira) {
     const zipPath = resolveWithin(directory, `${id}.zip`);
     try {
-      await pixiv.download(ugoira.zipUrl, zipPath, Math.min(maxImageBytes, config.maxUploadSize), true);
+      await pixiv.download(ugoira.zipUrl, zipPath, Math.min(maxImageBytes, config.maxUploadSize), true, signal);
       const destination = resolveWithin(directory, `${id}.ugoira`);
       await createUgoira(zipPath, destination, ugoira.frames);
       bytes = (await fs.promises.stat(destination)).size;
@@ -193,11 +202,12 @@ export async function importPixivPack(
     } finally { await fs.promises.rm(zipPath, { force: true }); }
   }
   for (const [index, page] of pages.entries()) {
+    signal?.throwIfAborted();
     const url = validatePixivImageUrl(page.urls.original);
     const extension = url.pathname.split('.').pop()!.toLowerCase();
     const destination = resolveWithin(directory, `${id}_p${String(index).padStart(3, '0')}.${extension}`);
     // Redownload on recovery so a changed upstream work cannot mix old and new pages.
-    bytes += await pixiv.download(url.href, destination, Math.min(maxImageBytes, config.maxUploadSize - bytes));
+    bytes += await pixiv.download(url.href, destination, Math.min(maxImageBytes, config.maxUploadSize - bytes), false, signal);
     onProgress(index + 1, pages.length, bytes);
   }
   const expected = new Set(pages.map((page, index) => `${id}_p${String(index).padStart(3, '0')}.${new URL(page.urls.original).pathname.split('.').pop()!.toLowerCase()}`));
@@ -205,6 +215,7 @@ export async function importPixivPack(
   for (const filename of await fs.promises.readdir(directory)) {
     if (!expected.has(filename)) await fs.promises.rm(resolveWithin(directory, filename), { force: true });
   }
+  signal?.throwIfAborted();
   getDb().transaction(() => {
     const options = JSON.parse(getLatestJob(packId, 'pixiv')?.options ?? '{}') as { autoName?: boolean; autoTags?: boolean };
     const name = (options.autoName ?? pack.name === `Pixiv ${id}`) ? metadata.title.replace(/[\0\r\n]/g, ' ').slice(0, 200) : pack.name;

@@ -96,6 +96,13 @@ export interface JobProgress {
   error: string | null;
 }
 
+export interface UploadTaskStatus {
+  pack: Pack;
+  progress: JobProgress | null;
+  matches: DuplicatePack[];
+  retryable: boolean;
+}
+
 export interface CompressionResult {
   originalSize: number;
   compressedSize: number;

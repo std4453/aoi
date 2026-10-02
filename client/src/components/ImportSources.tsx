@@ -9,9 +9,9 @@ export function PixivIcon({ className = 'w-10 h-10' }: { className?: string }) {
 // A provider descriptor keeps the layout independent of individual import forms.
 const sources = [{ id: 'pixiv', label: 'Pixiv', Icon: PixivIcon }] as const;
 
-export default function ImportSources({ onSelect }: { onSelect: (source: typeof sources[number]['id']) => void }) {
-  return <section className="mt-6" aria-labelledby="import-sources-title">
-    <h3 id="import-sources-title" className="text-sm text-gray-500 mb-3">导入自</h3>
+export default function ImportSources({ onSelect, title = '导入自' }: { onSelect: (source: typeof sources[number]['id']) => void; title?: string }) {
+  return <section className="mt-6" aria-label={title}>
+    <h3 className="text-sm text-gray-500 mb-3">{title}</h3>
     <div className="flex flex-wrap gap-3">
       {sources.map(({ id, label, Icon }) => <button key={id} type="button" onClick={() => onSelect(id)}
         className="flex flex-col items-center gap-2 rounded-xl px-4 py-3 text-gray-400 hover:bg-gray-800 hover:text-gray-200 transition-colors">

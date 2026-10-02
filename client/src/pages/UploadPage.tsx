@@ -4,13 +4,16 @@ import { useUpload } from '../hooks/useUpload';
 import { useFolderUpload } from '../hooks/useFolderUpload';
 import { clearPacksCache } from '../lib/homeStore';
 import { formatBytes } from '../lib/utils';
-import { Upload, Pause, Play, X, CheckCircle, AlertCircle, FileArchive, FolderOpen, Lock, Eye, EyeOff, Tag, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, X, FileArchive, FolderOpen, Lock, Eye, EyeOff, Tag, ChevronDown, ChevronUp } from 'lucide-react';
 import TagSelector from '../components/TagSelector';
 import Modal from '../components/Modal';
 import DuplicateUploadModal from '../components/DuplicateUploadModal';
 import { showInfo } from '../components/Toast';
 import PixivImport from '../components/PixivImport';
 import ImportSources from '../components/ImportSources';
+import UploadTask from '../components/UploadTask';
+import UploadTaskStatus, { taskActionClass } from '../components/UploadTaskStatus';
+import { readUploadTask, forgetUploadTask } from '../lib/uploadTask';
 
 type UploadMode = 'archive' | 'folder' | 'pixiv' | null;
 
@@ -19,13 +22,15 @@ const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 export default function UploadPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [restoredTask, setRestoredTask] = useState(() => searchParams.size ? null : readUploadTask());
   const initialFolderId = useRef(searchParams.get('folder'));
+  const serverFolder = useRef(Boolean(initialFolderId.current));
 
   // Archive upload
   const { matches: duplicateMatches, continueUpload: continueArchive, progress: archiveProgress, status: archiveStatus, error: archiveError, packId: archivePackId, startUpload: startArchiveUpload, pause: pauseArchive, resume: resumeArchive, cancel: cancelArchive, reset: resetArchive } = useUpload();
 
   // Folder upload
-  const { matches: folderMatches, verificationProgress, restoreUpload: restoreFolder, continueUpload: continueFolder, retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
+  const { matches: folderMatches, restoreUpload: restoreFolder, continueUpload: continueFolder, retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
 
   const [mode, setMode] = useState<UploadMode>(searchParams.has('pixiv') ? 'pixiv' : null);
   const [cancelConfirm, setCancelConfirm] = useState<null | 'open' | 'closing'>(null);
@@ -61,7 +66,7 @@ export default function UploadPage() {
   }, [restoreFolder]);
 
   useEffect(() => {
-    if (mode === 'folder' && folderPackId) {
+    if (mode === 'folder' && folderPackId && !serverFolder.current) {
       setSearchParams({ folder: folderPackId }, { replace: true });
     }
   }, [mode, folderPackId, setSearchParams]);
@@ -269,6 +274,8 @@ export default function UploadPage() {
   // --- Shared handlers ---
 
   const resetToIdle = () => {
+    forgetUploadTask(); setRestoredTask(null);
+    serverFolder.current = false;
     setSearchParams({}, { replace: true });
     clearPacksCache();
     setMode(null);
@@ -290,19 +297,6 @@ export default function UploadPage() {
     if (targetPackId) navigate(`/packs/${targetPackId}`);
   };
 
-  const handleDone = () => {
-    resetToIdle();
-    clearPacksCache();
-  };
-
-  const handleViewPack = () => {
-    const pid = mode === 'archive' ? archivePackId : folderPackId;
-    resetToIdle();
-    if (pid) {
-      navigate(`/packs/${pid}`);
-    }
-  };
-
   const handleCancelFile = () => {
     setFile(null);
     setPackName('');
@@ -311,20 +305,22 @@ export default function UploadPage() {
 
   // --- Derived states ---
 
-  const isArchiveActive = archiveStatus === 'uploading' || archiveStatus === 'paused';
-  const isFolderActive = ['uploading', 'paused', 'checking', 'duplicate', 'error'].includes(folderPhase) && Boolean(folderPackId);
-  const isArchiveDone = archiveStatus === 'done';
-  const isFolderDone = folderPhase === 'done';
-  const isAnyDone = isArchiveDone || isFolderDone;
+  if (['checking', 'duplicate', 'thumbnailing', 'done'].includes(folderPhase) && folderPackId) serverFolder.current = true;
+  const serverTaskId = searchParams.get('task') || archivePackId || (serverFolder.current ? folderPackId : null) || restoredTask;
+  useEffect(() => {
+    if (serverTaskId && !searchParams.has('task')) setSearchParams({ task: serverTaskId }, { replace: true });
+  }, [serverTaskId, searchParams, setSearchParams]);
 
   return (
     <div className="max-w-lg mx-auto">
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">上传图包</h2>
 
-      {mode === 'pixiv' && <PixivImport onBack={() => setMode(null)} />}
+      {!serverTaskId && mode === 'pixiv' && <PixivImport onBack={() => setMode(null)} />}
+
+      {serverTaskId && <UploadTask key={serverTaskId} packId={serverTaskId} onDone={resetToIdle} />}
 
       <DuplicateUploadModal
-        matches={mode === 'folder' ? folderMatches : duplicateMatches}
+        matches={serverTaskId ? [] : mode === 'folder' ? folderMatches : duplicateMatches}
         busy={mode === 'folder' ? ['confirming', 'cancelling'].includes(folderPhase) : ['checking', 'confirming', 'cancelling'].includes(archiveStatus)}
         error={mode === 'folder' ? folderError : archiveError}
         onCancel={() => { void handleDuplicateCancel(); }}
@@ -333,7 +329,7 @@ export default function UploadPage() {
       />
 
       {/* Initial: no file/folder selected */}
-      {!mode && (
+      {!mode && !serverTaskId && (
         <div
           onDrop={handleDrop}
           onDragOver={handleDragOver}
@@ -383,8 +379,8 @@ export default function UploadPage() {
       )}
 
       {/* Archive upload form */}
-      {!mode && <ImportSources onSelect={setMode} />}
-      {mode === 'archive' && file && !isArchiveDone && (
+      {!mode && !serverTaskId && <ImportSources onSelect={setMode} />}
+      {mode === 'archive' && file && !serverTaskId && (
         <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
           {/* File info */}
           <div className="mb-3">
@@ -453,89 +449,18 @@ export default function UploadPage() {
             </button>
           </div>
 
-          {/* Progress */}
-          {(archiveStatus === 'uploading' || archiveStatus === 'paused') && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-sm mb-2">
-                <span className="text-gray-400">
-                  {archiveStatus === 'paused' ? '已暂停' : '上传中...'}
-                </span>
-                <span className="text-white font-medium">{archiveProgress}%</span>
-              </div>
-              <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                  style={{ width: `${archiveProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {['checking', 'confirming', 'cancelling'].includes(archiveStatus) && (
-            <p role="status" className="text-sm text-gray-400 my-3">
-              {archiveStatus === 'checking' ? '正在检查是否重复…' : archiveStatus === 'cancelling' ? '正在取消上传…' : '正在创建图包…'}
-            </p>
-          )}
-
-          {/* Actions */}
-          <div className="flex gap-2">
-            {archiveStatus === 'idle' && (
-              <button
-                onClick={handleArchiveStart}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-500 transition-colors"
-              >
-                <Upload size={18} />
-                开始上传
-              </button>
-            )}
-            {archiveStatus === 'uploading' && (
-              <button
-                onClick={pauseArchive}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-yellow-600 text-white font-medium rounded-xl hover:bg-yellow-500 transition-colors"
-              >
-                <Pause size={18} />
-                暂停
-              </button>
-            )}
-            {archiveStatus === 'paused' && (
-              <button
-                onClick={resumeArchive}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-500 transition-colors"
-              >
-                <Play size={18} />
-                继续
-              </button>
-            )}
-            {isArchiveActive && (
-              <button
-                onClick={handleCancelClick}
-                className="flex items-center justify-center p-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-xl transition-colors"
-              >
-                <X size={18} />
-              </button>
-            )}
-          </div>
-
-          {/* Error */}
-          {archiveError && archiveStatus === 'error' && (
-            <div className="mt-4 p-3 bg-red-900/30 border border-red-800 rounded-xl flex items-start gap-2">
-              <AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-red-400 text-sm">{archiveError}</p>
-                <button
-                  onClick={resumeArchive}
-                  className="text-red-300 text-sm underline mt-1"
-                >
-                  重试
-                </button>
-              </div>
-            </div>
-          )}
+          {archiveStatus === 'idle' ? <button onClick={handleArchiveStart} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl"><Upload size={18} />开始上传</button> :
+            <UploadTaskStatus stage={archiveStatus === 'error' ? '上传失败' : archiveStatus === 'paused' ? '已暂停' : archiveStatus === 'uploading' ? '正在上传' : archiveStatus === 'duplicate' ? '发现重复，等待确认' : archiveStatus === 'cancelling' ? '正在取消…' : '正在检测重复…'}
+              progress={['uploading', 'paused'].includes(archiveStatus) ? archiveProgress : undefined} paused={archiveStatus === 'paused'} error={archiveError}>
+              {archiveStatus === 'uploading' && <button className={taskActionClass} onClick={pauseArchive}>暂停</button>}
+              {['paused', 'error'].includes(archiveStatus) && <button className={taskActionClass} onClick={resumeArchive}>{archiveStatus === 'error' ? '重试' : '继续'}</button>}
+              <button disabled={['checking', 'confirming', 'cancelling'].includes(archiveStatus)} className={`${taskActionClass} text-red-300`} onClick={handleCancelClick}>{archiveStatus === 'error' ? '删除任务' : '取消并删除'}</button>
+            </UploadTaskStatus>}
         </div>
       )}
 
       {/* Folder upload form */}
-      {mode === 'folder' && !isFolderDone && (
+      {mode === 'folder' && !serverTaskId && (
         <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
           {/* Folder info */}
           <div className="mb-3">
@@ -570,13 +495,6 @@ export default function UploadPage() {
             )}
           </div>
 
-          {['creating', 'checking', 'thumbnailing', 'confirming', 'cancelling'].includes(folderPhase) && (
-            <p role="status" className="mb-4 text-sm text-gray-400">
-              {folderPhase === 'creating' ? '正在创建上传…' : folderPhase === 'checking' ? `正在校验… ${verificationProgress}%`
-                : folderPhase === 'thumbnailing' ? '正在生成缩略图…' : folderPhase === 'cancelling' ? '正在取消上传…' : '正在继续处理…'}
-            </p>
-          )}
-
           {/* No password field for folder uploads */}
 
           {/* Tags */}
@@ -596,25 +514,17 @@ export default function UploadPage() {
             </button>
           </div>
 
-          {/* Progress */}
-          {(folderPhase === 'uploading' || folderPhase === 'paused') && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-sm mb-2">
-                <span className="text-gray-400">
-                  {folderPhase === 'paused' ? '已暂停' : '上传中...'}
-                  <span className="text-gray-500 ml-1.5">
-                    {folderFiles.filter(f => f.status === 'uploaded').length}/{folderFiles.length} 已上传
-                  </span>
-                </span>
-                <span className="text-white font-medium">{folderProgress}%</span>
-              </div>
-              <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                  style={{ width: `${folderProgress}%` }}
-                />
-              </div>
-
+          {folderPhase !== 'ready' && <UploadTaskStatus
+            stage={folderPhase === 'error' || folderError ? '上传失败' : folderPhase === 'paused' ? '已暂停' : folderPhase === 'uploading' ? '正在上传' : folderPhase === 'cancelling' ? '正在取消…' : '正在准备上传…'}
+            progress={['uploading', 'paused'].includes(folderPhase) ? folderProgress : undefined} paused={folderPhase === 'paused'} error={folderError}
+            detail={folderFiles.length ? `${folderFiles.filter(f => f.status === 'uploaded').length} / ${folderFiles.length} 个文件` : undefined}>
+            {folderPhase === 'uploading' && <button className={taskActionClass} onClick={pauseFolder}>暂停</button>}
+            {folderPhase === 'paused' && <button className={taskActionClass} onClick={resumeFolder}>继续</button>}
+            {(folderPhase === 'error' || folderError) && <button className={taskActionClass} onClick={() => void retryFolder()}>重试</button>}
+            <button disabled={['creating', 'scanning', 'confirming', 'cancelling'].includes(folderPhase)} className={`${taskActionClass} text-red-300`} onClick={handleCancelClick}>{folderPhase === 'error' || folderError ? '删除任务' : '取消并删除'}</button>
+          </UploadTaskStatus>}
+          {(folderPhase === 'uploading' || folderPhase === 'paused' || folderPhase === 'error') && (
+            <div className="mt-3">
               {/* Expandable file details */}
               <button
                 onClick={() => setShowFileDetails(!showFileDetails)}
@@ -653,88 +563,7 @@ export default function UploadPage() {
             </div>
           )}
 
-          {/* Actions */}
-          <div className="flex gap-2">
-            {folderPhase === 'scanning' && (
-              <button
-                disabled
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-700 text-gray-400 font-medium rounded-xl cursor-not-allowed"
-              >
-                扫描中...
-              </button>
-            )}
-            {folderPhase === 'ready' && (
-              <button
-                onClick={handleFolderStart}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-500 transition-colors"
-              >
-                <Upload size={18} />
-                开始上传
-              </button>
-            )}
-            {folderPhase === 'uploading' && (
-              <button
-                onClick={pauseFolder}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-yellow-600 text-white font-medium rounded-xl hover:bg-yellow-500 transition-colors"
-              >
-                <Pause size={18} />
-                暂停
-              </button>
-            )}
-            {folderPhase === 'paused' && (
-              <button
-                onClick={resumeFolder}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-500 transition-colors"
-              >
-                <Play size={18} />
-                继续
-              </button>
-            )}
-            {isFolderActive && (
-              <button
-                onClick={handleCancelClick}
-                className="flex items-center justify-center p-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-xl transition-colors"
-              >
-                <X size={18} />
-              </button>
-            )}
-          </div>
-
-          {/* Error */}
-          {folderError && (
-            <div className="mt-4 p-3 bg-red-900/30 border border-red-800 rounded-xl flex items-start gap-2">
-              <AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-red-400 text-sm">{folderError}</p>
-                <button onClick={() => { void retryFolder(); }} className="mt-2 text-sm text-red-300 underline">重试</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Success (both archive and folder) */}
-      {isAnyDone && (
-        <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 text-center">
-          <CheckCircle size={48} className="mx-auto text-green-400 mb-4" />
-          <p className="text-white font-medium mb-1">上传完成</p>
-          <p className="text-gray-400 text-sm mb-6">
-            {mode === 'folder' ? '图包已处理完成，可以预览。' : '图包正在后台处理中，请稍候…'}
-          </p>
-          <div className="flex gap-3">
-            <button
-              onClick={handleViewPack}
-              className="flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-500 transition-colors"
-            >
-              查看图包
-            </button>
-            <button
-              onClick={handleDone}
-              className="flex-1 py-3 bg-gray-800 text-gray-300 font-medium rounded-xl hover:bg-gray-700 transition-colors"
-            >
-              继续上传
-            </button>
-          </div>
+          {folderPhase === 'ready' && <button onClick={handleFolderStart} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl"><Upload size={18} />开始上传</button>}
         </div>
       )}
 

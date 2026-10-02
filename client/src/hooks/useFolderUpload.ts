@@ -97,6 +97,7 @@ export function useFolderUpload() {
             ...prev,
             files: newFiles,
             overallProgress: calculateOverallProgress(newFiles),
+            error: `文件 ${file.name} 上传失败：${_err.message}。可重试失败文件，或取消并删除任务。`,
           };
         });
         // Try next in queue

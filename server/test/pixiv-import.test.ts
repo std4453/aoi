@@ -72,7 +72,7 @@ test('rejects redirects, login failures and unsafe page URLs', async () => {
     agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123' }).reply(302, '', { headers: { location: 'http://127.0.0.1/' } });
     await assert.rejects(client.artwork('123'), /302/);
     agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123' }).reply(403, 'denied');
-    await assert.rejects(client.artwork('123'), /PIXIV_COOKIE/);
+    await assert.rejects(client.artwork('123'), /未配置 refresh-token/);
     agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123' }).reply(200, { error: false, body: { title: 'x', userName: 'y', pageCount: 1, illustType: 0 } });
     agent.get('https://www.pixiv.net').intercept({ path: '/ajax/illust/123/pages' }).reply(200, { error: false, body: [{ urls: { original: 'https://127.0.0.1/a.jpg' } }] });
     await assert.rejects(client.artwork('123'), /原图地址/);

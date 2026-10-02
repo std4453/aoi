@@ -20,6 +20,8 @@ class JobQueue extends EventEmitter {
   private currentJobId: string | null = null;
   private stopping = false;
   private verificationAbort: { packId: string; controller: AbortController } | null = null;
+  private importAbort: { packId: string; controller: AbortController } | null = null;
+  private cancellingImports = new Set<string>();
 
   start(): void {
     this.scheduleNext();
@@ -74,6 +76,8 @@ class JobQueue extends EventEmitter {
     try {
       switch (job.type) {
         case 'pixiv': {
+          const controller = new AbortController();
+          this.importAbort = { packId: job.packId, controller };
           const { importPixivPack } = await import('./pixiv-importer.js');
           await importPixivPack(job.packId, (completed, total, bytes) => {
             this.emitProgress(job.id, {
@@ -81,7 +85,8 @@ class JobQueue extends EventEmitter {
               percentage: Math.floor(completed / total * 100),
               totalOriginalSize: bytes, totalCompressedSize: 0, error: null,
             });
-          });
+          }, undefined, controller.signal);
+          this.importAbort = null;
           break;
         }
         case 'extract':
@@ -120,6 +125,10 @@ class JobQueue extends EventEmitter {
         }
       }
 
+      if (this.cancellingImports.has(job.packId)) {
+        updateJobStatus(job.id, 'cancelled');
+        return;
+      }
       if (!config.isReplica && (job.type === 'thumbnail' || job.type === 'compress')) resumeHistoricalVerification(job.packId);
       updateJobStatus(job.id, 'completed', 100);
       const completed = this.getProgress(job.id);
@@ -127,6 +136,11 @@ class JobQueue extends EventEmitter {
         this.emit('progress', { ...completed, status: 'completed', percentage: 100 });
       }
     } catch (err) {
+      if (this.importAbort?.packId === job.packId) this.importAbort = null;
+      if (this.cancellingImports.has(job.packId)) {
+        updateJobStatus(job.id, 'cancelled');
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       updateJobStatus(job.id, 'failed', 0, message);
       console.error(`Job ${job.id} failed:`, message);
@@ -296,6 +310,22 @@ class JobQueue extends EventEmitter {
       this.verificationAbort.controller.abort();
       await this.currentTask;
     }
+  }
+
+  async cancelImport(packId: string): Promise<void> {
+    if (getDb().prepare("SELECT 1 FROM jobs WHERE pack_id = ? AND type = 'compress' AND status IN ('pending', 'running')").get(packId)) {
+      throw new Error('正在生成压缩包，请完成后再删除');
+    }
+    this.cancellingImports.add(packId);
+    const cancelPending = () => getDb().prepare("UPDATE jobs SET status = 'cancelled' WHERE pack_id = ? AND status = 'pending'").run(packId);
+    try {
+      cancelPending();
+      if (this.importAbort?.packId === packId) this.importAbort.controller.abort();
+      if (this.verificationAbort?.packId === packId) this.verificationAbort.controller.abort();
+      if (this.currentJobId && getJob(this.currentJobId)?.packId === packId) await this.currentTask;
+      // Extraction/thumbnail work drains before deletion. Cancel any follow-up it queued.
+      cancelPending();
+    } finally { this.cancellingImports.delete(packId); }
   }
 
   async shutdown(timeoutMs: number): Promise<boolean> {

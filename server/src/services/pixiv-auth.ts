@@ -79,14 +79,15 @@ export class PixivAuth {
     return this.accessToken;
   }
 
-  async request(endpoint: 'illust/detail' | 'ugoira/metadata', id: string): Promise<unknown> {
+  async request(endpoint: 'illust/detail' | 'ugoira/metadata', id: string, signal?: AbortSignal): Promise<unknown> {
     if (!/^[1-9]\d{0,19}$/.test(id)) throw new Error('Invalid artwork id');
     for (let attempt = 0; attempt < 2; attempt++) {
       const token = await this.token();
+      signal?.throwIfAborted();
       let response: Response;
       try {
         response = await fetch(`https://app-api.pixiv.net/v1/${endpoint}?illust_id=${id}`, {
-          dispatcher: this.dispatcher, redirect: 'manual', signal: AbortSignal.timeout(30_000),
+          dispatcher: this.dispatcher, redirect: 'manual', signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]),
           headers: { ...appHeaders, Authorization: `Bearer ${token}` },
         });
       } catch { throw new Error('无法连接 Pixiv，请检查服务端网络或代理'); }
