@@ -6,7 +6,7 @@ import type { UgoiraManifest } from '../../../shared/types';
 // Playback updates the viewer's pooled image; sizing, blurhash and gestures stay shared.
 export default function UgoiraPlayer({ url, image }: { url: string; image: HTMLImageElement | null }) {
   const [manifest, setManifest] = useState<UgoiraManifest | null>(null);
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlaying] = useState(true);
   const [error, setError] = useState('');
   const frame = useRef(0);
   useLayoutEffect(() => {
