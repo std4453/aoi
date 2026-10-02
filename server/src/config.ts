@@ -12,6 +12,8 @@ const defaultDataDir = path.join(projectRoot, 'data');
 const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(value => value === 'true' || value === '1');
 
 const configSchema = z.object({
+  pixivProxyUrl: z.string().url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
+  pixivCookie: z.string().max(8192).refine(value => !/[\r\n]/.test(value)).default(''),
   frontendOnly: flag,
   snapshotEnabled: z.enum(['true', 'false', '1', '0']).default('true').transform(value => value === 'true' || value === '1'),
   replicaSourceUrl: z.string().url().optional().transform(value => {
@@ -45,6 +47,8 @@ const configSchema = z.object({
 });
 
 const parsed = configSchema.parse({
+  pixivProxyUrl: process.env.PIXIV_PROXY_URL || undefined,
+  pixivCookie: process.env.PIXIV_COOKIE,
   frontendOnly: process.env.FRONTEND_ONLY,
   snapshotEnabled: process.env.AOI_SNAPSHOT_ENABLED,
   replicaSourceUrl: process.env.AOI_REPLICA_SOURCE_URL,

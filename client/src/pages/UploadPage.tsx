@@ -9,8 +9,9 @@ import TagSelector from '../components/TagSelector';
 import Modal from '../components/Modal';
 import DuplicateUploadModal from '../components/DuplicateUploadModal';
 import { showInfo } from '../components/Toast';
+import PixivImport from '../components/PixivImport';
 
-type UploadMode = 'archive' | 'folder' | null;
+type UploadMode = 'archive' | 'folder' | 'pixiv' | null;
 
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
@@ -25,7 +26,7 @@ export default function UploadPage() {
   // Folder upload
   const { matches: folderMatches, verificationProgress, restoreUpload: restoreFolder, continueUpload: continueFolder, retry: retryFolder, phase: folderPhase, packId: folderPackId, files: folderFiles, overallProgress: folderProgress, error: folderError, scanFiles, startUpload: startFolderUpload, pause: pauseFolder, resume: resumeFolder, cancel: cancelFolder, reset: resetFolder } = useFolderUpload();
 
-  const [mode, setMode] = useState<UploadMode>(null);
+  const [mode, setMode] = useState<UploadMode>(searchParams.has('pixiv') ? 'pixiv' : null);
   const [cancelConfirm, setCancelConfirm] = useState<null | 'open' | 'closing'>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -318,6 +319,12 @@ export default function UploadPage() {
   return (
     <div className="max-w-lg mx-auto">
       <h2 className="text-xl font-bold text-white mb-4 h-9 flex items-center">上传图包</h2>
+
+      {mode === 'pixiv' && <PixivImport onBack={() => setMode(null)} />}
+      {!mode && <button onClick={() => setMode('pixiv')} className="w-full mb-4 rounded-2xl border border-blue-500/40 bg-blue-500/10 p-5 text-left hover:bg-blue-500/20 transition-colors">
+        <span className="block font-semibold text-blue-300">从 Pixiv 导入</span>
+        <span className="block text-sm text-gray-400 mt-1">粘贴作品网址，保存全部原图到本地图包</span>
+      </button>}
 
       <DuplicateUploadModal
         matches={mode === 'folder' ? folderMatches : duplicateMatches}

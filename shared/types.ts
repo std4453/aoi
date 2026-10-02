@@ -73,7 +73,7 @@ export interface Preset {
 export interface Job {
   id: string;
   packId: string;
-  type: 'extract' | 'thumbnail' | 'compress' | 'verify';
+  type: 'extract' | 'thumbnail' | 'compress' | 'verify' | 'pixiv';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   options: string | null;
@@ -158,6 +158,16 @@ export interface VerificationProgress {
 export interface FolderUploadStatus {
   pack: Pack;
   matches: DuplicatePack[];
+}
+
+export interface PixivImportRequest {
+  url: string;
+  packName?: string;
+  tagIds?: string[];
+}
+
+export interface PixivImportStatus extends FolderUploadStatus {
+  progress: JobProgress | null;
 }
 
 // Runtime deployment and browser connection contracts.

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { backupDb, closeDb, getDbPath, initDb } from './db/connection.js';
 import { registerPackRoutes } from './routes/packs.js';
+import { registerPixivRoutes } from './routes/pixiv.js';
 import { registerPresetRoutes } from './routes/presets.js';
 import { registerProcessingRoutes } from './routes/processing.js';
 import { registerDownloadRoutes } from './routes/download.js';
@@ -105,7 +106,9 @@ function recoverJobs(): void {
       resumeHistoricalVerification(pack.id);
       continue;
     }
-    if (pack.status === 'uploading' && pack.sourceType === 'archive') {
+    if (pack.status === 'uploading' && pack.originalFormat === 'pixiv') {
+      ensureRecoveryJob(pack.id, 'pixiv');
+    } else if (pack.status === 'uploading' && pack.sourceType === 'archive') {
       try {
         const archivePath = getArchivePath(pack.id, `original.${pack.originalFormat}`);
         if (fs.existsSync(archivePath)) {
@@ -262,6 +265,7 @@ async function main() {
 
     await app.register(registerSnapshotRoutes);
     await app.register(registerPackRoutes);
+    await app.register(registerPixivRoutes);
     await app.register(registerPresetRoutes);
     await app.register(registerProcessingRoutes);
     await app.register(registerDownloadRoutes);

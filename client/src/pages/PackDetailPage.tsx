@@ -384,9 +384,9 @@ export default function PackDetailPage() {
           }}>重试校验</button>
         </div>
       )}
-      {pack.sourceType === 'folder' && ['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) && !pack.verification?.allowsPreview && (
-        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?folder=${pack.id}`)}>
-          继续完成上传
+      {pack.sourceType === 'folder' && (['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) || (pack.originalFormat === 'pixiv' && pack.status === 'failed')) && !pack.verification?.allowsPreview && (
+        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?${pack.originalFormat === 'pixiv' ? 'pixiv' : 'folder'}=${pack.id}`)}>
+          {pack.originalFormat === 'pixiv' ? '查看导入进度' : '继续完成上传'}
         </button>
       )}
 
