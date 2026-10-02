@@ -86,7 +86,42 @@ export async function cleanupTempFiles(): Promise<number> {
   return cleaned;
 }
 
+const dataSizeCacheTtl = 5 * 60 * 1_000;
+const dataSizeRetryDelay = 30 * 1_000;
+let cachedDataSize: number | undefined;
+let dataSizeRefreshAt = 0;
+let dataSizeRefresh: Promise<number> | undefined;
+
 export async function getTotalDataSize(): Promise<number> {
+  if (cachedDataSize !== undefined && Date.now() < dataSizeRefreshAt) {
+    return cachedDataSize;
+  }
+
+  // Share the initial scan and background refresh across all callers.
+  if (!dataSizeRefresh) {
+    dataSizeRefresh = calculateTotalDataSize()
+      .then(size => {
+        cachedDataSize = size;
+        dataSizeRefreshAt = Date.now() + dataSizeCacheTtl;
+        return size;
+      })
+      .catch(error => {
+        if (cachedDataSize === undefined) throw error;
+        // Keep the last successful result and avoid retrying on every request.
+        dataSizeRefreshAt = Date.now() + dataSizeRetryDelay;
+        console.warn('[storage] Failed to refresh data size:', error);
+        return cachedDataSize;
+      })
+      .finally(() => {
+        dataSizeRefresh = undefined;
+      });
+  }
+
+  // Only the first request after startup needs to wait for a full scan.
+  return cachedDataSize ?? dataSizeRefresh;
+}
+
+async function calculateTotalDataSize(): Promise<number> {
   const sizes: number[] = [];
   for (const dir of Object.values(config.dirs)) {
     try {
@@ -95,8 +130,9 @@ export async function getTotalDataSize(): Promise<number> {
         const du = await dirSize(dir);
         sizes.push(du);
       }
-    } catch {
-      // directory doesn't exist yet
+    } catch (error) {
+      // Missing directories are normal; other failures must not poison the cache.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
   return sizes.reduce((a, b) => a + b, 0);
