@@ -350,6 +350,10 @@ npm --prefix client audit
 
 当前 React Router 的 npm 公告包含仅适用于 RSC/server actions 的问题；AoI 是纯客户端 `BrowserRouter` SPA，不启用 RSC 或服务端 action。升级路由依赖时仍需重新审阅 `client` 的审计结果与应用模式。
 
+## 参与贡献
+
+参与开发请参阅 [贡献指南](CONTRIBUTING.md)，其中约定了 `feat/xxx` 分支名和 `feat: ...` 提交格式。
+
 ## License
 
 MIT

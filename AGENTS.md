@@ -41,9 +41,11 @@ npm --prefix client install
 
 测试使用 Node 内置 test runner，由 tsx 执行。文件命名为 `server/test/**/*.test.ts`；涉及持久化时必须使用独立临时 `DATA_DIR` 并在测试后清理。数据库、迁移、任务恢复或文件路径变更应补充回归用例。提交前运行 `npm run check`；压缩流程还应手动验证上传、预览、生成和下载。
 
-## 提交与合并请求规范
+## 分支、提交与合并请求规范
 
-现有提交使用简短、祈使语气的英文句式，例如 `Fix file tree panel scroll behavior`。每个提交只处理一个逻辑变更。
+完整规范与示例见 [CONTRIBUTING.md](CONTRIBUTING.md)。新工作分支使用 `<type>/<description>`，例如 `feat/pack-tags`、`fix/storage-size-units`；描述使用小写英文和连字符，可选加 Issue 编号。人工开发与自动化代理统一使用此格式，不再为新分支添加 `codex/` 前缀。已有分支与历史提交无需改名或改写。
+
+新提交与 PR 标题采用 Conventional Commits：`<type>[optional scope][!]: <description>`，例如 `feat: add pack tags`、`fix(client): restore file tree scrolling`。类型使用 `feat`、`fix`、`docs`、`refactor`、`perf`、`test`、`build`、`ci`、`style`、`chore` 或 `revert`；scope 可选，优先使用 `client`、`server`、`shared`、`db`、`scripts`。描述使用简短的英文祈使句，以小写动词开头，不加句号，标题建议不超过 72 个字符。每个提交只处理一个逻辑变更。不兼容变更添加 `!` 和说明迁移方式的 `BREAKING CHANGE:` 页脚。平台自动生成的 merge commit 可保留默认标题。
 
 合并请求应说明用户可见变化、实现风险和验证方式，并关联相关 Issue。界面改动需附截图；新增环境变量、依赖或数据库迁移时必须明确标注。
 
