@@ -462,6 +462,20 @@ export function hasAnyActiveJob(packId: string): boolean {
   ));
 }
 
+export function hasActiveJobOtherThan(packId: string, excludedType: Job['type']): boolean {
+  return Boolean(queryOne(
+    "SELECT 1 FROM jobs WHERE pack_id = ? AND type != ? AND status IN ('pending', 'running') LIMIT 1",
+    [packId, excludedType],
+  ));
+}
+
+export function cancelPendingJobs(packId: string, type?: Job['type']): number {
+  const result = type === undefined
+    ? run("UPDATE jobs SET status = 'cancelled' WHERE pack_id = ? AND status = 'pending'", [packId])
+    : run("UPDATE jobs SET status = 'cancelled' WHERE pack_id = ? AND type = ? AND status = 'pending'", [packId, type]);
+  return result.changes;
+}
+
 export function getLatestJob(packId: string, type: Job['type']): Job | undefined {
   const row = queryOne(
     'SELECT * FROM jobs WHERE pack_id = ? AND type = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
