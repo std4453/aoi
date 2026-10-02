@@ -185,7 +185,7 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
             wrapperStyle={{ width: '100%', height: '100%' }}
           >
             <div className="w-screen h-screen supports-[height:100dvh]:h-dvh flex items-center justify-center">
-              {!currentImage.ugoiraUrl && blurhashCache && currentImage.blurhash && (
+              {blurhashCache && currentImage.blurhash && (
                 <BlurhashPlaceholder
                   hash={currentImage.blurhash}
                   width={currentImage.width}
@@ -195,14 +195,18 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
                   objectFit="contain"
                 />
               )}
-              {currentImage.ugoiraUrl ? <UgoiraPlayer key={currentImage.ugoiraUrl} url={currentImage.ugoiraUrl} poster={currentImage.fullUrl} /> : <div
+              <div
                 ref={imgContainerRef}
                 className="max-w-full max-h-full relative z-10"
-              />}
+              />
             </div>
           </TransformComponent>
         </TransformWrapper>
       </div>
+
+      {currentImage.ugoiraUrl && <div className="absolute bottom-24 left-0 right-0 z-30 flex justify-center pointer-events-none">
+        <UgoiraPlayer key={currentImage.ugoiraUrl} url={currentImage.ugoiraUrl} image={currentImg} />
+      </div>}
 
       {/* Left/Right buttons (desktop) */}
       <button
