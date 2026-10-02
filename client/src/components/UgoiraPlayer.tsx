@@ -48,7 +48,7 @@ export default function UgoiraPlayer({ url, poster }: { url: string; poster: str
     return () => { disposed = true; clearTimeout(timer); };
   }, [url, manifest, playing]);
   return <div className="relative z-10 flex flex-col items-center max-h-full max-w-full" onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()}>
-    <img ref={imageRef} src={resourceUrl(poster)} crossOrigin="anonymous" alt="ugoira 动画" className="max-w-[100vw] max-h-[75dvh] object-contain" />
+    <img ref={imageRef} src={resourceUrl(poster)} crossOrigin="anonymous" alt="动图" className="max-w-[100vw] max-h-[75dvh] object-contain" />
     <button type="button" disabled={!manifest} onClick={() => { setError(''); setPlaying(value => !value); }}
       className="mt-3 flex items-center gap-2 rounded-full bg-gray-800/90 px-4 py-2 text-white text-sm disabled:opacity-50">
       {playing ? <Pause size={16} /> : <Play size={16} />}{playing ? '暂停动画' : '播放动画'}

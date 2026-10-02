@@ -425,7 +425,7 @@ export default function PackDetailPage() {
                     <span className="text-white text-lg font-medium">+{thumbnails.length - 9}</span>
                   </div>
                 )}
-                {thumb.mediaType === 'ugoira' && <span className="absolute bottom-1 right-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">ugoira</span>}
+                {thumb.mediaType === 'ugoira' && <span className="absolute bottom-1 right-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">动图</span>}
               </div>
             ))}
           </div>
