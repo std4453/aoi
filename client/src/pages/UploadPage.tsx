@@ -15,7 +15,7 @@ import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../components/TaskSummary';
 import { taskNoticeMessage, taskProgressDisplay, taskStates, taskToneStyles } from '../lib/upload-task-display';
-import { TaskNotice, TaskTextAction } from '../components/TaskFeedback';
+import { TaskActionRow, TaskNotice, TaskTextAction } from '../components/TaskFeedback';
 import { getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../lib/upload-page-state';
 
 const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
@@ -212,7 +212,7 @@ function TaskCard({ task }: { task: UploadTask }) {
           {(task.status !== 'password' || task.passwordKind !== 'share') &&
             <PasswordInput value={archivePassword} onChange={setArchivePassword} placeholder="压缩包密码" />}
         </div>}
-        {state.content !== 'processing' && taskFiles.length > 1 && <div><TaskTextAction onClick={() => setDetails(!details)} aria-expanded={details} aria-controls={`task-files-${task.id}`}>
+        {state.content !== 'processing' && taskFiles.length > 1 && <div className={!error && !cancelConfirm ? '-mb-1' : undefined}><TaskTextAction onClick={() => setDetails(!details)} aria-expanded={details} aria-controls={`task-files-${task.id}`}>
           {details ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}{`${taskFiles.filter(file => file.status === 'uploaded').length}/${taskFiles.length} 个文件 · ${details ? '收起详情' : '查看详情'}`}</TaskTextAction>
           {details && <div id={`task-files-${task.id}`} className="mt-2 max-h-52 space-y-1 overflow-y-auto">{taskFiles.map(file => <div key={file.id} className="flex items-center gap-2 text-xs">
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${file.status === 'uploaded' ? 'bg-green-500' : file.status === 'failed' ? 'bg-red-400' : file.status === 'uploading' ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
@@ -226,9 +226,9 @@ function TaskCard({ task }: { task: UploadTask }) {
         {error && <TaskNotice role="alert" tone={state.tone}>{error}</TaskNotice>}
         {cancelConfirm ? <>
           <TaskNotice tone="neutral">确认取消此任务？本任务已上传的临时内容会被清理。</TaskNotice>
-          <ActionRow><Button variant="secondary" disabled={busy} onClick={() => setCancelConfirm(false)}>保留任务</Button>
-            <Button variant="danger" disabled={busy} onClick={() => { void run(() => dismiss(task.id)); }}>确认取消</Button></ActionRow>
-        </> : <ActionRow>
+          <TaskActionRow><Button variant="secondary" disabled={busy} onClick={() => setCancelConfirm(false)}>保留任务</Button>
+            <Button variant="danger" disabled={busy} onClick={() => { void run(() => dismiss(task.id)); }}>确认取消</Button></TaskActionRow>
+        </> : <TaskActionRow>
             <Button variant="secondary" disabled={busy} onClick={() => setCancelConfirm(true)}>取消任务</Button>
             {task.status === 'duplicate' && <Button variant="primary" disabled={busy} onClick={() => { void run(() => continueTask(task.id)); }}>继续上传</Button>}
             {task.status === 'uploading' && hasFiles && <Button variant="primary" disabled={busy} onClick={() => { void run(() => pause(task.id)); }}>暂停</Button>}
@@ -236,8 +236,8 @@ function TaskCard({ task }: { task: UploadTask }) {
             {(task.status === 'needs_file' || (!hasFiles && !remote && task.status === 'failed' && !task.packId)) &&
               <Button variant="primary" disabled={busy} onClick={() => input.current?.click()}>{`重新选择${task.source === 'folder' ? '文件夹' : '压缩包'}`}</Button>}
             {(task.status === 'password' || task.status === 'failed') && (hasFiles || remote || task.packId) &&
-              <Button variant="primary" disabled={busy} onClick={() => { void run(() => resume(task.id, { archivePassword: archivePassword || undefined, sharePassword: sharePassword || undefined })); }}>{task.status === 'password' ? '提交密码并继续' : '重试'}</Button>}
-        </ActionRow>}
+              <Button variant="primary" disabled={busy} onClick={() => { void run(() => resume(task.id, { archivePassword: archivePassword || undefined, sharePassword: sharePassword || undefined })); }}>{task.status === 'password' ? '提交并继续' : '重试'}</Button>}
+        </TaskActionRow>}
         </>}
       </div></div>
     </div>

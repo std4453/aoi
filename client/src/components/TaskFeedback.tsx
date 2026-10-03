@@ -1,5 +1,11 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { taskToneStyles, type TaskTone } from '../lib/upload-task-display';
+import { ActionRow } from './Button';
+
+/** Add separation before the visible action surface, beyond the body's 8px gap. */
+export function TaskActionRow({ children }: { children: ReactNode }) {
+  return <ActionRow className="mt-1">{children}</ActionRow>;
+}
 
 /** Task body copy uses 12px type and an 8px rhythm; primary actions keep their normal size. */
 export function TaskNotice({ children, tone, role = 'status' }: { children: ReactNode; tone: TaskTone; role?: 'status' | 'alert' }) {

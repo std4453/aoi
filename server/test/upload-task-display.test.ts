@@ -40,30 +40,46 @@ test('processing labels and counters replace finished transfer details for every
     const processing = { ...task, source, status: 'processing' as const, progress: 25,
       processing: { stage: 'verifying' as const, queued: false, completed: 1024, total: 4096 } };
     assert.deepEqual(taskProgressDisplay(processing), {
-      label: '正在校验与检测重复', detail: '已校验 1 KB / 4 KB', percentage: 25,
+      label: '校验中', detail: '已校验 1 KB / 4 KB', percentage: 25,
     });
     assert.deepEqual(taskProgressDisplay({ ...processing, progress: 50,
       processing: { stage: 'thumbnailing', queued: false, completed: 2, total: 4 } }), {
-      label: '正在生成预览', detail: '2 / 4 个文件', percentage: 50,
+      label: '生成预览中', detail: '2 / 4 个文件', percentage: 50,
     });
   }
 });
 
 test('queued and uncounted work never displays a fabricated zero percentage', () => {
   const processing = { ...task, status: 'processing' as const, progress: 0 };
-  assert.deepEqual(taskProgressDisplay(processing), { label: '正在准备处理' });
+  assert.deepEqual(taskProgressDisplay(processing), { label: '准备中' });
   assert.deepEqual(taskProgressDisplay({ ...processing, processing: {
     stage: 'extracting', queued: false, completed: 0, total: 0,
-  } }), { label: '正在解包' });
+  } }), { label: '解包中' });
   assert.deepEqual(taskProgressDisplay({ ...processing, processing: {
     stage: 'thumbnailing', queued: true, completed: 4, total: 4,
-  } }), { label: '等待生成预览' });
+  } }), { label: '生成预览中' });
   assert.deepEqual(taskProgressDisplay({ ...processing, processing: {
     stage: 'thumbnailing', queued: false, completed: 0, total: 4,
-  } }), { label: '正在生成预览', detail: '0 / 4 个文件', percentage: 0 });
+  } }), { label: '生成预览中', detail: '0 / 4 个文件', percentage: 0 });
   assert.deepEqual(taskProgressDisplay({ ...task, status: 'uploading', progress: 50, transferredBytes: 50 }), {
-    label: '正在上传', detail: '50 B / 100 B', percentage: 50,
+    label: '上传中', detail: '50 B / 100 B', percentage: 50,
   });
+});
+
+test('queued stages share concise labels without exposing stale counters', () => {
+  for (const stage of ['extracting', 'verifying', 'thumbnailing'] as const) {
+    const running = { ...task, status: 'processing' as const, progress: 50,
+      processing: { stage, queued: false, completed: 4, total: 8 } };
+    const queued = { ...running, processing: { ...running.processing, queued: true } };
+    const display = taskProgressDisplay(queued);
+    assert.equal(display.label, taskProgressDisplay(running).label);
+    assert.match(display.label, /中$/);
+    assert.ok(display.label.length <= 5);
+    assert.equal(display.percentage, undefined);
+    assert.equal(display.detail, undefined);
+    assert.equal(queued.processing.queued, true);
+    assert.equal(taskProgressDisplay(running).percentage, 50);
+  }
 });
 
 test('saved archive diagnostics become a concise error without local paths', () => {
