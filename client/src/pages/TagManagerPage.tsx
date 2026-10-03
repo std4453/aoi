@@ -1,4 +1,4 @@
-import { serverWritable } from '../lib/connection';
+import { useConnectionState } from '../hooks/useConnectionState';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ import Modal from '../components/Modal';
 type TagItem = TagWithStats;
 
 export default function TagManagerPage() {
+  const { serverWritable } = useConnectionState();
   const navigate = useNavigate();
   const [tags, setTags] = useState<TagItem[]>([]);
   const [loading, setLoading] = useState(true);

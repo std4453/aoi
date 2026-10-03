@@ -1,4 +1,4 @@
-import { serverWritable } from '../lib/connection';
+import { useConnectionState } from '../hooks/useConnectionState';
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -64,6 +64,7 @@ function SkeletonGrid() {
 }
 
 export default function HomePage() {
+  const { serverWritable } = useConnectionState();
   const navigate = useNavigate();
   const { packs, total, page, pageSize, loading, error, deletePack, goToPage, setSearchQuery, search, hardReset } = usePacks();
   const [deleting, setDeleting] = useState<string | null>(null);
