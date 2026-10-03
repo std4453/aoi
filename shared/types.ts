@@ -162,6 +162,13 @@ export interface UploadTask {
   transferredBytes: number;
   progress: number;
   status: UploadTaskState;
+  /** Current server processing stage; populated when reading a processing task. */
+  processing?: {
+    stage: 'preparing' | 'extracting' | 'verifying' | 'thumbnailing';
+    queued: boolean;
+    completed: number;
+    total: number;
+  };
   packId: string | null;
   uploadId: string | null;
   matches: DuplicatePack[];

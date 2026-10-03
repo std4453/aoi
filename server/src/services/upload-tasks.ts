@@ -40,6 +40,7 @@ export function syncUploadTask(task: UploadTask): UploadTask {
   if (!task.packId || task.status === 'completed') return task;
   const pack = getPack(task.packId);
   let patch: Partial<UploadTask>;
+  let processing: UploadTask['processing'];
   if (!pack) {
     patch = { status: 'failed', error: '图包已被删除' };
   } else if (['extracted', 'generated', 'generating'].includes(pack.status)) {
@@ -65,17 +66,21 @@ export function syncUploadTask(task: UploadTask): UploadTask {
     // Keep handoff errors visible until the durable download journal is retried.
     return task;
   } else {
-    const type = pack.status === 'thumbnailing' ? 'thumbnail' : pack.status === 'verifying' ? 'verify' : 'extract';
-    const job = getLatestJob(pack.id, type);
-    patch = { status: 'processing', progress: job ? jobQueue.getProgress(job.id)?.percentage ?? job.progress : 0,
+    const stage = pack.status === 'thumbnailing' || pack.status === 'verifying' || pack.status === 'extracting' ? pack.status : 'preparing';
+    const type = stage === 'thumbnailing' ? 'thumbnail' : stage === 'verifying' ? 'verify' : 'extract';
+    const job = stage === 'preparing' ? undefined : getLatestJob(pack.id, type);
+    const progress = job ? jobQueue.getProgress(job.id) : null;
+    processing = { stage, queued: stage !== 'preparing' && (!job || job.status === 'pending'),
+      completed: progress?.completed ?? 0, total: progress?.total ?? 0 };
+    patch = { status: 'processing', progress: progress?.percentage ?? 0,
       transferredBytes: task.totalBytes, error: null, matches: [] };
   }
   if (pack && task.source === 'pixiv') Object.assign(patch, { name: pack.name, totalBytes: pack.originalSize,
     ...(['completed', 'processing', 'duplicate'].includes(patch.status ?? '') ? { transferredBytes: pack.originalSize } : {}) });
-  if (Object.entries(patch).every(([key, value]) => JSON.stringify(task[key as keyof UploadTask]) === JSON.stringify(value))) return task;
-  const updated = updateUploadTask(task.id, patch)!;
-  if (updated.status === 'completed') updateUploadTaskMetadata(task.id, { archivePassword: undefined, sharePassword: undefined });
-  return updated;
+  const changed = !Object.entries(patch).every(([key, value]) => JSON.stringify(task[key as keyof UploadTask]) === JSON.stringify(value));
+  const updated = changed ? updateUploadTask(task.id, patch)! : task;
+  if (changed && updated.status === 'completed') updateUploadTaskMetadata(task.id, { archivePassword: undefined, sharePassword: undefined });
+  return processing ? { ...updated, processing } : updated;
 }
 
 export function getSyncedUploadTask(id: string): UploadTask | undefined {

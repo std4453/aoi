@@ -14,13 +14,9 @@ import ImportSources from '../components/ImportSources';
 import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../components/TaskSummary';
-import { taskErrorMessage } from '../lib/upload-task-display';
+import { taskErrorMessage, taskProgressDisplay } from '../lib/upload-task-display';
 import { getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../lib/upload-page-state';
 
-const labels: Record<UploadTask['status'], string> = {
-  uploading: '上传中', downloading: '下载中', paused: '已暂停', needs_file: '等待原文件',
-  processing: '正在处理图包', duplicate: '发现重复图包，等待确认', password: '需要密码', completed: '上传完成', failed: '需要处理',
-};
 const needsAttention = (task: UploadTask) => ['duplicate', 'password', 'needs_file', 'failed'].includes(task.status);
 const taskFeedbackStyles = {
   failed: { border: 'border-red-500/60', panel: 'border-red-800/50 bg-red-900/20', text: 'text-red-300' },
@@ -195,10 +191,9 @@ function TaskCard({ task }: { task: UploadTask }) {
     finally { setBusy(false); }
   };
   const taskFiles = files[task.id] || [];
-  const progress = Math.max(0, Math.min(100, task.progress));
-  const stage = task.status === 'duplicate' && !expanded ? '待确认' : task.status === 'processing' && !expanded ? '处理中' : labels[task.status];
+  const progress = taskProgressDisplay(task);
   const remote = task.source === 'mega' || task.source === 'pixiv';
-  const indeterminate = remote && task.status === 'downloading' && task.totalBytes <= 0;
+  const indeterminate = progress.percentage === undefined;
   const showProgress = !attention;
   return <article className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${feedback.border || (expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-600')}`}>
     <div className="upload-card-header">
@@ -212,8 +207,8 @@ function TaskCard({ task }: { task: UploadTask }) {
     <div id={`task-${task.id}`} className="upload-task-details" data-open={expanded} inert={!expanded}>
       <div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-3 px-4 pb-4">
         {completed ? <PackProcessingResult packId={task.packId} onDone={() => dismiss(task.id)} /> : <>
-        {showProgress && <div><div className="mb-2 flex justify-between gap-3 text-xs text-gray-500"><span>{task.source === 'pixiv' ? 'Pixiv 导入' : task.source === 'mega' ? 'MEGA 导入' : task.source === 'folder' ? '文件夹上传' : '压缩包上传'}{task.totalBytes > 0 && ` · ${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`}</span>{!indeterminate && <span>{progress}%</span>}</div>
-          <div role="progressbar" aria-label={stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={indeterminate ? undefined : progress} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`h-full rounded-full bg-blue-500 ${indeterminate ? 'w-1/3 animate-pulse' : 'transition-all duration-300'}`} style={indeterminate ? undefined : { width: `${progress}%` }} /></div></div>}
+        {showProgress && <div><div className="mb-2 flex justify-between gap-3 text-xs text-gray-500"><span>{progress.label}{progress.detail && ` · ${progress.detail}`}</span>{!indeterminate && <span className="shrink-0">{progress.percentage}%</span>}</div>
+          <div role="progressbar" aria-label={progress.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percentage} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`h-full rounded-full bg-blue-500 ${indeterminate ? `w-1/3 ${task.status === 'paused' ? '' : 'animate-pulse'}` : 'transition-all duration-300'}`} style={indeterminate ? undefined : { width: `${progress.percentage}%` }} /></div></div>}
         {task.error && <p role="status" className={`break-words rounded-xl border p-3 text-sm ${feedback.panel} ${feedback.text}`}>{taskErrorMessage(task)}</p>}
         {task.status === 'duplicate' && <div className="flex flex-col gap-3">
           <p className={`rounded-lg bg-amber-500/10 px-3 py-2 text-sm ${feedback.text}`}>此图包可能已被上传过，请确认是否继续。</p>
@@ -227,7 +222,7 @@ function TaskCard({ task }: { task: UploadTask }) {
             <PasswordInput value={archivePassword} onChange={setArchivePassword} placeholder="压缩包密码" />}
         </div>}
         {task.status === 'needs_file' && <p className={`text-sm leading-relaxed ${feedback.text}`}>刷新后需重新选择原来的{task.source === 'folder' ? '文件夹' : '压缩包'}以继续上传。已上传的内容会保留。</p>}
-        {taskFiles.length > 1 && <div><Button variant="ghost" className="-ml-3" onClick={() => setDetails(!details)} aria-expanded={details}>
+        {task.status !== 'processing' && taskFiles.length > 1 && <div><Button variant="ghost" className="-ml-3" onClick={() => setDetails(!details)} aria-expanded={details}>
           {`${taskFiles.filter(file => file.status === 'uploaded').length}/${taskFiles.length} 个文件 · ${details ? '收起详情' : '查看详情'}`}</Button>
           {details && <div className="mt-2 max-h-52 space-y-1 overflow-y-auto">{taskFiles.map(file => <div key={file.id} className="flex items-center gap-2 text-xs">
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${file.status === 'uploaded' ? 'bg-green-500' : file.status === 'failed' ? 'bg-red-400' : file.status === 'uploading' ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />

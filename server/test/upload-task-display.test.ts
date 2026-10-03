@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { taskErrorMessage, taskFailureLabel } from '../../client/src/lib/upload-task-display.ts';
+import { taskErrorMessage, taskFailureLabel, taskProgressDisplay } from '../../client/src/lib/upload-task-display.ts';
 import type { UploadTask } from '../../shared/types.js';
 
 const task: UploadTask = {
@@ -9,6 +9,37 @@ const task: UploadTask = {
   packId: 'pack', uploadId: 'upload', matches: [], error: null,
   createdAt: '', updatedAt: '',
 };
+
+test('processing labels and counters replace finished transfer details for every source', () => {
+  for (const source of ['archive', 'folder', 'mega', 'pixiv'] as const) {
+    const processing = { ...task, source, status: 'processing' as const, progress: 25,
+      processing: { stage: 'verifying' as const, queued: false, completed: 1024, total: 4096 } };
+    assert.deepEqual(taskProgressDisplay(processing), {
+      label: '正在校验与检测重复', detail: '已校验 1 KB / 4 KB', percentage: 25,
+    });
+    assert.deepEqual(taskProgressDisplay({ ...processing, progress: 50,
+      processing: { stage: 'thumbnailing', queued: false, completed: 2, total: 4 } }), {
+      label: '正在生成预览', detail: '2 / 4 个文件', percentage: 50,
+    });
+  }
+});
+
+test('queued and uncounted work never displays a fabricated zero percentage', () => {
+  const processing = { ...task, status: 'processing' as const, progress: 0 };
+  assert.deepEqual(taskProgressDisplay(processing), { label: '正在准备处理' });
+  assert.deepEqual(taskProgressDisplay({ ...processing, processing: {
+    stage: 'extracting', queued: false, completed: 0, total: 0,
+  } }), { label: '正在解包' });
+  assert.deepEqual(taskProgressDisplay({ ...processing, processing: {
+    stage: 'thumbnailing', queued: true, completed: 4, total: 4,
+  } }), { label: '等待生成预览' });
+  assert.deepEqual(taskProgressDisplay({ ...processing, processing: {
+    stage: 'thumbnailing', queued: false, completed: 0, total: 4,
+  } }), { label: '正在生成预览', detail: '0 / 4 个文件', percentage: 0 });
+  assert.deepEqual(taskProgressDisplay({ ...task, status: 'uploading', progress: 50, transferredBytes: 50 }), {
+    label: '正在上传', detail: '50 B / 100 B', percentage: 50,
+  });
+});
 
 test('saved archive diagnostics become a concise error without local paths', () => {
   const failed = { ...task, error: '无法检查压缩包内容: ERROR C:\\private\\archives\\original.zip Cannot open the file as [zip] archive ERRORS: Is not archive' };

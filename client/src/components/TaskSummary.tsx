@@ -1,7 +1,7 @@
 import { AlertCircle, Check, Copy, Download, FileArchive, FolderOpen, Loader2, LockKeyhole, Pause, Upload } from 'lucide-react';
 import type { UploadTask } from '../../../shared/types';
 import { MegaIcon, PixivIcon } from './ImportSources';
-import { taskFailureLabel } from '../lib/upload-task-display';
+import { taskFailureLabel, taskProgressDisplay } from '../lib/upload-task-display';
 
 const states = {
   uploading: { label: '上传中', Icon: Upload, color: 'text-gray-400' },
@@ -19,17 +19,16 @@ const states = {
 export function TaskSummaryContent({ task, message, layout = 'card', expanded = false }: { task: UploadTask; message?: string; layout?: 'card' | 'toast'; expanded?: boolean }) {
   const state = states[task.status];
   const StatusIcon = state.Icon;
-  const progress = Math.max(0, Math.min(100, Math.round(task.progress)));
-  const active = ['uploading', 'downloading', 'processing'].includes(task.status);
-  const hasProgress = !expanded && active && Number.isFinite(task.progress)
-    && (task.status === 'processing' ? task.progress > 0 : task.totalBytes > 0);
-  const label = task.status === 'failed' ? taskFailureLabel(task) : message ?? state.label;
+  const progress = taskProgressDisplay(task);
+  const active = ['uploading', 'downloading'].includes(task.status);
+  const hasProgress = !expanded && active && progress.percentage !== undefined;
+  const label = task.status === 'failed' ? taskFailureLabel(task) : message ?? (task.status === 'processing' ? progress.label : state.label);
   return <span className={`w-full min-w-0 items-center text-xs font-normal ${layout === 'toast' ? 'flex gap-2' : 'grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3'}`}>
     <TaskSourceTitle source={task.source} name={task.name} />
     <span className={`flex min-w-0 items-center gap-1.5 ${state.color} ${layout === 'toast' ? 'max-w-[60%] shrink-0' : ''}`}>
       {!hasProgress && <StatusIcon size={14} aria-hidden="true" className={`shrink-0 ${task.status === 'processing' ? 'animate-spin' : ''}`} />}
-      {hasProgress ? <span role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
-          <span className="block h-full rounded-full bg-blue-500 transition-[width] duration-300" style={{ width: `${progress}%` }} />
+      {hasProgress ? <span role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percentage} className="h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
+          <span className="block h-full rounded-full bg-blue-500 transition-[width] duration-300" style={{ width: `${progress.percentage}%` }} />
       </span> : <span className="min-w-0 truncate" title={label}>{label}</span>}
     </span>
   </span>;

@@ -1,4 +1,25 @@
 import type { UploadTask } from '../../../shared/types';
+import { formatBytes } from './utils';
+
+export function taskProgressDisplay(task: UploadTask): { label: string; detail?: string; percentage?: number } {
+  const percentage = Number.isFinite(task.progress) ? Math.max(0, Math.min(100, Math.round(task.progress))) : undefined;
+  if (task.status === 'processing') {
+    const processing = task.processing;
+    if (!processing || processing.stage === 'preparing') return { label: '正在准备处理' };
+    const labels = { extracting: '解包', verifying: '校验与检测重复', thumbnailing: '生成预览' };
+    const label = `${processing.queued ? '等待' : '正在'}${labels[processing.stage]}`;
+    if (processing.queued || processing.total <= 0) return { label };
+    const detail = processing.stage === 'verifying'
+      ? `已校验 ${formatBytes(processing.completed)} / ${formatBytes(processing.total)}`
+      : `${processing.completed} / ${processing.total} 个文件`;
+    return { label, detail, percentage };
+  }
+  return {
+    label: task.status === 'paused' ? '已暂停' : task.source === 'pixiv' || task.source === 'mega' ? '正在下载' : '正在上传',
+    detail: task.totalBytes > 0 ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}` : undefined,
+    percentage: task.totalBytes > 0 ? percentage : undefined,
+  };
+}
 
 /** Keep implementation diagnostics out of cards, including previously saved errors. */
 export function taskFailureLabel(task: UploadTask): string {
