@@ -3,6 +3,8 @@ import { useRef, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import ConnectionStatus from '../ConnectionStatus';
 import { Home, Upload, Settings } from 'lucide-react';
+import { useUploadTasks } from '../../features/uploads/useUploadTasks';
+import UploadTaskNotifications from '../../features/uploads/UploadTaskNotifications';
 import { saveHomeScrollY, clearHomeScrollY, getLastHomeSearch, saveLastHomeSearch, triggerHomeReset } from '../../lib/homeStore';
 
 const navItems = [
@@ -16,15 +18,17 @@ export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const lastTabClickRef = useRef(0);
+  const { tasks } = useUploadTasks();
 
   useEffect(() => {
-    if (location.pathname !== '/') {
+    if (!['/', '/upload'].includes(location.pathname.replace(/\/+$/, '') || '/')) {
       window.scrollTo(0, 0);
     }
   }, [location.pathname]);
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-950">
+      <UploadTaskNotifications />
       {/* Main content */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-4 pb-24">
         {!serverWritable && ['/upload', '/settings/presets'].includes(location.pathname.replace(/\/+$/, '')) ? <p className="text-gray-400">备服务器不支持此操作，请连接主服务器。</p> : <Outlet />}
@@ -74,7 +78,10 @@ export default function AppShell() {
                   isActive ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'
                 }`}
               >
-                <Icon size={22} />
+                <span className="relative">
+                  <Icon size={22} />
+                  {to === '/upload' && tasks.length > 0 && <span aria-label={`${tasks.length} 个上传任务`} className="absolute -right-4 -top-1 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] leading-4 text-center font-semibold">{tasks.length}</span>}
+                </span>
                 <span className="text-xs">{label}</span>
               </NavLink>
             );

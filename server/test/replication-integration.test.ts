@@ -75,7 +75,7 @@ test('direct snapshots: defaults, auth, scoped incremental content, pending, del
     assert.equal(video.status, 206); assert.equal(await video.text(), 'VID');
     const thumbs = await json(`${replica.url}/api/packs/pack1/thumbnails`); assert.equal(thumbs.length, 1);
     assert.equal((await fetch(replica.url + thumbs[0].thumbUrl)).status, 200);
-    for (const [method, route] of [['POST','/api/presets'], ['PATCH','/api/packs/pack1'], ['DELETE','/api/packs/pack1'], ['POST','/api/upload/files']]) {
+    for (const [method, route] of [['POST','/api/presets'], ['PATCH','/api/packs/pack1'], ['DELETE','/api/packs/pack1'], ['POST','/api/upload/files'], ['POST','/api/upload-tasks'], ['PATCH','/api/upload-tasks/missing'], ['DELETE','/api/upload-tasks/missing'], ['POST','/api/upload-tasks/missing/continue']]) {
       assert.equal((await fetch(replica.url + route, { method, body: 'invalid' })).status, 403);
     }
     const replicaDb = new Database(path.join(dir, 'replica/db/packdb.sqlite'));

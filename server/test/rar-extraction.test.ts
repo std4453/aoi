@@ -9,8 +9,9 @@ import sharp from 'sharp';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-rar-'));
 process.env.DATA_DIR = root;
 const { initDb, closeDb } = await import('../src/db/connection.js');
-const { createPack, getPack } = await import('../src/db/repositories.js');
+const { createPack, getPack, updatePackStatus } = await import('../src/db/repositories.js');
 const { archiveExtractor, is7zLinkField } = await import('../src/services/archive-extractor.js');
+const { createUploadTask, updateUploadTask, getSyncedUploadTask } = await import('../src/services/upload-tasks.js');
 const { getArchivePath, getExtractedImagesDir } = await import('../src/services/storage.js');
 await initDb();
 test.after(() => { closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
@@ -39,10 +40,12 @@ function block(type: number, flags: number, payload = Buffer.alloc(0)): Buffer {
   return data;
 }
 
-test('RAR image imports through the installed 7z backend and preserves image bytes', async () => {
+test('RAR imports preserve image bytes and damaged archives never request a password', async () => {
   // A generated RAR4 stored entry avoids committing archives or third-party media.
   const formats = execFileSync('7z', ['i'], { encoding: 'utf8' });
   assert.match(formats, /\bRar\b/); assert.match(formats, /\bRar5\b/);
+  const codecs = formats.split('Codecs:')[1]?.split('Hashers:')[0] ?? '';
+  assert.match(codecs, /\bRar5\b/, '7z must include the RAR5 decoder, not just its archive handler');
   const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#225599' } }).png().toBuffer();
   const name = Buffer.from('image.png');
   const header = Buffer.alloc(25 + name.length);
@@ -57,5 +60,21 @@ test('RAR image imports through the installed 7z backend and preserves image byt
   await archiveExtractor.extract(pack);
   assert.equal(getPack(pack.id)?.imageCount, 1);
   assert.deepEqual(fs.readFileSync(path.join(getExtractedImagesDir(pack.id), 'image.png')), image);
-});
 
+  // A missing RAR end block makes 7z fail after listing "Encrypted = -".
+  // That metadata must not turn a damaged, unencrypted archive into a password prompt.
+  const truncated = createPack({ name: 'Truncated RAR', originalFilename: 'truncated.rar', originalFormat: 'rar', originalSize: archive.length - 15 });
+  const truncatedPath = getArchivePath(truncated.id, 'original.rar');
+  fs.mkdirSync(path.dirname(truncatedPath), { recursive: true });
+  fs.writeFileSync(truncatedPath, archive.subarray(0, -15));
+  const task = createUploadTask({ source: 'archive', name: truncated.name, filename: 'truncated.rar', fileSize: truncated.originalSize });
+  updateUploadTask(task.id, { packId: truncated.id });
+  await assert.rejects(archiveExtractor.extract(truncated), error => {
+    const message = String(error);
+    assert.doesNotMatch(message, /需要密码|密码错误/);
+    assert.match(message, /Encrypted = -/);
+    updatePackStatus(truncated.id, 'failed', message);
+    assert.equal(getSyncedUploadTask(task.id)?.status, 'failed');
+    return true;
+  });
+});

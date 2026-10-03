@@ -19,6 +19,7 @@ import {
 } from './file-classifier.js';
 import { config } from '../config.js';
 import { normalizeRelativePath, resolveWithin } from './safe-path.js';
+import { isArchivePasswordError } from './archive-errors.js';
 
 class ArchiveSafetyError extends Error {
   override name = 'ArchiveSafetyError';
@@ -26,7 +27,7 @@ class ArchiveSafetyError extends Error {
 
 class ArchivePasswordRequiredError extends Error {
   constructor() {
-    super('此 ZIP 压缩包需要密码，请填写密码后重新上传');
+    super('此 ZIP 压缩包需要密码，请在上传任务中填写密码后继续');
   }
 }
 
@@ -173,10 +174,10 @@ function inspect7zArchive(
       timeout: config.archiveCommandTimeout,
     }, (err, stdout, stderr) => {
       if (err) {
-        if (/password|encrypted/i.test(`${stderr}\n${stdout}`)) {
+        if (isArchivePasswordError(`${stderr}\n${stdout}`)) {
           reject(new Error(password
             ? '密码错误或压缩包已损坏'
-            : '此压缩包需要密码，请填写密码后重新上传'));
+            : '此压缩包需要密码，请在上传任务中填写密码后继续'));
           return;
         }
         reject(new Error(`无法检查压缩包内容: ${safe7zMessage(stdout, stderr, password)}`));
@@ -264,10 +265,10 @@ async function extract7z(archivePath: string, imagesDir: string, videosDir: stri
       if (err && err.code !== 0) {
         const msg = safe7zMessage(stdout, stderr, password);
         fs.rmSync(tempDir, { recursive: true, force: true });
-        if (/password|encrypted/i.test(`${stderr}\n${stdout}`)) {
+        if (isArchivePasswordError(`${stderr}\n${stdout}`)) {
           return reject(new Error(password
             ? '密码错误或压缩包已损坏'
-            : '此压缩包需要密码，请填写密码后重新上传'));
+            : '此压缩包需要密码，请在上传任务中填写密码后继续'));
         }
         return reject(new Error(`7z 解压失败: ${msg}`));
       }

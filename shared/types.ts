@@ -141,6 +141,7 @@ export interface PackListParams {
 }
 
 export interface ArchiveUploadRequest {
+  taskId?: string;
   uploadId: string;
   filename: string;
   fileSize: number;
@@ -148,6 +149,45 @@ export interface ArchiveUploadRequest {
   archivePassword?: string;
   tagIds?: string[];
   allowDuplicate?: boolean;
+}
+
+export type UploadTaskState = 'uploading' | 'downloading' | 'paused' | 'needs_file' | 'processing' | 'duplicate' | 'password' | 'completed' | 'failed';
+
+export interface UploadTask {
+  id: string;
+  source: 'archive' | 'folder' | 'mega' | 'pixiv';
+  name: string;
+  filename: string;
+  totalBytes: number;
+  transferredBytes: number;
+  progress: number;
+  status: UploadTaskState;
+  /** Current server processing stage; populated when reading a processing task. */
+  processing?: {
+    stage: 'preparing' | 'extracting' | 'verifying' | 'thumbnailing';
+    queued: boolean;
+    completed: number;
+    total: number;
+  };
+  packId: string | null;
+  uploadId: string | null;
+  matches: DuplicatePack[];
+  error: string | null;
+  passwordKind?: 'share' | 'archive';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateUploadTaskRequest {
+  autoName?: boolean;
+  source: UploadTask['source'];
+  name: string;
+  filename?: string;
+  fileSize?: number;
+  tagIds?: string[];
+  url?: string;
+  sharePassword?: string;
+  archivePassword?: string;
 }
 
 export type DuplicatePack = Pick<Pack, 'id' | 'name' | 'status'>;
@@ -167,12 +207,20 @@ export interface VerificationProgress {
 export interface FolderUploadStatus {
   pack: Pack;
   matches: DuplicatePack[];
+  packFiles: PackFile[];
 }
 
 export interface PixivImportRequest {
   url: string;
   packName?: string;
   tagIds?: string[];
+}
+
+export interface MegaMetadata {
+  title: string;
+  filename: string;
+  kind: 'archive' | 'folder';
+  totalBytes: number;
 }
 
 export interface PixivMetadata {

@@ -1,4 +1,3 @@
-import { forgetUploadTask } from '../lib/uploadTask';
 import { apiFetch } from '../lib/connection';
 import type { ArchiveUploadRequest, DuplicateArchiveResponse, PackThumbnail } from '../../../shared/types.js';
 import { get, post, patch, del, put } from './client';
@@ -24,7 +23,6 @@ export function fetchPack(id: string): Promise<Pack> {
 
 export async function removePack(id: string): Promise<void> {
   await del<void>(`/packs/${id}`);
-  forgetUploadTask(id);
 }
 
 export function renamePack(id: string, name: string): Promise<Pack> {
@@ -88,6 +86,7 @@ export function createFolderPack(data: {
   packName: string;
   files: { relativePath: string; fileSize: number }[];
   tagIds?: string[];
+  taskId?: string;
 }): Promise<{ id: string; packFiles: PackFile[] }> {
   return post<{ id: string; packFiles: PackFile[] }>('/packs/folder-create', data);
 }
@@ -97,6 +96,10 @@ export function confirmFolderFileComplete(packId: string, data: {
   uploadId: string;
 }): Promise<{ allComplete: boolean }> {
   return post<{ allComplete: boolean }>(`/packs/${packId}/folder-file-complete`, data);
+}
+
+export function fetchFolderUploadStatus(packId: string): Promise<{ packFiles: PackFile[] }> {
+  return get<{ packFiles: PackFile[] }>(`/packs/${packId}/folder-upload-status`);
 }
 
 export function cancelFolderUpload(packId: string): Promise<{ ok: boolean }> {

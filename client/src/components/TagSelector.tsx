@@ -6,7 +6,14 @@ import BottomPanel from './BottomPanel';
 
 type Tag = TagWithStats;
 
+export interface TagCatalog {
+  tags: TagWithStats[];
+  loading: boolean;
+  onCreated: (tag: TagWithStats) => void;
+}
+
 interface TagSelectorProps {
+  catalog?: TagCatalog;
   visible?: boolean;
   selectedIds: string[];
   onConfirm: (ids: string[]) => void;
@@ -14,9 +21,11 @@ interface TagSelectorProps {
   onClosed?: () => void;
 }
 
-export default function TagSelector({ visible = true, selectedIds, onConfirm, onClose, onClosed }: TagSelectorProps) {
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function TagSelector({ visible = true, selectedIds, onConfirm, onClose, onClosed, catalog }: TagSelectorProps) {
+  const [ownTags, setTags] = useState<Tag[]>([]);
+  const [ownLoading, setLoading] = useState(true);
+  const tags = catalog?.tags ?? ownTags;
+  const loading = catalog?.loading ?? ownLoading;
   const [query, setQuery] = useState('');
   const [newTagName, setNewTagName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -24,17 +33,20 @@ export default function TagSelector({ visible = true, selectedIds, onConfirm, on
   const changed = selected.length !== selectedIds.length || selected.some((id) => !selectedIds.includes(id));
 
   useEffect(() => {
+    if (catalog) return;
+    let active = true;
     (async () => {
       try {
         const data = await fetchTags();
-        setTags(data);
+        if (active) setTags(data);
       } catch (err) {
         console.error('Failed to load tags:', err);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [catalog]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return tags;
@@ -52,7 +64,9 @@ export default function TagSelector({ visible = true, selectedIds, onConfirm, on
     setCreating(true);
     try {
       const tag = await createTag(name);
-      setTags((prev) => [...prev, { ...tag, count: 0, covers: [] }]);
+      const option = { ...tag, count: 0, covers: [] };
+      if (catalog) catalog.onCreated(option);
+      else setTags(prev => [...prev.filter(item => item.id !== tag.id), option]);
       setSelected((prev) => [...prev, tag.id]);
       setNewTagName('');
     } catch (err) {

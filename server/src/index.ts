@@ -14,6 +14,9 @@ import { config } from './config.js';
 import { backupDb, closeDb, getDbPath, initDb } from './db/connection.js';
 import { registerPackRoutes } from './routes/packs.js';
 import { registerPixivRoutes } from './routes/pixiv.js';
+import { registerMegaRoutes } from './routes/mega.js';
+import { registerUploadTaskRoutes } from './routes/upload-tasks.js';
+import { recoverArchiveTaskFiles, recoverUploadTasks, listUploadTasks, getUploadTaskMetadata } from './services/upload-tasks.js';
 import { registerPresetRoutes } from './routes/presets.js';
 import { registerProcessingRoutes } from './routes/processing.js';
 import { registerDownloadRoutes } from './routes/download.js';
@@ -90,13 +93,16 @@ function recoverCompletedFolderFiles(packId: string): number {
   return recovered;
 }
 
-function recoverJobs(): void {
+function recoverJobs(pendingMegaPackIds = new Set<string>()): void {
   const recovered = recoverInterruptedJobs();
   if (recovered > 0) {
     console.log(`[startup] Requeued ${recovered} interrupted job(s)`);
   }
 
   for (const pack of listPacks()) {
+    // A failed MEGA handoff still owns its journal. Ordinary recovery must not
+    // reinterpret it as a missing archive or an interrupted browser upload.
+    if (pendingMegaPackIds.has(pack.id)) continue;
     if (config.isReplica) {
       if (pack.status === 'thumbnailing') ensureRecoveryJob(pack.id, 'thumbnail');
       continue;
@@ -185,6 +191,8 @@ function installShutdownHandlers(app: FastifyInstance, replicator?: Replicator):
     shutdownPromise = (async () => {
       app.log.info({ signal }, 'Graceful shutdown started');
       const closePromise = app.close();
+      const { shutdownMegaImports } = await import('./services/mega-import.js');
+      await shutdownMegaImports();
       await replicator?.stop();
       const drained = await jobQueue.shutdown(config.shutdownTimeout);
 
@@ -266,6 +274,8 @@ async function main() {
     await app.register(registerSnapshotRoutes);
     await app.register(registerPackRoutes);
     await app.register(registerPixivRoutes);
+    await app.register(registerMegaRoutes);
+    await app.register(registerUploadTaskRoutes);
     await app.register(registerPresetRoutes);
     await app.register(registerProcessingRoutes);
     await app.register(registerDownloadRoutes);
@@ -275,7 +285,25 @@ async function main() {
       replicator = new Replicator();
       await replicator.initialize();
     }
-    recoverJobs();
+    const pendingMegaPackIds = new Set<string>();
+    if (!config.isReplica) {
+      recoverArchiveTaskFiles();
+      const { recoverMegaImports, hasPendingMegaHandoff } = await import('./services/mega-import.js');
+      await recoverMegaImports();
+      for (const task of listUploadTasks()) {
+        if (hasPendingMegaHandoff(task)) pendingMegaPackIds.add(task.packId!);
+      }
+    }
+    recoverJobs(pendingMegaPackIds);
+    if (!config.isReplica) {
+      recoverUploadTasks();
+      const { startMegaImport } = await import('./services/mega-import.js');
+      for (const task of listUploadTasks()) {
+        if (task.source === 'mega' && !task.packId && task.status === 'downloading') {
+          void startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name });
+        }
+      }
+    }
     jobQueue.start();
     replicator?.start();
   }

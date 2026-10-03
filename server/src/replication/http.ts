@@ -18,6 +18,8 @@ export function registerReplicationHooks(app: FastifyInstance): void {
             '/api/packs/:id/process',
             '/api/packs/pixiv-import',
             '/api/packs/:id/upload-task', '/api/packs/:id/upload-task/retry', '/api/packs/:id/upload-task/continue',
+            '/api/upload-tasks', '/api/upload-tasks/:id', '/api/upload-tasks/:id/continue',
+            '/api/upload-tasks/:id/retry',
           ].includes(options.url)) return;
       const original = options.handler;
       options.handler = async function (request, reply) {

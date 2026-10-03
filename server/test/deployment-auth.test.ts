@@ -21,7 +21,7 @@ test('auth protects APIs, resources and tus before parsing, and supports cross-o
     assert.equal(capability.writable, true);
     assert.equal(capability.role, 'standalone');
     assert.equal(fs.existsSync(path.join(dir, 'replication')), false);
-    for (const route of ['/api/packs', '/api/system/disk-space', '/api/packs/missing/cover', '/api/packs/missing/images/a.jpg', '/api/packs/missing/download', '/api/jobs/missing/events']) {
+    for (const route of ['/api/packs', '/api/upload-tasks', '/api/upload-tasks/missing', '/api/system/disk-space', '/api/packs/missing/cover', '/api/packs/missing/images/a.jpg', '/api/packs/missing/download', '/api/jobs/missing/events']) {
       assert.equal((await fetch(server.url + route)).status, 401, route);
     }
     const rejected = await fetch(`${server.url}/api/upload/files`, { method: 'POST', headers: { Origin: origin, 'Tus-Resumable': '1.0.0', 'Upload-Length': '3' } });
@@ -38,6 +38,16 @@ test('auth protects APIs, resources and tus before parsing, and supports cross-o
     assert.notEqual(token, 'private-key');
     const headers = { Authorization: `Bearer ${token}`, Origin: origin };
     assert.equal((await fetch(`${server.url}/api/packs`, { headers })).status, 200);
+    const taskHeaders = { ...headers, 'Content-Type': 'application/json' };
+    const taskResponse = await fetch(`${server.url}/api/upload-tasks`, { method: 'POST', headers: taskHeaders,
+      body: JSON.stringify({ source: 'archive', name: 'Authenticated', filename: 'auth.zip', fileSize: 3 }) });
+    assert.equal(taskResponse.status, 200);
+    const task = await taskResponse.json() as { id: string };
+    assert.equal((await fetch(`${server.url}/api/upload-tasks/${task.id}/complete`, { method: 'POST', headers: taskHeaders, body: JSON.stringify({ uploadId: 'missing' }) })).status, 404);
+    assert.equal((await fetch(`${server.url}/api/upload-tasks/${task.id}`, { method: 'PATCH', headers: taskHeaders, body: JSON.stringify({ status: 'completed' }) })).status, 400);
+    assert.equal((await fetch(`${server.url}/api/upload-tasks/${task.id}/continue`, { method: 'POST', headers: taskHeaders, body: '{}' })).status, 409);
+    assert.equal((await fetch(`${server.url}/api/upload-tasks/${task.id}/retry`, { method: 'POST', headers: taskHeaders, body: '{}' })).status, 409);
+    assert.equal((await fetch(`${server.url}/api/upload-tasks/${task.id}`, { method: 'DELETE', headers })).status, 200);
     assert.equal((await fetch(`${server.url}/api/packs?access_token=${token}`)).status, 401);
     assert.equal((await fetch(`${server.url}/api/packs/missing/cover?access_token=${token}`)).status, 404);
     assert.equal((await fetch(`${server.url}/api/packs/missing/cover?access_token=${token}`, { method: 'HEAD' })).status, 404);
