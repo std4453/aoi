@@ -29,7 +29,7 @@ export function TaskSummaryContent({ task, message, layout = 'card', expanded = 
     <span className={`flex min-w-0 items-center gap-1.5 ${state.color} ${layout === 'toast' ? 'max-w-[60%] shrink-0' : ''}`}>
       {!hasProgress && <StatusIcon size={14} aria-hidden="true" className={`shrink-0 ${task.status === 'processing' ? 'animate-spin' : ''}`} />}
       {hasProgress ? <span role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
-          <span className="upload-progress-fill block h-full rounded-full bg-blue-500 transition-[width] duration-300" data-active={active} style={{ width: `${progress}%` }} />
+          <span className="block h-full rounded-full bg-blue-500 transition-[width] duration-300" style={{ width: `${progress}%` }} />
       </span> : <span className="min-w-0 truncate" title={label}>{label}</span>}
     </span>
   </span>;
