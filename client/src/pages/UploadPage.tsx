@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronUp, FileArchive, FolderOpen, Plus, Tag, Upload } from 'lucide-react';
 import type { UploadTask } from '../../../shared/types';
@@ -12,12 +12,16 @@ import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../components/TaskSummary';
 import { taskErrorMessage } from '../lib/upload-task-display';
+import { getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta } from '../lib/upload-page-state';
 
 const labels: Record<UploadTask['status'], string> = {
   uploading: '上传中', downloading: '下载中', paused: '已暂停', needs_file: '等待原文件',
   processing: '正在处理图包', duplicate: '发现重复图包，等待确认', password: '需要密码', completed: '上传完成', failed: '需要处理',
 };
 const needsAttention = (task: UploadTask) => ['duplicate', 'password', 'needs_file', 'failed'].includes(task.status);
+
+const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
+  : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
 
 function InlineTags() {
   const { draft, setDraft } = useUploadTasks();
@@ -87,10 +91,7 @@ async function readDirectory(directory: FileSystemDirectoryEntry, root = directo
 }
 
 function UploadForm() {
-  const { draft, setDraft, resetDraft, start, starting, metadataLoading, metadataError, expandedId, expand } = useUploadTasks();
-  const [collapsed, setCollapsed] = useState(false);
-  const expanded = !expandedId && !collapsed;
-  const open = () => { expand(null); setCollapsed(false); };
+  const { draft, setDraft, resetDraft, start, starting, metadataLoading, metadataError } = useUploadTasks();
   const formId = useId();
   const archiveInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -103,7 +104,6 @@ function UploadForm() {
     if (!files.length) { setError('文件夹为空'); return; }
     if (!folder && !/\.(zip|rar|7z)$/i.test(files[0].name)) { setError('请选择 ZIP、RAR、7Z 压缩包或文件夹'); return; }
     setError('');
-    open();
     setDraft({ source: folder ? 'folder' : 'archive', files,
       name: folder ? files[0].webkitRelativePath.split('/')[0] : files[0].name.replace(/\.[^.]+$/, ''),
     });
@@ -124,7 +124,7 @@ function UploadForm() {
   };
   const remote = draft.source === 'mega' || draft.source === 'pixiv';
   const canStart = remote ? Boolean(draft.url.trim()) : draft.files.length > 0;
-  const title = draft.source === 'pixiv' ? 'Pixiv 导入' : draft.source === 'mega' ? 'MEGA 分享' : draft.source === 'folder' ? '上传文件夹' : '上传压缩包';
+  const title = draftTitle(draft.source);
   return <div onDrop={event => { void drop(event); }}
     onDragEnter={event => {
       if (!Array.from(event.dataTransfer.types).includes('Files') || starting || scanning) return;
@@ -145,27 +145,19 @@ function UploadForm() {
       onChange={event => { select(Array.from(event.target.files || []), false); event.target.value = ''; }} />
     <input ref={folderInput} type="file" {...{ webkitdirectory: '', directory: '' }} className="hidden"
       onChange={event => { select(Array.from(event.target.files || []), true); event.target.value = ''; }} />
-    <div className="upload-task-details" data-open={Boolean(draft.source) || !expanded} inert={!draft.source && expanded}>
-      <div className="min-h-0 overflow-hidden">
-        {draft.source ? <div className="upload-card-heading" data-expanded={expanded}>
-          <button type="button" className="min-w-0 flex-1 text-left" aria-expanded={expanded} aria-controls={formId} onClick={() => expanded ? setCollapsed(true) : open()}>
-            <TaskSourceTitle source={draft.source} name={title} expanded={expanded} />
-          </button>
-          <IconButton icon={expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />} label={expanded ? '收起上传表单' : '展开上传表单'} aria-expanded={expanded} aria-controls={formId} onClick={() => expanded ? setCollapsed(true) : open()} />
-        </div> : <Button variant="ghost" icon={<Upload size={16} />} onClick={open} className="w-full">继续上传</Button>}
-      </div>
+    <div className={`upload-card-heading upload-form-heading ${draft.source ? '' : 'upload-empty-heading'}`} data-expanded="true">
+      {draft.source ? <TaskSourceTitle source={draft.source} name={title} expanded />
+        : <span className="flex items-center justify-center gap-2 text-sm text-gray-400"><Upload size={20} aria-hidden="true" />上传图包</span>}
     </div>
-    <div className="upload-task-details" data-open={expanded} inert={!expanded}>
-    <div className="min-h-0 overflow-hidden"><div className={draft.source ? 'px-4 pb-4' : 'p-4'}>
+    <div className="px-4 pb-4">
     {!draft.source ? <>
       <div className="py-3 text-center">
-        <div className="mb-4 flex items-center justify-center gap-2 text-gray-400"><Upload size={24} aria-hidden="true" /><span className="text-sm">上传图包</span></div>
         <ActionRow><Button variant="secondary" icon={<FileArchive size={16} />} onClick={() => archiveInput.current?.click()} disabled={starting || scanning}>选择压缩包</Button>
           <Button variant="secondary" icon={<FolderOpen size={16} />} onClick={() => folderInput.current?.click()} disabled={starting || scanning}>选择文件夹</Button></ActionRow>
         <p className="mt-2 text-xs text-gray-500">支持 ZIP、RAR、7Z 压缩包或文件夹</p>
         {scanning && <p role="status" className="mt-2 text-xs text-gray-500">正在读取文件夹…</p>}
       </div>
-      <ImportSources compact availableSources={['pixiv', 'mega']} onSelect={source => { setSettings(false); resetDraft(); setDraft({ source }); setCollapsed(false); }} />
+      <ImportSources compact availableSources={['pixiv', 'mega']} onSelect={source => { setSettings(false); resetDraft(); setDraft({ source }); }} />
     </> : <form id={formId} onSubmit={event => { event.preventDefault(); if (canStart && !starting && !scanning) void start(); }} className="flex flex-col gap-3">
       {remote && <FormField label={draft.source === 'pixiv' ? '作品网址' : '分享链接'} hint={metadataLoading ? <span className="text-xs text-gray-500">识别中…</span> : undefined}>
         <TextInput type="url" required value={draft.url} onChange={event => setDraft({ url: event.target.value })} disabled={starting}
@@ -184,8 +176,7 @@ function UploadForm() {
     {error && <p role="alert" className="mt-3 text-sm text-red-400">{error}</p>}
     {draft.source && <ActionRow className="mt-3"><Button variant="secondary" onClick={() => { setSettings(false); setError(''); resetDraft(); }} disabled={starting}>取消上传</Button>
       <Button variant="primary" type="submit" form={formId} disabled={!canStart || starting || scanning}>{starting ? '正在创建任务…' : remote ? '开始导入' : '开始上传'}</Button></ActionRow>}
-    </div>
-    </div></div></div>
+    </div></div>
     {dragging && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-blue-400" role="status"><Upload size={32} /><span className="text-sm">松开以上传压缩包或文件夹</span></div>}
   </div>;
 }
@@ -219,9 +210,13 @@ function TaskCard({ task }: { task: UploadTask }) {
   const indeterminate = remote && task.status === 'downloading' && task.totalBytes <= 0;
   const showProgress = !completed && !attention;
   return <article className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${task.status === 'failed' ? 'border-red-500/60' : attention && task.status !== 'duplicate' ? 'border-amber-500/60' : completed ? 'border-green-700/70' : expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-600'}`}>
-    <div className="upload-card-heading" data-expanded={expanded}>
-      <button type="button" aria-expanded={expanded} aria-controls={`task-${task.id}`} onClick={() => expand(expanded ? null : task.id)} className="min-w-0 flex-1 text-left"><TaskSummaryContent task={task} expanded={expanded} /></button>
-      <IconButton icon={expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />} label={expanded ? '收起任务' : '展开任务'} aria-expanded={expanded} aria-controls={`task-${task.id}`} onClick={() => expand(expanded ? null : task.id)} />
+    <div className="upload-card-header">
+      <button type="button" className="upload-card-heading" data-expanded={expanded} aria-expanded={expanded} aria-controls={`task-${task.id}`}
+        onClick={() => expand(expanded ? null : task.id)}>
+        <TaskSummaryContent task={task} expanded={expanded} />
+      </button>
+      <IconButton className="upload-card-chevron" icon={expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        label={expanded ? '收起任务' : '展开任务'} aria-expanded={expanded} aria-controls={`task-${task.id}`} onClick={() => expand(expanded ? null : task.id)} />
     </div>
     <div id={`task-${task.id}`} className="upload-task-details" data-open={expanded} inert={!expanded}>
       <div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-3 px-4 pb-4">
@@ -251,7 +246,7 @@ function TaskCard({ task }: { task: UploadTask }) {
         {settings && task.source === 'pixiv' && task.status === 'failed' && <div className="rounded-xl border border-gray-800"><PixivSettings onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} /></div>}
         <input ref={input} type="file" className="hidden" {...(task.source === 'folder' ? { webkitdirectory: '', directory: '' } : { accept: '.zip,.rar,.7z' })}
           onChange={event => { const selected = Array.from(event.target.files || []); event.target.value = ''; if (selected.length) void run(() => reselect(task.id, selected)); }} />
-        {busy && <p role="status" className="text-xs text-gray-400">正在处理…</p>}
+        {busy && <p role="status" className="sr-only">正在处理…</p>}
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         {cancelConfirm && !completed ? <>
           <p className="text-sm text-gray-400">确认取消此任务？本任务已上传的临时内容会被清理。</p>
@@ -278,31 +273,94 @@ function TaskCard({ task }: { task: UploadTask }) {
 }
 
 export default function UploadPage() {
-  const { tasks, expandedId, expand, exitingIds, error, loading, refresh } = useUploadTasks();
+  const { tasks, expandedId, revealRevision, expand, exitingIds, draft, error, loading, refresh } = useUploadTasks();
+  const formContainer = useRef<HTMLDivElement>(null);
+  const stickyHeader = useRef<HTMLDivElement>(null);
+  const [formPastTop, setFormPastTop] = useState(false);
+  const [enteringIds, setEnteringIds] = useState(new Set<string>());
+  const seenTasks = useRef(new Set(tasks.map(task => task.id)));
+  const loadedTasks = useRef(!loading);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTask = searchParams.get('task');
   const requestedFolder = searchParams.get('folder');
+
+  // Only newly arriving tasks animate. Mounting a cached list on a tab switch does not.
+  useLayoutEffect(() => {
+    if (loading) return;
+    const additions = loadedTasks.current ? tasks.filter(task => !seenTasks.current.has(task.id)).map(task => task.id) : [];
+    loadedTasks.current = true;
+    seenTasks.current = new Set(tasks.map(task => task.id));
+    if (additions.length) setEnteringIds(previous => new Set([...previous, ...additions]));
+  }, [tasks, loading]);
+
+  useLayoutEffect(() => {
+    if (loading) return;
+    window.scrollTo(0, getUploadScrollY());
+    const update = () => {
+      saveUploadScrollY(window.scrollY);
+      setFormPastTop((formContainer.current?.getBoundingClientRect().bottom ?? 0) < 0);
+    };
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    const observer = new ResizeObserver(update);
+    if (formContainer.current) observer.observe(formContainer.current);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      observer.disconnect();
+    };
+  }, [loading]);
+
   useEffect(() => {
     const task = requestedTask ? tasks.find(task => task.id === requestedTask) : requestedFolder ? tasks.find(task => task.packId === requestedFolder) : undefined;
     if (task) { expand(task.id); setSearchParams({}, { replace: true }); }
   }, [requestedTask, requestedFolder, tasks, expand, setSearchParams]);
+
   useEffect(() => {
-    if (!expandedId) return;
+    if (!expandedId || revealRevision === getHandledRevealRevision()) return;
     const timer = setTimeout(() => {
       const card = document.getElementById(`upload-card-${expandedId}`);
-      const top = card?.getBoundingClientRect().top;
-      if (top !== undefined && (top < 0 || top > window.innerHeight - 100)) card?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      if (!card) return;
+      setHandledRevealRevision(revealRevision);
+      const rect = card.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+      const navigationTop = document.querySelector('nav')?.getBoundingClientRect().top ?? viewportBottom;
+      const visibleBottom = Math.min(viewportBottom, navigationTop) - 8;
+      const formBottom = formContainer.current?.getBoundingClientRect().bottom ?? 0;
+      const headerHeight = stickyHeader.current?.offsetHeight ?? 0;
+      let visibleTop = viewportTop + (formBottom < 0 ? headerHeight : 0) + 8;
+      let delta = taskRevealDelta(rect.top, rect.bottom, visibleTop, visibleBottom);
+      // Scrolling down may reveal the floating header. Include that new obstruction.
+      visibleTop = viewportTop + (formBottom - delta < 0 ? headerHeight : 0) + 8;
+      delta = taskRevealDelta(rect.top, rect.bottom, visibleTop, visibleBottom);
+      if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
     }, 260);
     return () => clearTimeout(timer);
-  }, [expandedId]);
+  }, [expandedId, revealRevision]);
+
   return <div className="upload-panel mx-auto max-w-lg pb-4">
     <div className="mb-4 flex min-h-9 items-center justify-between gap-3"><h2 className="text-xl font-bold text-white">上传图包</h2>
       {tasks.length > 0 && <span className="text-xs text-gray-500">{tasks.length} 个任务</span>}</div>
-    <div className="mb-4"><UploadForm /></div>
+    <div ref={formContainer} className="mb-4"><UploadForm /></div>
+    <div ref={stickyHeader} className="upload-sticky" data-visible={formPastTop} inert={!formPastTop} aria-hidden={!formPastTop} aria-label="返回上传表单">
+      <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })}
+        className={`upload-return-button ${draft.source ? 'border-solid bg-gray-900 hover:bg-gray-800' : 'border-dashed bg-transparent hover:bg-gray-900'}`}>
+        {draft.source ? <TaskSourceTitle source={draft.source} name={draftTitle(draft.source)} />
+          : <span className="flex items-center justify-center gap-2 text-sm text-gray-400"><Upload size={16} aria-hidden="true" />上传图包</span>}
+      </button>
+      {tasks.length > 0 && <p className="mt-4 text-xs text-gray-500">任务列表</p>}
+    </div>
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-800/50 bg-red-900/20 p-3 text-sm text-red-300">{error}<Button variant="ghost" onClick={() => { void refresh(); }}>重试</Button></div>}
     {loading && <p role="status" className="py-4 text-center text-sm text-gray-500">正在读取上传任务…</p>}
-    {tasks.length > 0 && <p className="mb-2 text-xs text-gray-500">任务列表</p>}
-    <div aria-label="上传任务列表">{tasks.map(task => <div id={`upload-card-${task.id}`} key={task.id} className={`upload-task-frame ${exitingIds.has(task.id) ? 'is-exiting' : ''}`}>
+    {tasks.length > 0 && <p className="mb-3 text-xs text-gray-500">任务列表</p>}
+    <div aria-label="上传任务列表">{tasks.map(task => <div id={`upload-card-${task.id}`} key={task.id} inert={exitingIds.has(task.id)}
+      onAnimationEnd={event => {
+        if (event.target === event.currentTarget) setEnteringIds(previous => new Set([...previous].filter(id => id !== task.id)));
+      }}
+      className={`upload-task-frame ${enteringIds.has(task.id) ? 'is-entering' : ''} ${exitingIds.has(task.id) ? 'is-exiting' : ''}`}>
       <div className="min-h-0 overflow-hidden"><div className="pb-3"><TaskCard task={task} /></div></div>
     </div>)}</div>
   </div>;

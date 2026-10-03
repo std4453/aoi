@@ -7,6 +7,7 @@ import { fetchMegaMetadata } from '../api/mega';
 import { createFolderPack, fetchFolderUploadStatus, confirmFolderFileComplete } from '../api/packs';
 import { apiUrl, authHeaders, serverWritable } from '../lib/connection';
 import { clearPacksCache } from '../lib/homeStore';
+import { TASK_EXIT_MS, retainPendingTasks, selectionAfterRemoval } from '../lib/upload-task-state';
 
 export interface UploadDraft {
   source: 'archive' | 'folder' | 'mega' | 'pixiv' | null;
@@ -28,6 +29,7 @@ const emptyDraft = (): UploadDraft => ({ source: null, files: [], name: '', url:
 interface Snapshot {
   tasks: UploadTask[];
   expandedId: string | null;
+  revealRevision: number;
   exitingIds: Set<string>;
   draft: UploadDraft;
   error: string | null;
@@ -37,7 +39,7 @@ interface Snapshot {
   metadataError: string | null;
   files: Record<string, UploadFileProgress[]>;
 }
-let snapshot: Snapshot = { tasks: [], expandedId: null, exitingIds: new Set(), draft: emptyDraft(), error: null, loading: true, starting: false, metadataLoading: false, metadataError: null, files: {} };
+let snapshot: Snapshot = { tasks: [], expandedId: null, revealRevision: 0, exitingIds: new Set(), draft: emptyDraft(), error: null, loading: true, starting: false, metadataLoading: false, metadataError: null, files: {} };
 const listeners = new Set<() => void>();
 const publish = (patch: Partial<Snapshot>) => {
   snapshot = { ...snapshot, ...patch };
@@ -48,6 +50,7 @@ const getSnapshot = () => snapshot;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const runtimes = new Map<string, Runtime>();
 const deletedIds = new Set<string>();
+const dismissingIds = new Set<string>();
 let refreshing: Promise<void> | null = null;
 let mutationRevision = 0;
 let refreshError: string | null = null;
@@ -56,12 +59,8 @@ let metadataTimer: ReturnType<typeof setTimeout> | undefined;
 let nameEdited = false;
 let tagsEdited = false;
 let metadataReady = false;
-let submittedDraft: UploadDraft | null = null;
-let draftResetTimer: ReturnType<typeof setTimeout> | undefined;
 
 function resetDraft() {
-  clearTimeout(draftResetTimer);
-  submittedDraft = null;
   clearTimeout(metadataTimer);
   metadataRevision++;
   nameEdited = false;
@@ -351,7 +350,7 @@ async function refresh() {
     try {
       const fetched = await api.fetchUploadTasks();
       if (revision !== mutationRevision) return;
-      const tasks = fetched.filter(task => !deletedIds.has(task.id)).map(task => {
+      const fetchedTasks = fetched.filter(task => !deletedIds.has(task.id)).map(task => {
         const runtime = runtimes.get(task.id);
         if (runtime && ['processing', 'duplicate', 'password', 'completed'].includes(task.status)) {
           runtime.done = true;
@@ -363,10 +362,9 @@ async function refresh() {
         }
         return runtime && !runtime.done ? { ...task, ...runtime.local } : task;
       });
+      const tasks = retainPendingTasks(fetchedTasks, snapshot.tasks, new Set([...dismissingIds, ...snapshot.exitingIds]));
       const newlyCompleted = tasks.some(task => task.status === 'completed' && snapshot.tasks.find(old => old.id === task.id)?.status !== 'completed');
       if (newlyCompleted) clearPacksCache();
-      // Keep the outgoing card mounted until its exit transition has finished.
-      for (const old of snapshot.tasks) if (snapshot.exitingIds.has(old.id) && !tasks.some(task => task.id === old.id)) tasks.push(old);
       publish({ tasks, expandedId: tasks.some(task => task.id === snapshot.expandedId) ? snapshot.expandedId : null,
         error: snapshot.error === refreshError ? null : snapshot.error, loading: false });
       refreshError = null;
@@ -394,13 +392,8 @@ async function start() {
     });
     mutationRevision++;
     replaceTask(task);
-    // Let the populated form finish folding before replacing its content.
-    submittedDraft = draft;
-    clearTimeout(draftResetTimer);
-    draftResetTimer = setTimeout(() => {
-      if (submittedDraft === draft) resetDraft();
-    }, 260);
-    publish({ expandedId: task.id });
+    resetDraft();
+    publish({ expandedId: task.id, revealRevision: snapshot.revealRevision + 1 });
     if (!remote) void beginLocal(task, draft.files, draft.tagIds, draft.archivePassword || undefined);
   } catch (error) { publish({ error: message(error) }); }
   finally { publish({ starting: false, metadataLoading: false }); }
@@ -440,6 +433,9 @@ async function resume(id: string, passwords: { archivePassword?: string; sharePa
 }
 
 async function dismiss(id: string) {
+  if (dismissingIds.has(id) || deletedIds.has(id)) return;
+  dismissingIds.add(id);
+  mutationRevision++;
   const runtime = runtimes.get(id);
   try {
     if (runtime && !runtime.done) {
@@ -451,6 +447,7 @@ async function dismiss(id: string) {
     }
     await api.deleteUploadTask(id);
   } catch (error) {
+    dismissingIds.delete(id);
     if (runtime && !runtime.done) {
       runtime.cancelled = false;
       runtime.paused = true;
@@ -469,6 +466,7 @@ async function dismiss(id: string) {
     void Promise.all([...runtime.uploads.values()].map(upload => upload.abort(true).catch(() => {})));
   }
   deletedIds.add(id);
+  dismissingIds.delete(id);
   publish({ exitingIds: new Set([...snapshot.exitingIds, id]) });
   clearPacksCache();
   setTimeout(() => {
@@ -476,17 +474,17 @@ async function dismiss(id: string) {
     const files = { ...snapshot.files };
     delete files[id];
     publish({ tasks: snapshot.tasks.filter(task => task.id !== id), files,
-      expandedId: snapshot.expandedId === id ? null : snapshot.expandedId,
+      expandedId: selectionAfterRemoval(snapshot.tasks, snapshot.expandedId, id, snapshot.exitingIds),
+      revealRevision: snapshot.revealRevision + (snapshot.expandedId === id ? 1 : 0),
       exitingIds: new Set([...snapshot.exitingIds].filter(item => item !== id)),
     });
-  }, 240);
+  }, TASK_EXIT_MS);
 }
 
 const actions = {
   refresh, start, pause, resume, dismiss,
   expand: (id: string | null) => {
-    if (id === null && submittedDraft) resetDraft();
-    publish({ expandedId: id });
+    publish({ expandedId: id, revealRevision: snapshot.revealRevision + (id ? 1 : 0) });
   },
   setDraft, resetDraft,
   continueTask: async (id: string) => {

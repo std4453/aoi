@@ -21,7 +21,7 @@ export default function AppShell() {
   const { tasks } = useUploadTasks();
 
   useEffect(() => {
-    if (location.pathname !== '/') {
+    if (!['/', '/upload'].includes(location.pathname.replace(/\/+$/, '') || '/')) {
       window.scrollTo(0, 0);
     }
   }, [location.pathname]);
