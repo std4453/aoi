@@ -9,6 +9,7 @@ import { formatBytes } from '../lib/utils';
 import { DuplicateCard } from '../components/DuplicateUploadModal';
 import { TextInput, PasswordInput } from '../components/Form';
 import TagSelector from '../components/TagSelector';
+import PackProcessingResult from '../components/PackProcessingResult';
 import ImportSources from '../components/ImportSources';
 import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
@@ -198,7 +199,7 @@ function TaskCard({ task }: { task: UploadTask }) {
   const stage = task.status === 'duplicate' && !expanded ? '待确认' : task.status === 'processing' && !expanded ? '处理中' : labels[task.status];
   const remote = task.source === 'mega' || task.source === 'pixiv';
   const indeterminate = remote && task.status === 'downloading' && task.totalBytes <= 0;
-  const showProgress = !completed && !attention;
+  const showProgress = !attention;
   return <article className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${feedback.border || (expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-600')}`}>
     <div className="upload-card-header">
       <button type="button" className="upload-card-heading" data-expanded={expanded} aria-expanded={expanded} aria-controls={`task-${task.id}`}
@@ -210,6 +211,7 @@ function TaskCard({ task }: { task: UploadTask }) {
     </div>
     <div id={`task-${task.id}`} className="upload-task-details" data-open={expanded} inert={!expanded}>
       <div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-3 px-4 pb-4">
+        {completed ? <PackProcessingResult packId={task.packId} onDone={() => dismiss(task.id)} /> : <>
         {showProgress && <div><div className="mb-2 flex justify-between gap-3 text-xs text-gray-500"><span>{task.source === 'pixiv' ? 'Pixiv 导入' : task.source === 'mega' ? 'MEGA 导入' : task.source === 'folder' ? '文件夹上传' : '压缩包上传'}{task.totalBytes > 0 && ` · ${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`}</span>{!indeterminate && <span>{progress}%</span>}</div>
           <div role="progressbar" aria-label={stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={indeterminate ? undefined : progress} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`h-full rounded-full bg-blue-500 ${indeterminate ? 'w-1/3 animate-pulse' : 'transition-all duration-300'}`} style={indeterminate ? undefined : { width: `${progress}%` }} /></div></div>}
         {task.error && <p role="status" className={`break-words rounded-xl border p-3 text-sm ${feedback.panel} ${feedback.text}`}>{taskErrorMessage(task)}</p>}
@@ -225,8 +227,7 @@ function TaskCard({ task }: { task: UploadTask }) {
             <PasswordInput value={archivePassword} onChange={setArchivePassword} placeholder="压缩包密码" />}
         </div>}
         {task.status === 'needs_file' && <p className={`text-sm leading-relaxed ${feedback.text}`}>刷新后需重新选择原来的{task.source === 'folder' ? '文件夹' : '压缩包'}以继续上传。已上传的内容会保留。</p>}
-        {completed && <p className={`text-sm ${feedback.text}`}>图包已处理完成，确认后移除任务。</p>}
-        {taskFiles.length > 1 && <div><Button variant="ghost" onClick={() => setDetails(!details)} aria-expanded={details}>
+        {taskFiles.length > 1 && <div><Button variant="ghost" className="-ml-3" onClick={() => setDetails(!details)} aria-expanded={details}>
           {`${taskFiles.filter(file => file.status === 'uploaded').length}/${taskFiles.length} 个文件 · ${details ? '收起详情' : '查看详情'}`}</Button>
           {details && <div className="mt-2 max-h-52 space-y-1 overflow-y-auto">{taskFiles.map(file => <div key={file.id} className="flex items-center gap-2 text-xs">
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${file.status === 'uploaded' ? 'bg-green-500' : file.status === 'failed' ? 'bg-red-400' : file.status === 'uploading' ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
@@ -238,15 +239,11 @@ function TaskCard({ task }: { task: UploadTask }) {
           onChange={event => { const selected = Array.from(event.target.files || []); event.target.value = ''; if (selected.length) void run(() => reselect(task.id, selected)); }} />
         {busy && <p role="status" className="sr-only">正在处理…</p>}
         {error && <p role="alert" className={`text-sm ${feedback.text}`}>{error}</p>}
-        {cancelConfirm && !completed ? <>
+        {cancelConfirm ? <>
           <p className="text-sm text-gray-400">确认取消此任务？本任务已上传的临时内容会被清理。</p>
           <ActionRow><Button variant="secondary" disabled={busy} onClick={() => setCancelConfirm(false)}>保留任务</Button>
             <Button variant="danger" disabled={busy} onClick={() => { void run(() => dismiss(task.id)); }}>确认取消</Button></ActionRow>
         </> : <ActionRow>
-          {completed ? <>
-            {task.packId && <Button variant="secondary" disabled={busy} onClick={() => navigate(`/packs/${task.packId}`)}>查看图包</Button>}
-            <Button variant="primary" disabled={busy} onClick={() => { void run(() => dismiss(task.id)); }}>完成</Button>
-          </> : <>
             <Button variant="secondary" disabled={busy} onClick={() => setCancelConfirm(true)}>取消任务</Button>
             {task.status === 'duplicate' && <Button variant="primary" disabled={busy} onClick={() => { void run(() => continueTask(task.id)); }}>继续上传</Button>}
             {task.status === 'uploading' && hasFiles && <Button variant="primary" disabled={busy} onClick={() => { void run(() => pause(task.id)); }}>暂停</Button>}
@@ -255,8 +252,8 @@ function TaskCard({ task }: { task: UploadTask }) {
               <Button variant="primary" disabled={busy} onClick={() => input.current?.click()}>{`重新选择${task.source === 'folder' ? '文件夹' : '压缩包'}`}</Button>}
             {(task.status === 'password' || task.status === 'failed') && (hasFiles || remote || task.packId) &&
               <Button variant="primary" disabled={busy} onClick={() => { void run(() => resume(task.id, { archivePassword: archivePassword || undefined, sharePassword: sharePassword || undefined })); }}>{task.status === 'password' ? '提交密码并继续' : '重试'}</Button>}
-          </>}
         </ActionRow>}
+        </>}
       </div></div>
     </div>
   </article>;
