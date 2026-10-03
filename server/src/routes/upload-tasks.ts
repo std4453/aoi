@@ -139,11 +139,13 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
       const input = request.body ?? {};
       const patch = { ...(input.sharePassword !== undefined ? { sharePassword: password(input.sharePassword) } : {}), ...(input.archivePassword !== undefined ? { archivePassword: password(input.archivePassword) } : {}) };
       updateUploadTaskMetadata(task.id, patch);
-      if (task.packId) await retryPackTask(task, input.archivePassword);
-      else if (task.source === 'mega') {
-        const { startMegaImport } = await import('../services/mega-import.js');
-        void startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name });
-      } else updateUploadTask(task.id, { status: 'needs_file', error: null });
+      if (task.source === 'mega') {
+        const { startMegaImport, hasPendingMegaHandoff } = await import('../services/mega-import.js');
+        if (!task.packId || hasPendingMegaHandoff(task)) {
+          void startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name }, Boolean(task.packId));
+        } else await retryPackTask(task, input.archivePassword);
+      } else if (task.packId) await retryPackTask(task, input.archivePassword);
+      else updateUploadTask(task.id, { status: 'needs_file', error: null });
       return getSyncedUploadTask(task.id);
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { UploadTask } from '../../../shared/types.js';
 import { getDb } from '../db/connection.js';
 import { createPack, getPack, setPackTags, findArchiveDuplicates, updatePackStats, updatePackStructureType, hasAnyActiveJob,
   createPackFiles, getPackFiles, completePackFile } from '../db/repositories.js';
@@ -62,6 +63,7 @@ async function finishImport(id: string, result: MegaDownloadResult, options: Meg
     })();
   }
   if (!pack) throw new Error('无法创建导入图包');
+  updateUploadTask(id, { status: 'processing', error: null, progress: 0 });
   if (archive) {
     const destination = getArchivePath(pack.id, `original.${format}`);
     ensureDir(path.dirname(destination));
@@ -169,13 +171,18 @@ export async function shutdownMegaImports(): Promise<void> {
   await Promise.all(jobs.map(job => job.promise));
 }
 
+/** A bound pack without a job still belongs to the durable download handoff. */
+export function hasPendingMegaHandoff(task: UploadTask): boolean {
+  if (task.source !== 'mega' || !task.packId) return false;
+  const pack = getPack(task.packId);
+  return pack?.status === 'uploading' && !hasAnyActiveJob(pack.id)
+    && fs.existsSync(resolveWithin(importDirectory(task.id), 'download.json'));
+}
+
 /** Complete a crash between pack publication and moving its downloaded content before ordinary job recovery. */
 export async function recoverMegaImports(): Promise<void> {
   for (const task of listUploadTasks()) {
-    if (task.source !== 'mega' || !task.packId || !['processing', 'downloading'].includes(task.status)) continue;
-    const pack = getPack(task.packId);
-    if (!pack || pack.status !== 'uploading' || hasAnyActiveJob(pack.id)) continue;
-    if (!fs.existsSync(resolveWithin(importDirectory(task.id), 'download.json'))) continue;
+    if (!['processing', 'downloading', 'failed'].includes(task.status) || !hasPendingMegaHandoff(task)) continue;
     await startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name }, true);
   }
 }

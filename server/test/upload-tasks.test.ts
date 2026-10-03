@@ -104,6 +104,39 @@ test('upload tasks persist, bind once, preserve completed packs, and recover fol
     assert.equal((await request(`/api/packs/${bound.packId}`)).status, 200);
     assert.equal((await request(`/api/upload-tasks/${first.id}`)).status, 404);
 
+    const partial = await create({ source: 'folder', name: 'partial transfer', fileSize: image.length * 2 });
+    const partialPack = await (await request('/api/packs/folder-create', 'POST', {
+      taskId: partial.id, packName: partial.name,
+      files: ['first.png', 'second.png'].map(relativePath => ({ relativePath, fileSize: image.length })),
+    })).json() as { id: string; packFiles: Array<{ id: string }> };
+    const firstFileUpload = await upload(image);
+    assert.equal((await request(`/api/packs/${partialPack.id}/folder-file-complete`, 'POST', {
+      packFileId: partialPack.packFiles[0]!.id, uploadId: firstFileUpload,
+    })).status, 200);
+    assert.equal((await request(`/api/upload-tasks/${partial.id}`, 'PATCH', { status: 'failed', error: 'network upload failed' })).status, 200);
+    const failedTransfer = await (await request(`/api/upload-tasks/${partial.id}`)).json() as UploadTask;
+    assert.equal(failedTransfer.status, 'needs_file', 'a refreshed browser must be able to reselect a failed folder transfer');
+    assert.equal(failedTransfer.packId, partialPack.id);
+    const partialStatus = await (await request(`/api/packs/${partialPack.id}/folder-upload-status`)).json() as { packFiles: Array<{ id: string; status: string }> };
+    assert.equal(partialStatus.packFiles[0]?.status, 'uploaded', 'reselection must retain completed files');
+    assert.equal(partialStatus.packFiles[1]?.status, 'pending');
+    assert.equal((await request(`/api/upload-tasks/${partial.id}/retry`, 'POST', {})).status, 200);
+    assert.equal((await request(`/api/upload-tasks/${partial.id}`, 'PATCH', { status: 'uploading' })).status, 200);
+    const secondFileUpload = await upload(image);
+    assert.equal((await request(`/api/packs/${partialPack.id}/folder-file-complete`, 'POST', {
+      packFileId: partialPack.packFiles[1]!.id, uploadId: secondFileUpload,
+    })).status, 200);
+
+    const processingFailure = await create({ source: 'archive', name: 'bad archive', filename: 'bad.zip', fileSize: 3 });
+    const invalidUpload = await upload(Buffer.from('bad'));
+    await request(`/api/upload-tasks/${processingFailure.id}/complete`, 'POST', { uploadId: invalidUpload });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const task = await (await request(`/api/upload-tasks/${processingFailure.id}`)).json() as UploadTask;
+      if (task.status === 'failed') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal((await (await request(`/api/upload-tasks/${processingFailure.id}`)).json() as UploadTask).status, 'failed', 'processing failures must keep the server retry action');
+
     const folder = await create({ source: 'folder', name: 'folder', fileSize: image.length });
     const folderResponse = await request('/api/packs/folder-create', 'POST', { taskId: folder.id, packName: 'folder', files: [{ relativePath: 'image.png', fileSize: image.length }] });
     const createdFolder = await folderResponse.json() as { id: string; packFiles: Array<{ id: string }> };

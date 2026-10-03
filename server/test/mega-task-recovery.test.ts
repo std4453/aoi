@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import Fastify from 'fastify';
 
 test('MEGA duplicate confirmation and archive/folder materialization recover from a durable download journal', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-mega-recovery-'));
@@ -15,6 +16,9 @@ test('MEGA duplicate confirmation and archive/folder materialization recover fro
   const { startMegaImport, continueMegaImport, recoverMegaImports, shutdownMegaImports } = await import('../src/services/mega-import.js');
   const { jobQueue } = await import('../src/services/job-queue.js');
   const { getArchivePath, getFolderStagingDir } = await import('../src/services/storage.js');
+  const { registerUploadTaskRoutes } = await import('../src/routes/upload-tasks.js');
+  const app = Fastify();
+  await app.register(registerUploadTaskRoutes);
   const previousEnqueue = jobQueue.enqueueUnique;
   const previousStart = jobQueue.start;
   // Test durable handoff in isolation; the ordinary queue/extractor has separate integration coverage.
@@ -22,8 +26,8 @@ test('MEGA duplicate confirmation and archive/folder materialization recover fro
   jobQueue.start = () => {};
   const contents = Buffer.from('downloaded fixture');
   const md5 = createHash('md5').update(contents).digest('hex');
-  const createTask = (name: string) => tasks.createUploadTask({ source: 'mega', name,
-    url: 'https://mega.nz/file/GRBSjBCI#W-PD47BgVmkIB9x_c5DFPilhYrtwk21hdwyppp-1pO8' });
+  // Journals provide all content; omitting a URL also prevents accidental network access.
+  const createTask = (name: string) => tasks.createUploadTask({ source: 'mega', name });
   const journal = (id: string, kind: 'archive' | 'folder') => {
     const root = path.join(directory, 'uploads', `mega-${id}`);
     const file = kind === 'archive' ? 'fixture.zip' : 'nested/photo.jpg';
@@ -67,6 +71,49 @@ test('MEGA duplicate confirmation and archive/folder materialization recover fro
     assert.equal(packs.getPack(tasks.getUploadTask(automatic.id)!.packId!)?.name, 'fixture');
 
     for (const kind of ['archive', 'folder'] as const) {
+      const task = createTask(`failed handoff ${kind}`);
+      const root = journal(task.id, kind);
+      const rename = fs.renameSync;
+      fs.renameSync = (source, destination) => {
+        if (String(source).startsWith(path.join(root, 'contents'))) throw new Error('EACCES: fixture handoff failure');
+        rename(source, destination);
+      };
+      try {
+        await startMegaImport(task.id, tasks.getUploadTaskMetadata(task.id), true);
+        const failed = tasks.getSyncedUploadTask(task.id)!;
+        assert.ok(failed.packId, 'failure must happen after pack publication');
+        assert.equal(failed.status, 'failed', 'polling must not erase a materialization error');
+        assert.match(failed.error!, /EACCES/);
+        assert.equal(packs.hasAnyActiveJob(failed.packId!), false);
+        const retry = await app.inject({ method: 'POST', url: `/api/upload-tasks/${task.id}/retry`, payload: {} });
+        assert.equal(retry.statusCode, 200, retry.body);
+        assert.equal(tasks.getSyncedUploadTask(task.id)?.status, 'failed');
+        assert.equal(tasks.getUploadTask(task.id)?.packId, failed.packId);
+      } finally {
+        fs.renameSync = rename;
+      }
+      const packId = tasks.getUploadTask(task.id)!.packId!;
+      if (kind === 'archive') {
+        const retry = await app.inject({ method: 'POST', url: `/api/upload-tasks/${task.id}/retry`, payload: {} });
+        assert.equal(retry.statusCode, 200, retry.body);
+        // Observe the route's background worker instead of starting another import
+        // after it has already consumed the journal.
+        for (let attempt = 0; attempt < 100 && fs.existsSync(root); attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      } else {
+        closeDb();
+        await initDb();
+        await recoverMegaImports();
+      }
+      assert.equal(tasks.getSyncedUploadTask(task.id)?.status, 'processing');
+      assert.equal(tasks.getUploadTask(task.id)?.packId, packId);
+      assert.equal(fs.existsSync(root), false);
+      assert.ok(packs.getLatestJob(packId, kind === 'archive' ? 'extract' : 'verify'));
+      assert.equal((getDb().prepare('SELECT count(*) AS count FROM jobs WHERE pack_id = ?').get(packId) as { count: number }).count, 1);
+    }
+
+    for (const kind of ['archive', 'folder'] as const) {
       const task = createTask(`interrupted ${kind}`);
       const root = journal(task.id, kind);
       const pack = packs.createPack({ name: task.name, originalFilename: kind === 'archive' ? 'fixture.zip' : 'Photos',
@@ -95,6 +142,7 @@ test('MEGA duplicate confirmation and archive/folder materialization recover fro
     }
   } finally {
     await shutdownMegaImports();
+    await app.close();
     closeDb();
     jobQueue.enqueueUnique = previousEnqueue;
     jobQueue.start = previousStart;

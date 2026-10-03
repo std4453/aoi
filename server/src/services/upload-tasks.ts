@@ -56,6 +56,12 @@ export function syncUploadTask(task: UploadTask): UploadTask {
     patch = { status: 'downloading', progress: progress?.percentage ?? job?.progress ?? 0,
       transferredBytes: progress?.totalOriginalSize ?? 0, error: null, matches: [] };
   } else if (pack.status === 'uploading' && pack.sourceType === 'folder') {
+    // A local transfer can fail while its pack is still accepting files. It is
+    // resumable by reselection after a reload, unlike a failed processing job.
+    if (task.source !== 'folder' || task.status !== 'failed') return task;
+    patch = { status: 'needs_file' };
+  } else if (pack.status === 'uploading' && task.source === 'mega' && task.status === 'failed' && !hasAnyActiveJob(pack.id)) {
+    // Keep handoff errors visible until the durable download journal is retried.
     return task;
   } else {
     const type = pack.status === 'thumbnailing' ? 'thumbnail' : pack.status === 'verifying' ? 'verify' : 'extract';

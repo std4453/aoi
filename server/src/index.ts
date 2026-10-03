@@ -93,13 +93,16 @@ function recoverCompletedFolderFiles(packId: string): number {
   return recovered;
 }
 
-function recoverJobs(): void {
+function recoverJobs(pendingMegaPackIds = new Set<string>()): void {
   const recovered = recoverInterruptedJobs();
   if (recovered > 0) {
     console.log(`[startup] Requeued ${recovered} interrupted job(s)`);
   }
 
   for (const pack of listPacks()) {
+    // A failed MEGA handoff still owns its journal. Ordinary recovery must not
+    // reinterpret it as a missing archive or an interrupted browser upload.
+    if (pendingMegaPackIds.has(pack.id)) continue;
     if (config.isReplica) {
       if (pack.status === 'thumbnailing') ensureRecoveryJob(pack.id, 'thumbnail');
       continue;
@@ -282,12 +285,16 @@ async function main() {
       replicator = new Replicator();
       await replicator.initialize();
     }
+    const pendingMegaPackIds = new Set<string>();
     if (!config.isReplica) {
       recoverArchiveTaskFiles();
-      const { recoverMegaImports } = await import('./services/mega-import.js');
+      const { recoverMegaImports, hasPendingMegaHandoff } = await import('./services/mega-import.js');
       await recoverMegaImports();
+      for (const task of listUploadTasks()) {
+        if (hasPendingMegaHandoff(task)) pendingMegaPackIds.add(task.packId!);
+      }
     }
-    recoverJobs();
+    recoverJobs(pendingMegaPackIds);
     if (!config.isReplica) {
       recoverUploadTasks();
       const { startMegaImport } = await import('./services/mega-import.js');
