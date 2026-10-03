@@ -1,12 +1,14 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronUp, FileArchive, FolderOpen, Plus, Tag, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileArchive, FolderOpen, Tag, Upload } from 'lucide-react';
 import type { UploadTask } from '../../../shared/types';
 import { useUploadTasks } from '../hooks/useUploadTasks';
-import { createTag, fetchTags } from '../api/packs';
+import { fetchTags } from '../api/packs';
 import { formatBytes } from '../lib/utils';
 import { DuplicateCard } from '../components/DuplicateUploadModal';
-import { FormField, TextInput, PasswordInput, inputClass } from '../components/Form';
+import { TextInput, PasswordInput } from '../components/Form';
+import TagSelector from '../components/TagSelector';
 import ImportSources from '../components/ImportSources';
 import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
@@ -29,51 +31,30 @@ const taskFeedbackStyles = {
 const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
   : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
 
-function InlineTags() {
-  const { draft, setDraft } = useUploadTasks();
-  const [open, setOpen] = useState(false);
+function UploadTags() {
+  const { draft, setDraft, starting } = useUploadTasks();
+  const [selector, setSelector] = useState<null | 'open' | 'closing'>(null);
   const [tags, setTags] = useState<Array<{ id: string; name: string }>>([]);
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
   const selectedKey = draft.tagIds.join(',');
   useEffect(() => {
-    if (!open && !selectedKey) return;
+    if (!selectedKey) return;
     let active = true;
-    void fetchTags().then(tags => { if (active) setTags(tags); }).catch(error => { if (active) setError(String(error)); });
+    setError('');
+    void fetchTags().then(tags => { if (active) setTags(tags); }).catch(() => { if (active) setError('标签名称暂时无法加载'); });
     return () => { active = false; };
-  }, [open, selectedKey]);
-  const add = async () => {
-    if (!name.trim() || busy) return;
-    setBusy(true);
-    try {
-      const tag = await createTag(name.trim());
-      setTags(previous => [...previous, tag]);
-      setDraft({ tagIds: [...draft.tagIds, tag.id] });
-      setName('');
-      setError('');
-    } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
-    finally { setBusy(false); }
-  };
-  return <div>
-    <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={draft.tagIds.length ? `选择标签，已选择 ${draft.tagIds.length} 个` : '选择标签'}
-      className="flex w-full items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-400">
+  }, [selectedKey]);
+  return <div className="mt-3">
+    <button type="button" onClick={() => setSelector('open')} disabled={starting} aria-expanded={selector === 'open'} aria-label={draft.tagIds.length ? `选择标签，已选择 ${draft.tagIds.length} 个` : '选择标签'}
+      className="flex w-full items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-400 transition-colors hover:bg-gray-700 disabled:opacity-50">
       <Tag size={16} className="shrink-0" /> <span className="flex min-w-0 flex-1 flex-wrap gap-1 text-left">{draft.tagIds.length
         ? draft.tagIds.map(id => <span key={id} className="max-w-full truncate rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300">{tags.find(tag => tag.id === id)?.name ?? '…'}</span>)
         : '选择标签'}</span><ChevronDown size={14} className="shrink-0" />
     </button>
-    {open && <div className="mt-2 space-y-3 rounded-xl border border-gray-800 p-3">
-      <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
-        {tags.map(tag => <button key={tag.id} type="button" aria-pressed={draft.tagIds.includes(tag.id)}
-          onClick={() => setDraft({ tagIds: draft.tagIds.includes(tag.id) ? draft.tagIds.filter(id => id !== tag.id) : [...draft.tagIds, tag.id] })}
-          className={`rounded-lg px-3 py-1.5 text-sm ${draft.tagIds.includes(tag.id) ? 'bg-blue-600/25 text-blue-300 ring-1 ring-blue-500/50' : 'bg-gray-800 text-gray-400'}`}>{tag.name}</button>)}
-        {tags.length === 0 && <p className="text-xs text-gray-500">暂无标签，可以在下方创建。</p>}
-      </div>
-      <div className="flex gap-2"><input value={name} onChange={event => setName(event.target.value)} placeholder="新建标签" aria-label="新建标签" className={inputClass}
-        onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void add(); } }} />
-        <IconButton onClick={() => { void add(); }} disabled={!name.trim() || busy} label="创建标签" icon={<Plus size={16} />} /></div>
-      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
-    </div>}
+    {error && <p role="status" className="mt-2 text-xs text-amber-400">{error}</p>}
+    {selector && createPortal(<TagSelector visible={selector === 'open'} selectedIds={draft.tagIds}
+      onConfirm={tagIds => { setDraft({ tagIds }); setSelector('closing'); }}
+      onClose={() => setSelector('closing')} onClosed={() => setSelector(null)} />, document.body)}
   </div>;
 }
 
@@ -165,19 +146,21 @@ function UploadForm() {
       </div>
       <ImportSources compact availableSources={['pixiv', 'mega']} onSelect={source => { setSettings(false); resetDraft(); setDraft({ source }); }} />
     </> : <form id={formId} onSubmit={event => { event.preventDefault(); if (canStart && !starting && !scanning) void start(); }} className="flex flex-col gap-3">
-      {remote && <FormField label={draft.source === 'pixiv' ? '作品网址' : '分享链接'} hint={metadataLoading ? <span className="text-xs text-gray-500">识别中…</span> : undefined}>
+      {remote && <div className="relative">
         <TextInput type="url" required value={draft.url} onChange={event => setDraft({ url: event.target.value })} disabled={starting}
-          placeholder={draft.source === 'pixiv' ? 'https://www.pixiv.net/artworks/…' : 'https://mega.nz/file/… 或 /folder/…'} />
-      </FormField>}
+          aria-label={draft.source === 'pixiv' ? '作品网址' : '分享链接'} aria-busy={metadataLoading} className={metadataLoading ? 'pr-20' : ''}
+          placeholder={draft.source === 'pixiv' ? '作品网址（Pixiv）' : '分享链接（MEGA 文件或文件夹）'} />
+        {metadataLoading && <span role="status" className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-500">识别中…</span>}
+      </div>}
       {metadataError && <div className="text-xs text-amber-400" role="status">{metadataError}
         {draft.source === 'pixiv' && <Button variant="ghost" onClick={() => setSettings(!settings)}>配置登录</Button>}</div>}
-      <FormField label="图包名称"><TextInput value={draft.name} onChange={event => setDraft({ name: event.target.value })}
-        placeholder={remote ? '自动使用分享标题' : '图包名称'} maxLength={200} disabled={starting} /></FormField>
+      <TextInput value={draft.name} onChange={event => setDraft({ name: event.target.value })} aria-label="图包名称"
+        placeholder={remote ? '图包名称（自动使用分享标题）' : '图包名称'} maxLength={200} disabled={starting} />
       {!remote && <p className="text-xs text-gray-500">{draft.source === 'folder' ? `${draft.files.length} 个文件` : draft.files[0]?.name} · {formatBytes(draft.files.reduce((sum, file) => sum + file.size, 0))}</p>}
       {draft.source === 'mega' && <PasswordInput value={draft.sharePassword} onChange={sharePassword => setDraft({ sharePassword })} placeholder="分享密码 / 解密密钥" disabled={starting} />}
       {(draft.source === 'archive' || draft.source === 'mega') && <PasswordInput value={draft.archivePassword} onChange={archivePassword => setDraft({ archivePassword })} placeholder="压缩包密码" disabled={starting} />}
-      <InlineTags />
     </form>}
+    {draft.source && <UploadTags />}
     {settings && draft.source === 'pixiv' && <div className="mt-3 rounded-xl border border-gray-800"><PixivSettings onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} /></div>}
     {error && <p role="alert" className="mt-3 text-sm text-red-400">{error}</p>}
     {draft.source && <ActionRow className="mt-3"><Button variant="secondary" onClick={() => { setSettings(false); setError(''); resetDraft(); }} disabled={starting}>取消上传</Button>
