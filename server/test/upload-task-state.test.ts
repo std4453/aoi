@@ -4,12 +4,12 @@ import { retainPendingTasks, selectionAfterRemoval } from '../../client/src/lib/
 
 const tasks = ['first', 'middle', 'last'].map(id => ({ id }));
 
-test('task removal selects the next remaining task without reopening the upload form', () => {
-  assert.equal(selectionAfterRemoval(tasks, 'middle', 'middle', new Set(['middle'])), 'last');
-  assert.equal(selectionAfterRemoval(tasks, 'last', 'last', new Set(['last'])), null);
-  assert.equal(selectionAfterRemoval(tasks, 'first', 'first', new Set(['first', 'middle'])), 'last');
-  assert.equal(selectionAfterRemoval(tasks, null, 'middle', new Set()), null);
-  assert.equal(selectionAfterRemoval(tasks, 'first', 'middle', new Set()), 'first');
+test('task removal clears only the removed selection without expanding another task', () => {
+  assert.equal(selectionAfterRemoval('middle', 'middle'), null);
+  assert.equal(selectionAfterRemoval('last', 'last'), null);
+  assert.equal(selectionAfterRemoval('first', 'first'), null);
+  assert.equal(selectionAfterRemoval(null, 'middle'), null);
+  assert.equal(selectionAfterRemoval('first', 'middle'), 'first');
 });
 
 test('polling retains deleting cards in place before and during their exit', () => {

@@ -474,8 +474,7 @@ async function dismiss(id: string) {
     const files = { ...snapshot.files };
     delete files[id];
     publish({ tasks: snapshot.tasks.filter(task => task.id !== id), files,
-      expandedId: selectionAfterRemoval(snapshot.tasks, snapshot.expandedId, id, snapshot.exitingIds),
-      revealRevision: snapshot.revealRevision + (snapshot.expandedId === id ? 1 : 0),
+      expandedId: selectionAfterRemoval(snapshot.expandedId, id),
       exitingIds: new Set([...snapshot.exitingIds].filter(item => item !== id)),
     });
   }, TASK_EXIT_MS);

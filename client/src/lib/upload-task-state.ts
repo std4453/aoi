@@ -12,8 +12,6 @@ export function retainPendingTasks<T extends { id: string }>(fetched: T[], previ
   return tasks;
 }
 
-export function selectionAfterRemoval(tasks: { id: string }[], selected: string | null, removed: string, exiting: Set<string>): string | null {
-  if (selected !== removed) return selected;
-  const index = tasks.findIndex(task => task.id === removed);
-  return index < 0 ? null : tasks.slice(index + 1).find(task => !exiting.has(task.id))?.id ?? null;
+export function selectionAfterRemoval(selected: string | null, removed: string): string | null {
+  return selected === removed ? null : selected;
 }
