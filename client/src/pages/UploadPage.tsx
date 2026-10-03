@@ -12,7 +12,7 @@ import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../components/TaskSummary';
 import { taskErrorMessage } from '../lib/upload-task-display';
-import { getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta } from '../lib/upload-page-state';
+import { getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../lib/upload-page-state';
 
 const labels: Record<UploadTask['status'], string> = {
   uploading: '上传中', downloading: '下载中', paused: '已暂停', needs_file: '等待原文件',
@@ -145,7 +145,7 @@ function UploadForm() {
       onChange={event => { select(Array.from(event.target.files || []), false); event.target.value = ''; }} />
     <input ref={folderInput} type="file" {...{ webkitdirectory: '', directory: '' }} className="hidden"
       onChange={event => { select(Array.from(event.target.files || []), true); event.target.value = ''; }} />
-    <div className={`upload-card-heading upload-form-heading ${draft.source ? '' : 'upload-empty-heading'}`} data-expanded="true">
+    <div className="upload-card-heading upload-form-heading" data-expanded="true">
       {draft.source ? <TaskSourceTitle source={draft.source} name={title} expanded />
         : <span className="flex items-center justify-center gap-2 text-sm text-gray-400"><Upload size={20} aria-hidden="true" />上传图包</span>}
     </div>
@@ -278,6 +278,7 @@ export default function UploadPage() {
   const stickyHeader = useRef<HTMLDivElement>(null);
   const stickyButton = useRef<HTMLButtonElement>(null);
   const taskListTitle = useRef<HTMLParagraphElement>(null);
+  const taskList = useRef<HTMLDivElement>(null);
   const [showSticky, setShowSticky] = useState(false);
   const [enteringIds, setEnteringIds] = useState(new Set<string>());
   const seenTasks = useRef(new Set(tasks.map(task => task.id)));
@@ -321,29 +322,41 @@ export default function UploadPage() {
     if (task) { expand(task.id); setSearchParams({}, { replace: true }); }
   }, [requestedTask, requestedFolder, tasks, expand, setSearchParams]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!expandedId || revealRevision === getHandledRevealRevision()) return;
-    const timer = setTimeout(() => {
-      const card = document.getElementById(`upload-card-${expandedId}`);
-      if (!card) return;
-      setHandledRevealRevision(revealRevision);
-      const rect = card.getBoundingClientRect();
-      const viewport = window.visualViewport;
-      const viewportTop = viewport?.offsetTop ?? 0;
-      const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
-      const navigationTop = document.querySelector('nav')?.getBoundingClientRect().top ?? viewportBottom;
-      const visibleBottom = Math.min(viewportBottom, navigationTop) - 8;
-      const listTop = taskListTitle.current?.getBoundingClientRect().top ?? formContainer.current?.getBoundingClientRect().bottom ?? 0;
-      const buttonBottom = (stickyButton.current?.offsetTop ?? 0) + (stickyButton.current?.offsetHeight ?? 0);
-      const headerHeight = stickyHeader.current?.offsetHeight ?? 0;
-      let visibleTop = viewportTop + (listTop < buttonBottom ? headerHeight : 0) + 8;
-      let delta = taskRevealDelta(rect.top, rect.bottom, visibleTop, visibleBottom);
-      // Scrolling down may reveal the floating header. Include that new obstruction.
-      visibleTop = viewportTop + (listTop - delta < buttonBottom ? headerHeight : 0) + 8;
-      delta = taskRevealDelta(rect.top, rect.bottom, visibleTop, visibleBottom);
-      if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
-    }, 260);
-    return () => clearTimeout(timer);
+    const list = taskList.current;
+    const card = document.getElementById(`upload-card-${expandedId}`);
+    if (!list || !card) return;
+    setHandledRevealRevision(revealRevision);
+    // Measure mounted content at its natural height, including the space lost
+    // as preceding cards collapse. This gives the final bounds before paint.
+    let top = list.getBoundingClientRect().top;
+    let bottom = top;
+    for (const frame of Array.from(list.children)) {
+      const details = frame.querySelector<HTMLElement>('.upload-task-details')!;
+      const article = frame.querySelector('article')!;
+      const content = details.firstElementChild?.firstElementChild as HTMLElement;
+      const spacing = parseFloat(getComputedStyle(article.parentElement!).paddingBottom);
+      const height = frame.classList.contains('is-exiting') ? 0
+        : article.getBoundingClientRect().height - details.getBoundingClientRect().height + spacing
+          + (details.dataset.open === 'true' ? content.getBoundingClientRect().height : 0);
+      if (frame === card) { bottom = top + height; break; }
+      top += height;
+    }
+    const viewport = window.visualViewport;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+    const navigationTop = document.querySelector('nav')?.getBoundingClientRect().top ?? viewportBottom;
+    const visibleBottom = Math.min(viewportBottom, navigationTop) - 8;
+    const listTop = taskListTitle.current?.getBoundingClientRect().top ?? formContainer.current?.getBoundingClientRect().bottom ?? 0;
+    const buttonBottom = (stickyButton.current?.offsetTop ?? 0) + (stickyButton.current?.offsetHeight ?? 0);
+    const headerHeight = stickyHeader.current?.offsetHeight ?? 0;
+    let visibleTop = viewportTop + (listTop < buttonBottom ? headerHeight : 0) + 8;
+    let delta = taskRevealDelta(top, bottom, visibleTop, visibleBottom);
+    // Scrolling down may reveal the floating header. Include that new obstruction.
+    visibleTop = viewportTop + (listTop - delta < buttonBottom ? headerHeight : 0) + 8;
+    delta = taskRevealDelta(top, bottom, visibleTop, visibleBottom);
+    return scrollWithTaskExpansion(window.scrollY + delta);
   }, [expandedId, revealRevision]);
 
   return <div className="upload-panel mx-auto max-w-lg pb-4">
@@ -361,7 +374,7 @@ export default function UploadPage() {
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-800/50 bg-red-900/20 p-3 text-sm text-red-300">{error}<Button variant="ghost" onClick={() => { void refresh(); }}>重试</Button></div>}
     {loading && <p role="status" className="py-4 text-center text-sm text-gray-500">正在读取上传任务…</p>}
     {tasks.length > 0 && <p ref={taskListTitle} className="mb-3 text-xs text-gray-500">任务列表</p>}
-    <div aria-label="上传任务列表">{tasks.map(task => <div id={`upload-card-${task.id}`} key={task.id} inert={exitingIds.has(task.id)}
+    <div ref={taskList} aria-label="上传任务列表">{tasks.map(task => <div id={`upload-card-${task.id}`} key={task.id} inert={exitingIds.has(task.id)}
       onAnimationEnd={event => {
         if (event.target === event.currentTarget) setEnteringIds(previous => new Set([...previous].filter(id => id !== task.id)));
       }}

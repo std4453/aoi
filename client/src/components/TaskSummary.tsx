@@ -25,7 +25,7 @@ export function TaskSummaryContent({ task, message, layout = 'card', expanded = 
     && (task.status === 'processing' ? task.progress > 0 : task.totalBytes > 0);
   const label = task.status === 'failed' ? taskFailureLabel(task) : message ?? state.label;
   return <span className={`w-full min-w-0 items-center text-xs font-normal ${layout === 'toast' ? 'flex gap-2' : 'grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3'}`}>
-    <TaskSourceTitle source={task.source} name={task.name} expanded={expanded} />
+    <TaskSourceTitle source={task.source} name={task.name} />
     <span className={`flex min-w-0 items-center gap-1.5 ${state.color} ${layout === 'toast' ? 'max-w-[60%] shrink-0' : ''}`}>
       {!hasProgress && <StatusIcon size={14} aria-hidden="true" className={`shrink-0 ${task.status === 'processing' ? 'animate-spin' : ''}`} />}
       {hasProgress ? <span role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} className="h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
