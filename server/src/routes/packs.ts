@@ -41,6 +41,7 @@ import { buildJpegOutputPaths } from '../services/jpeg-output-path.js';
 import { folderProcessor } from '../services/folder-processor.js';
 import { isUgoira, readUgoiraFrame, readUgoiraManifest } from '../services/ugoira.js';
 import { safeContentFile } from '../replication/protocol.js';
+import { getUploadTask, updateUploadTask, updateUploadTaskMetadata, listUploadTasks, deleteUploadTask } from '../services/upload-tasks.js';
 
 const MAX_NAME_LENGTH = 200;
 const MAX_FILENAME_LENGTH = 255;
@@ -152,6 +153,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       }
       removePackFiles(pack.id);
       deletePackFromDb(pack.id);
+      for (const task of listUploadTasks()) if (task.packId === pack.id) deleteUploadTask(task.id);
       return { ok: true };
     });
   });
@@ -357,9 +359,20 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       archivePassword,
       tagIds,
       allowDuplicate,
+      taskId,
     } = request.body ?? {};
 
-    return withUploadLock(uploadId, async () => {
+    return withUploadLock(taskId ? `upload-task-${taskId}` : uploadId, async () => {
+      if (taskId) {
+        const task = getUploadTask(taskId);
+        if (!task) return reply.code(404).send({ error: 'Upload task not found' });
+        if (task.source !== 'archive') return reply.code(400).send({ error: 'Task is not an archive upload' });
+        if (task.packId) {
+          const existingPack = getPack(task.packId);
+          if (existingPack) return toPublicPack(existingPack);
+          return reply.code(409).send({ error: 'Task pack was deleted' });
+        }
+      }
       let safeFilename: string;
       let packNameToUse: string;
       let safeTagIds: string[];
@@ -404,6 +417,11 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
         reply.code(400).send({ error: 'Uploaded file size is invalid' });
         return;
       }
+      if (taskId) {
+        const task = getUploadTask(taskId)!;
+        if (task.totalBytes && actualSize !== task.totalBytes) return reply.code(400).send({ error: 'Upload is incomplete' });
+        updateUploadTask(taskId, { uploadId, transferredBytes: actualSize, progress: 100 });
+      }
 
       const ext = path.extname(safeFilename).toLowerCase().replace('.', '');
       if (!['zip', 'rar', '7z'].includes(ext)) {
@@ -416,21 +434,25 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
         await backfillArchiveHashes(actualSize);
         const matches = findArchiveDuplicates(archiveMd5);
         if (matches.length > 0 && !allowDuplicate) {
+          if (taskId) updateUploadTask(taskId, { status: 'duplicate', matches, progress: 100 });
           return reply.code(409).send({ code: 'DUPLICATE_ARCHIVE', matches });
         }
-        const pack = createPack({
-          name: packNameToUse,
-          originalFilename: safeFilename,
-          originalSize: actualSize,
-          originalFormat: ext,
-          archivePassword,
-          archiveMd5,
-        });
-
-        // Set tags if provided
-        if (safeTagIds.length > 0) {
-          setPackTagsInDb(pack.id, safeTagIds);
-        }
+        const pack = getDb().transaction(() => {
+          const created = createPack({
+            name: packNameToUse,
+            originalFilename: safeFilename,
+            originalSize: actualSize,
+            originalFormat: ext,
+            archivePassword,
+            archiveMd5,
+          });
+          if (taskId) {
+            updateUploadTask(taskId, { packId: created.id, status: 'processing', error: null, matches: [] });
+            updateUploadTaskMetadata(taskId, { archivePassword });
+          }
+          if (safeTagIds.length > 0) setPackTagsInDb(created.id, safeTagIds);
+          return created;
+        })();
 
         // Move uploaded file to archives directory
         const archiveDir = path.join(config.dirs.archives, pack.id);
@@ -461,9 +483,16 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       packName: string;
       files: { relativePath: string; fileSize: number }[];
       tagIds?: string[];
+      taskId?: string;
     };
   }>('/api/packs/folder-create', async (request, reply) => {
-    const { packName, files, tagIds } = request.body ?? {};
+    const { packName, files, tagIds, taskId } = request.body ?? {};
+    if (taskId) {
+      const task = getUploadTask(taskId);
+      if (!task) return reply.code(404).send({ error: 'Upload task not found' });
+      if (task.source !== 'folder') return reply.code(400).send({ error: 'Task is not a folder upload' });
+      if (task.packId) return { id: task.packId, packFiles: getPackFiles(task.packId) };
+    }
 
     if (!Array.isArray(files) || files.length === 0) {
       reply.code(400).send({ error: 'Files list cannot be empty' });
@@ -504,19 +533,19 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     }
 
     try {
-      const pack = createPack({
-        name: safePackName,
-        originalFilename: safePackName,
-        originalSize: normalizedFiles.reduce((sum, file) => sum + file.fileSize, 0),
-        originalFormat: 'folder',
-        sourceType: 'folder',
-      });
-
-      createPackFiles(pack.id, normalizedFiles);
-
-      if (safeTagIds.length > 0) {
-        setPackTagsInDb(pack.id, safeTagIds);
-      }
+      const pack = getDb().transaction(() => {
+        const created = createPack({
+          name: safePackName,
+          originalFilename: safePackName,
+          originalSize: normalizedFiles.reduce((sum, file) => sum + file.fileSize, 0),
+          originalFormat: 'folder',
+          sourceType: 'folder',
+        });
+        createPackFiles(created.id, normalizedFiles);
+        if (taskId) updateUploadTask(taskId, { packId: created.id });
+        if (safeTagIds.length > 0) setPackTagsInDb(created.id, safeTagIds);
+        return created;
+      })();
 
       // Create staging directory
       const stagingDir = getFolderStagingDir(pack.id);
@@ -627,7 +656,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
         jobQueue.start();
         pack = getPack(id)!;
       }
-      return { pack: toPublicPack(pack), matches };
+      return { pack: toPublicPack(pack), matches, packFiles: getPackFiles(id) };
     });
   });
 

@@ -88,6 +88,7 @@ export function createFolderPack(data: {
   packName: string;
   files: { relativePath: string; fileSize: number }[];
   tagIds?: string[];
+  taskId?: string;
 }): Promise<{ id: string; packFiles: PackFile[] }> {
   return post<{ id: string; packFiles: PackFile[] }>('/packs/folder-create', data);
 }
@@ -97,6 +98,10 @@ export function confirmFolderFileComplete(packId: string, data: {
   uploadId: string;
 }): Promise<{ allComplete: boolean }> {
   return post<{ allComplete: boolean }>(`/packs/${packId}/folder-file-complete`, data);
+}
+
+export function fetchFolderUploadStatus(packId: string): Promise<{ packFiles: PackFile[] }> {
+  return get<{ packFiles: PackFile[] }>(`/packs/${packId}/folder-upload-status`);
 }
 
 export function cancelFolderUpload(packId: string): Promise<{ ok: boolean }> {

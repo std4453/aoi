@@ -155,7 +155,7 @@ export default function ImageViewer({ images, initialIndex, onClose, onIndexChan
   }, []);
 
   return (
-    <div className="fixed top-0 left-0 right-0 pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] h-dvh z-50 bg-black select-none box-content">
+    <div data-image-viewer className="fixed top-0 left-0 right-0 pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] h-dvh z-50 bg-black select-none box-content">
       <div
         className="absolute inset-0 touch-none"
         onPointerDown={handlePointerDown}

@@ -12,6 +12,7 @@ services:
       FRONTEND_ONLY: ${FRONTEND_ONLY:-false}
       SERVER_SELECTION_ENABLED: ${SERVER_SELECTION_ENABLED:-false}
       AUTH_KEY: ${AUTH_KEY:-}
+      AOI_PROXY_URL: ${AOI_PROXY_URL:-}
       # Uncomment together with the certificate volume for built-in HTTPS.
       # TLS_CERT_FILE: /app/certs/fullchain.pem
       # TLS_KEY_FILE: /app/certs/privkey.pem

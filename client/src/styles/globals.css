@@ -1,7 +1,80 @@
 @import "tailwindcss";
 
+/* Keep draft and task content mounted while their cards fold. */
+.upload-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  transition: padding 240ms ease;
+}
+.upload-card-heading[data-expanded="true"] {
+  padding: 0.625rem 1rem;
+}
+.upload-source-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.5rem;
+  color: var(--color-gray-200);
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  transition: font-size 240ms ease, color 240ms ease;
+}
+.upload-source-title[data-expanded="true"] {
+  font-size: 0.875rem;
+  color: white;
+}
+.upload-source-icon {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-gray-400);
+  transition: width 240ms ease, height 240ms ease;
+}
+.upload-source-title[data-expanded="true"] .upload-source-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.upload-panel { overflow-anchor: none; }
+.upload-task-details {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 240ms ease, opacity 180ms ease, visibility 0s 240ms;
+}
+.upload-task-details[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition: grid-template-rows 240ms ease, opacity 180ms ease, visibility 0s;
+}
+.upload-task-frame {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  animation: upload-task-enter 240ms ease both;
+  transition: grid-template-rows 240ms ease, opacity 180ms ease, transform 240ms ease;
+  scroll-margin: 1rem;
+}
+.upload-task-frame.is-exiting {
+  animation: none;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+@keyframes upload-task-enter {
+  from { grid-template-rows: 0fr; opacity: 0; transform: translateY(-8px); }
+  to { grid-template-rows: 1fr; opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .upload-task-details, .upload-task-frame, .upload-card-heading, .upload-source-title, .upload-source-icon { transition-duration: 0.01ms; animation-duration: 0.01ms; }
+}
+
 @theme {
-  --root-font-size: 18px;
+  --root-font-size: 16px;
 }
 
 html {

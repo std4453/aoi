@@ -1,0 +1,169 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { CreateUploadTaskRequest, UploadTask } from '../../../shared/types.js';
+import { getDb } from '../db/connection.js';
+import { createPack, createJob, getJob, setPackTags, getPack, getPackFiles, listPacks, getLatestJob, hasAnyActiveJob, updatePackStatus } from '../db/repositories.js';
+import { createUploadTask, getUploadTask, listUploadTasks, updateUploadTask, getUploadTaskMetadata, updateUploadTaskMetadata } from '../db/upload-task-repository.js';
+import { getLiveMatches, getVerification, scheduleVerification } from './content-verification.js';
+import { jobQueue } from './job-queue.js';
+import { getArchivePath, getUploadPath, ensureDir } from './storage.js';
+import { parsePixivUrl } from './pixiv-importer.js';
+
+export * from '../db/upload-task-repository.js';
+
+/** Persist the task, pack and queued download together before starting network work. */
+export function createPixivUploadTask(input: CreateUploadTaskRequest): UploadTask {
+  const artwork = parsePixivUrl(input.url!);
+  const task = getDb().transaction(() => {
+    const created = createUploadTask({ ...input, source: 'pixiv', url: artwork.url });
+    const pack = createPack({ name: input.name, originalFilename: artwork.url,
+      originalSize: 0, originalFormat: 'pixiv', sourceType: 'folder' });
+    setPackTags(pack.id, input.tagIds ?? []);
+    const job = createJob(pack.id, 'pixiv');
+    getDb().prepare('UPDATE jobs SET options = ? WHERE id = ?')
+      .run(JSON.stringify({ autoName: input.autoName ?? false, autoTags: input.tagIds === undefined }), job.id);
+    return updateUploadTask(created.id, { packId: pack.id })!;
+  })();
+  jobQueue.start();
+  return task;
+}
+
+export function syncUploadTask(task: UploadTask): UploadTask {
+  if (!task.packId && task.status === 'duplicate') {
+    const matches = task.matches.flatMap(match => {
+      const pack = getPack(match.id);
+      return pack ? [{ id: pack.id, name: pack.name, status: pack.status }] : [];
+    });
+    return JSON.stringify(matches) === JSON.stringify(task.matches) ? task : updateUploadTask(task.id, { matches })!;
+  }
+  if (!task.packId || task.status === 'completed') return task;
+  const pack = getPack(task.packId);
+  let patch: Partial<UploadTask>;
+  if (!pack) {
+    patch = { status: 'failed', error: '图包已被删除' };
+  } else if (['extracted', 'generated', 'generating'].includes(pack.status)) {
+    patch = { status: 'completed', progress: 100, transferredBytes: task.totalBytes, error: null, matches: [] };
+  } else if (pack.status === 'awaiting_confirmation') {
+    patch = { status: 'duplicate', matches: getLiveMatches(pack.id), transferredBytes: task.totalBytes, error: null };
+  } else if (pack.status === 'failed') {
+    const password = /需要密码|密码错误|(?:incorrect|wrong|required|missing) password|password (?:is )?required|encrypted/i.test(pack.errorMessage ?? '');
+    const interrupted = pack.sourceType === 'folder' && /上传中断/.test(pack.errorMessage ?? '');
+    patch = { status: interrupted ? 'needs_file' : password ? 'password' : 'failed',
+      error: pack.errorMessage, ...(password ? { passwordKind: 'archive' as const } : {}) };
+  } else if (pack.status === 'uploading' && task.source === 'pixiv') {
+    const job = getLatestJob(pack.id, 'pixiv');
+    const progress = job ? jobQueue.getProgress(job.id) : null;
+    patch = { status: 'downloading', progress: progress?.percentage ?? job?.progress ?? 0,
+      transferredBytes: progress?.totalOriginalSize ?? 0, error: null, matches: [] };
+  } else if (pack.status === 'uploading' && pack.sourceType === 'folder') {
+    return task;
+  } else {
+    const type = pack.status === 'thumbnailing' ? 'thumbnail' : pack.status === 'verifying' ? 'verify' : 'extract';
+    const job = getLatestJob(pack.id, type);
+    patch = { status: 'processing', progress: job ? jobQueue.getProgress(job.id)?.percentage ?? job.progress : 0,
+      transferredBytes: task.totalBytes, error: null, matches: [] };
+  }
+  if (pack && task.source === 'pixiv') Object.assign(patch, { name: pack.name, totalBytes: pack.originalSize,
+    ...(['completed', 'processing', 'duplicate'].includes(patch.status ?? '') ? { transferredBytes: pack.originalSize } : {}) });
+  if (Object.entries(patch).every(([key, value]) => JSON.stringify(task[key as keyof UploadTask]) === JSON.stringify(value))) return task;
+  const updated = updateUploadTask(task.id, patch)!;
+  if (updated.status === 'completed') updateUploadTaskMetadata(task.id, { archivePassword: undefined, sharePassword: undefined });
+  return updated;
+}
+
+export function getSyncedUploadTask(id: string): UploadTask | undefined {
+  const task = getUploadTask(id);
+  return task ? syncUploadTask(task) : undefined;
+}
+
+export function listSyncedUploadTasks(): UploadTask[] {
+  return listUploadTasks().map(syncUploadTask);
+}
+
+export function recoverUploadTasks(): void {
+  const tracked = new Set(listUploadTasks().map(task => task.packId));
+  for (const pack of listPacks().reverse()) {
+    if (pack.sourceType !== 'folder' || tracked.has(pack.id)) continue;
+    const verification = getVerification(pack.id);
+    const pending = (pack.originalFormat === 'pixiv' && ['uploading', 'verifying', 'thumbnailing', 'failed'].includes(pack.status)) || ['uploading', 'awaiting_confirmation'].includes(pack.status) ||
+      (pack.status === 'failed' && /上传中断/.test(pack.errorMessage ?? '')) ||
+      (verification?.historical === 0 && (['verifying', 'thumbnailing'].includes(pack.status) ||
+        (pack.status === 'failed' && verification.status === 'failed')));
+    if (!pending) continue;
+    const task = createUploadTask({ source: pack.originalFormat === 'pixiv' ? 'pixiv' : 'folder', name: pack.name, filename: pack.originalFilename,
+      fileSize: pack.originalSize, tagIds: pack.tags.map(tag => tag.id),
+      ...(pack.originalFormat === 'pixiv' ? { url: pack.originalFilename } : {}) });
+    const transferredBytes = getPackFiles(pack.id).filter(file => file.status === 'uploaded').reduce((sum, file) => sum + file.fileSize, 0);
+    updateUploadTask(task.id, { packId: pack.id, transferredBytes, progress: pack.originalSize ? transferredBytes / pack.originalSize * 100 : 0 });
+  }
+  for (const task of listUploadTasks()) {
+    if (['archive', 'folder'].includes(task.source) && ['uploading', 'paused'].includes(task.status)) {
+      updateUploadTask(task.id, { status: 'needs_file', error: '请重新选择原文件以继续上传' });
+    }
+    syncUploadTask(getUploadTask(task.id)!);
+  }
+}
+
+/** Recover a crash after durable task/pack binding and before the archive rename. */
+export function recoverArchiveTaskFiles(): void {
+  for (const task of listUploadTasks()) {
+    if (task.source !== 'archive' || !task.packId || !task.uploadId) continue;
+    const pack = getPack(task.packId);
+    if (!pack || pack.sourceType !== 'archive' || pack.status !== 'uploading') continue;
+    try {
+      const destination = getArchivePath(pack.id, `original.${pack.originalFormat}`);
+      if (fs.existsSync(destination)) continue;
+      const source = getUploadPath(task.uploadId);
+      if (!fs.existsSync(source)) continue;
+      const stat = fs.statSync(source);
+      if (!stat.isFile() || stat.size !== pack.originalSize) continue;
+      ensureDir(path.dirname(destination));
+      fs.renameSync(source, destination);
+      for (const suffix of ['.info', '.json']) fs.rmSync(source + suffix, { force: true });
+    } catch (error) {
+      updatePackStatus(pack.id, 'failed', `无法恢复压缩包上传：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+export async function retryPackTask(task: UploadTask, archivePassword?: string): Promise<void> {
+  if (!task.packId) return;
+  const pack = getPack(task.packId);
+  if (!pack) throw new Error('Pack not found');
+  if (hasAnyActiveJob(pack.id)) throw new Error('图包正在处理');
+  if (pack.sourceType === 'folder' && task.status === 'needs_file') {
+    updatePackStatus(pack.id, 'uploading');
+    updateUploadTask(task.id, { status: 'uploading', error: null });
+    return;
+  }
+  if (pack.status !== 'failed') throw new Error('仅失败任务可以重试');
+  if (task.source === 'pixiv') {
+    const row = getDb().prepare("SELECT id FROM jobs WHERE pack_id = ? AND type != 'compress' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(pack.id) as { id: string } | undefined;
+    const latest = row ? getJob(row.id) : undefined;
+    if (!latest || !['pixiv', 'verify', 'thumbnail'].includes(latest.type)) throw new Error('无法重试此导入任务');
+    getDb().transaction(() => {
+      if (latest.type === 'verify') scheduleVerification(pack.id);
+      else {
+        updatePackStatus(pack.id, latest.type === 'pixiv' ? 'uploading' : 'thumbnailing');
+        const next = createJob(pack.id, latest.type);
+        if (latest.options) getDb().prepare('UPDATE jobs SET options = ? WHERE id = ?').run(latest.options, next.id);
+      }
+      updateUploadTask(task.id, { status: latest.type === 'pixiv' ? 'downloading' : 'processing', error: null, progress: 0 });
+    })();
+    jobQueue.start();
+    return;
+  } else if (getVerification(pack.id)?.status === 'failed') {
+    scheduleVerification(pack.id);
+    jobQueue.start();
+  } else if (pack.sourceType === 'archive') {
+    if (!fs.existsSync(getArchivePath(pack.id, `original.${pack.originalFormat}`))) throw new Error('原始压缩包缺失');
+    getDb().prepare('UPDATE packs SET archive_password = ? WHERE id = ?')
+      .run(archivePassword ?? getUploadTaskMetadata(task.id).archivePassword ?? null, pack.id);
+    updatePackStatus(pack.id, 'extracting');
+    await jobQueue.enqueueUnique(pack.id, 'extract');
+  } else {
+    updatePackStatus(pack.id, 'thumbnailing');
+    await jobQueue.enqueueUnique(pack.id, 'thumbnail');
+  }
+  updateUploadTask(task.id, { status: 'processing', error: null, passwordKind: undefined });
+}

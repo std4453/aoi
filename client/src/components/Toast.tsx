@@ -1,22 +1,35 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AlertCircle, CheckCircle, Info, AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertCircle, CheckCircle, Info, AlertTriangle, Loader2, Check, ChevronRight } from 'lucide-react';
+import type { UploadTask } from '../../../shared/types';
+import { IconButton } from './Button';
+import { TaskSummaryContent } from './TaskSummary';
 
 type ToastType = 'default' | 'info' | 'success' | 'error' | 'warning' | 'loading';
+
+interface ToastOptions {
+  position?: 'top' | 'bottom';
+  duration?: number | null;
+  onClick?: () => void;
+  action?: { label: string; onClick: () => void; ariaLabel?: string; icon?: 'check' | 'arrow' };
+  task?: UploadTask;
+}
 
 interface ToastItem {
   id: number;
   message: string;
   type: ToastType;
   exiting: boolean;
+  options: ToastOptions;
 }
 
 let nextId = 0;
 
-type AddToastListener = (message: string, type?: ToastType) => number;
+type AddToastListener = (message: string, type?: ToastType, options?: ToastOptions) => number;
 type RemoveToastListener = (id: number) => void;
 
 let addListener: AddToastListener | null = null;
 let removeListener: RemoveToastListener | null = null;
+let updateTaskListener: ((id: number, task: UploadTask, options: TaskToastOptions) => void) | null = null;
 
 function addToast(message: string, type: ToastType = 'default'): number {
   return addListener?.(message, type) ?? -1;
@@ -24,6 +37,24 @@ function addToast(message: string, type: ToastType = 'default'): number {
 
 function removeToast(id: number): void {
   removeListener?.(id);
+}
+
+/** Persistent task notification with one action and an independently clickable body. */
+export interface TaskToastHandle {
+  close: () => void;
+  update: (task: UploadTask, options: TaskToastOptions) => void;
+}
+
+type TaskToastOptions = Omit<ToastOptions, 'position' | 'duration' | 'task'> & { message?: string };
+
+function taskToastType(task: UploadTask): ToastType {
+  return task.status === 'completed' ? 'success' : task.status === 'failed' ? 'error' : 'warning';
+}
+
+export function showTaskToast(task: UploadTask, options: TaskToastOptions): TaskToastHandle {
+  const { message = '', ...actions } = options;
+  const id = addListener?.(message, taskToastType(task), { ...actions, task, position: 'bottom', duration: null }) ?? -1;
+  return { close: () => removeToast(id), update: (next, nextOptions) => updateTaskListener?.(id, next, nextOptions) };
 }
 
 /** Show a default (gray) toast. Auto-dismisses after 2.5s. */
@@ -155,11 +186,11 @@ export default function Toast() {
   }, [dismissNow]);
 
   useEffect(() => {
-    addListener = (message: string, type: ToastType = 'default') => {
+    addListener = (message: string, type: ToastType = 'default', options: ToastOptions = {}) => {
       const id = nextId++;
-      setToasts(prev => [...prev, { id, message, type, exiting: false }]);
+      setToasts(prev => [...prev, { id, message, type, exiting: false, options }]);
 
-      const duration = TYPE_CONFIG[type].duration;
+      const duration = options.duration === undefined ? TYPE_CONFIG[type].duration : options.duration;
       if (duration !== null) {
         const timer = setTimeout(() => dismiss(id), duration);
         timerRef.current.set(id, timer);
@@ -184,30 +215,44 @@ export default function Toast() {
       setTimeout(() => dismissNow(id), EXIT_DURATION);
     };
 
+    updateTaskListener = (id, task, options) => {
+      const { message = '', ...actions } = options;
+      setToasts(prev => prev.map(toast => toast.id === id && !toast.exiting
+        ? { ...toast, message, type: taskToastType(task), options: { ...toast.options, ...actions, task } }
+        : toast));
+    };
+
     return () => {
       addListener = null;
       removeListener = null;
+      updateTaskListener = null;
+      timerRef.current.forEach(clearTimeout);
+      timerRef.current.clear();
     };
   }, [dismiss, dismissNow]);
 
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none">
-      {toasts.map(t => {
+    <>{(['top', 'bottom'] as const).map(position => <div key={position} className={`fixed left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none ${position === 'top' ? 'top-[max(1rem,env(safe-area-inset-top))]' : 'bottom-[calc(5rem+env(safe-area-inset-bottom))] [:root:has([data-image-viewer])_&]:bottom-[calc(7rem+env(safe-area-inset-bottom))] max-h-[40dvh] overflow-y-auto max-w-[90vw]'}`} aria-live="polite">
+      {toasts.filter(t => (t.options.position ?? 'top') === position).map(t => {
         const cfg = TYPE_CONFIG[t.type];
         const Icon = cfg.icon;
         return (
           <div
             key={t.id}
-            className={`pointer-events-auto flex items-center gap-2.5 ${cfg.bg} border ${cfg.border} ${cfg.text} text-sm px-4 py-3 rounded-xl shadow-lg ${t.exiting ? 'animate-toast-exit' : 'animate-toast-enter'} w-max max-w-[90vw]`}
-            onClick={() => dismiss(t.id)}
+            className={`pointer-events-auto flex items-center gap-2 ${cfg.bg} border ${cfg.border} ${cfg.text} text-sm rounded-xl shadow-lg backdrop-blur-md ${t.exiting ? 'animate-toast-exit' : 'animate-toast-enter'} ${position === 'bottom' ? 'w-max max-w-[90vw] px-2 py-1' : 'w-max max-w-[90vw] px-4 py-3'}`}
           >
-            <Icon size={16} className={`${cfg.iconClass} shrink-0 ${t.type === 'loading' ? 'animate-spin' : ''}`} />
-            <span className="flex-1">{t.message}</span>
+            {!t.options.task && <Icon size={16} className={`${cfg.iconClass} shrink-0 ${t.type === 'loading' ? 'animate-spin' : ''}`} />}
+            <button type="button" className={`flex-1 min-w-0 text-left ${t.options.task ? 'py-1' : 'break-words'}`} onClick={() => { t.options.onClick?.(); if (t.type !== 'loading') dismiss(t.id); }}>
+              {t.options.task ? <TaskSummaryContent task={t.options.task} message={t.message || undefined} layout="toast" /> : t.message}
+            </button>
+            {t.options.action && <IconButton className="h-7 w-7" label={t.options.action.ariaLabel ?? t.options.action.label}
+              icon={t.options.action.icon === 'check' ? <Check size={16} /> : <ChevronRight size={16} />}
+              onClick={event => { event.stopPropagation(); t.options.action!.onClick(); }} />}
           </div>
         );
       })}
-    </div>
+    </div>)}</>
   );
 }

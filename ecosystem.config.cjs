@@ -22,6 +22,7 @@ module.exports = {
         FRONTEND_ONLY: process.env.FRONTEND_ONLY || 'false',
         SERVER_SELECTION_ENABLED: process.env.SERVER_SELECTION_ENABLED || 'false',
         AUTH_KEY: process.env.AUTH_KEY || '',
+        AOI_PROXY_URL: process.env.AOI_PROXY_URL || '',
         TLS_CERT_FILE: process.env.TLS_CERT_FILE || '',
         TLS_KEY_FILE: process.env.TLS_KEY_FILE || '',
       },

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { parseProxyUrl } from './services/outbound-fetch.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,7 @@ const configSchema = z.object({
   replicationInterval: z.coerce.number().int().min(5).default(300),
   serverSelectionEnabled: flag,
   authKey: z.string().max(4096).default(''),
+  outboundProxyUrl: z.string().optional().transform(parseProxyUrl),
   tlsCertFile: z.string().optional(),
   tlsKeyFile: z.string().optional(),
   port: z.coerce.number().default(3000),
@@ -58,6 +60,7 @@ const parsed = configSchema.parse({
   replicationInterval: process.env.AOI_REPLICATION_INTERVAL,
   serverSelectionEnabled: process.env.SERVER_SELECTION_ENABLED,
   authKey: process.env.AUTH_KEY,
+  outboundProxyUrl: process.env.AOI_PROXY_URL,
   tlsCertFile: process.env.TLS_CERT_FILE,
   tlsKeyFile: process.env.TLS_KEY_FILE,
   port: process.env.PORT,

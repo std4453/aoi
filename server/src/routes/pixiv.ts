@@ -1,11 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getDb } from '../db/connection.js';
-import { createPack, createJob, getPack, setPackTags, toPublicPack } from '../db/repositories.js';
+import { getPack, toPublicPack } from '../db/repositories.js';
 import { parsePixivUrl, getPixivClient, ensurePixivTags } from '../services/pixiv-importer.js';
 import { readPixivSettings, savePixivSettings, refreshTokenSchema } from '../services/pixiv-auth.js';
 import { beginMutation } from '../replication/state.js';
-import { jobQueue } from '../services/job-queue.js';
+import { createPixivUploadTask } from '../services/upload-tasks.js';
 import type { PixivImportRequest, PixivMetadata, PixivSettings } from '../../../shared/types.js';
 
 const requestSchema = z.object({
@@ -46,15 +45,9 @@ export const registerPixivRoutes: FastifyPluginAsync = async app => {
     try {
       const input = requestSchema.parse(request.body);
       const artwork = parsePixivUrl(input.url);
-      const pack = getDb().transaction(() => {
-        const created = createPack({ name: input.packName || `Pixiv ${artwork.id}`,
-          originalFilename: artwork.url, originalSize: 0, originalFormat: 'pixiv', sourceType: 'folder' });
-        setPackTags(created.id, input.tagIds ?? []);
-        const job = createJob(created.id, 'pixiv');
-        getDb().prepare('UPDATE jobs SET options = ? WHERE id = ?').run(JSON.stringify({ autoName: !input.packName, autoTags: input.tagIds === undefined }), job.id);
-        return getPack(created.id)!;
-      })();
-      jobQueue.start();
+      const task = createPixivUploadTask({ source: 'pixiv', name: input.packName || `Pixiv ${artwork.id}`,
+        autoName: !input.packName, url: artwork.url, tagIds: input.tagIds });
+      const pack = getPack(task.packId!)!;
       return reply.code(202).send(toPublicPack(pack));
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : '无效的 Pixiv 导入请求' });

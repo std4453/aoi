@@ -3,6 +3,7 @@ import ConnectionGate from './components/ConnectionGate';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import AppShell from './components/layout/AppShell';
+import { UploadTasksProvider } from './hooks/useUploadTasks';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const UploadPage = lazy(() => import('./pages/UploadPage'));
@@ -24,6 +25,7 @@ export default function App() {
     <>
       <Toast />
       <ConnectionGate>
+        <UploadTasksProvider>
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
             <Route element={<AppShell />}>
@@ -37,6 +39,7 @@ export default function App() {
             </Route>
           </Routes>
         </Suspense>
+        </UploadTasksProvider>
       </ConnectionGate>
     </>
   );
