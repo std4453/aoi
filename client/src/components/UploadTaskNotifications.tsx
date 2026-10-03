@@ -2,15 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUploadTasks } from '../hooks/useUploadTasks';
 import { showError, showTaskToast, type TaskToastHandle } from './Toast';
-import type { UploadTask } from '../../../shared/types';
-
-const messages: Partial<Record<UploadTask['status'], string>> = {
-  duplicate: '待确认重复',
-  password: '待输入密码',
-  needs_file: '待选择文件',
-  completed: '已完成',
-  failed: '失败',
-};
+import { taskStates } from '../lib/upload-task-display';
 
 export default function UploadTaskNotifications() {
   const { tasks, expand, dismiss } = useUploadTasks();
@@ -26,7 +18,7 @@ export default function UploadTaskNotifications() {
     const currentIds = new Set(tasks.map(task => task.id));
     for (const [id, handle] of visible.current) {
       const task = tasks.find(item => item.id === id);
-      if (onUpload || !task || !messages[task.status]) {
+      if (onUpload || !task || taskStates[task.status].tone === 'neutral') {
         handle.close();
         visible.current.delete(id);
       }
@@ -34,7 +26,8 @@ export default function UploadTaskNotifications() {
     for (const id of seen.current.keys()) if (!currentIds.has(id)) seen.current.delete(id);
     for (const task of tasks) {
       const signature = `${task.status}:${task.error ?? ''}`;
-      const message = messages[task.status];
+      const state = taskStates[task.status];
+      const message = state.tone === 'neutral' ? undefined : state.label;
       const previous = seen.current.get(task.id);
       seen.current.set(task.id, signature);
       if (!message || onUpload || (previous === signature && !visible.current.has(task.id))) continue;

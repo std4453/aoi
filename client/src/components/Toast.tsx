@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle, Info, AlertTriangle, Loader2, Check, ChevronR
 import type { UploadTask } from '../../../shared/types';
 import { IconButton } from './Button';
 import { TaskSummaryContent } from './TaskSummary';
+import { taskStates } from '../lib/upload-task-display';
 
 type ToastType = 'default' | 'info' | 'success' | 'error' | 'warning' | 'loading';
 
@@ -48,7 +49,8 @@ export interface TaskToastHandle {
 type TaskToastOptions = Omit<ToastOptions, 'position' | 'duration' | 'task'> & { message?: string };
 
 function taskToastType(task: UploadTask): ToastType {
-  return task.status === 'completed' ? 'success' : task.status === 'failed' ? 'error' : 'warning';
+  const tone = taskStates[task.status].tone;
+  return tone === 'neutral' ? 'default' : tone;
 }
 
 export function showTaskToast(task: UploadTask, options: TaskToastOptions): TaskToastHandle {

@@ -1,6 +1,35 @@
 import type { UploadTask } from '../../../shared/types';
 import { formatBytes } from './utils';
 
+export type TaskTone = 'neutral' | 'warning' | 'success' | 'error';
+
+/** One status contract for card content, summary and notifications, across all sources. */
+export const taskStates = {
+  uploading: { label: '上传中', tone: 'neutral', content: 'transfer' },
+  downloading: { label: '下载中', tone: 'neutral', content: 'transfer' },
+  paused: { label: '已暂停', tone: 'neutral', content: 'transfer' },
+  processing: { label: '处理中', tone: 'neutral', content: 'processing' },
+  needs_file: { label: '待选择文件', tone: 'warning', content: 'attention' },
+  password: { label: '待输入密码', tone: 'warning', content: 'attention' },
+  duplicate: { label: '待确认重复', tone: 'warning', content: 'attention' },
+  completed: { label: '已完成', tone: 'success', content: 'result' },
+  failed: { label: '失败', tone: 'error', content: 'attention' },
+} as const satisfies Record<UploadTask['status'], { label: string; tone: TaskTone; content: 'transfer' | 'processing' | 'attention' | 'result' }>;
+
+export const taskToneStyles = {
+  neutral: { border: '', panel: 'border-gray-700 bg-gray-800/50', text: 'text-gray-400', icon: 'text-gray-400' },
+  warning: { border: 'border-amber-500/60', panel: 'border-amber-800/50 bg-amber-500/10', text: 'text-amber-300', icon: 'text-amber-400' },
+  success: { border: 'border-green-700/70', panel: 'border-green-800/50 bg-green-900/20', text: 'text-green-300', icon: 'text-green-400' },
+  error: { border: 'border-red-500/60', panel: 'border-red-800/50 bg-red-900/20', text: 'text-red-300', icon: 'text-red-400' },
+} satisfies Record<TaskTone, { border: string; panel: string; text: string; icon: string }>;
+
+export function taskNoticeMessage(task: UploadTask): string | undefined {
+  if (taskStates[task.status].content !== 'attention') return;
+  if (task.error || task.status === 'password' || task.status === 'failed') return taskErrorMessage(task);
+  if (task.status === 'duplicate') return '此图包可能已被上传过，请确认是否继续。';
+  if (task.status === 'needs_file') return `刷新后需重新选择原来的${task.source === 'folder' ? '文件夹' : '压缩包'}以继续上传。已上传的内容会保留。`;
+}
+
 export function taskProgressDisplay(task: UploadTask): { label: string; detail?: string; percentage?: number } {
   const percentage = Number.isFinite(task.progress) ? Math.max(0, Math.min(100, Math.round(task.progress))) : undefined;
   if (task.status === 'processing') {

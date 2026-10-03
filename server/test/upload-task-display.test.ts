@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { taskErrorMessage, taskFailureLabel, taskProgressDisplay } from '../../client/src/lib/upload-task-display.ts';
+import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage } from '../../client/src/lib/upload-task-display.ts';
 import type { UploadTask } from '../../shared/types.js';
 
 const task: UploadTask = {
@@ -9,6 +9,31 @@ const task: UploadTask = {
   packId: 'pack', uploadId: 'upload', matches: [], error: null,
   createdAt: '', updatedAt: '',
 };
+
+test('all sources share status semantics without leaking transfer details into results', () => {
+  for (const source of ['archive', 'folder', 'mega', 'pixiv'] as const) {
+    for (const status of ['uploading', 'downloading', 'paused', 'processing', 'needs_file', 'password', 'duplicate', 'failed', 'completed'] as const) {
+      const current = { ...task, source, status, error: 'stale transfer failure' };
+      const state = taskStates[status];
+      if (['needs_file', 'password', 'duplicate', 'failed'].includes(status)) {
+        assert.equal(state.content, 'attention');
+        assert.equal(state.tone, status === 'failed' ? 'error' : 'warning');
+        assert.ok(taskNoticeMessage(current));
+      } else {
+        assert.equal(taskNoticeMessage(current), undefined);
+        assert.equal(state.content, status === 'completed' ? 'result' : status === 'processing' ? 'processing' : 'transfer');
+        assert.equal(state.tone, status === 'completed' ? 'success' : 'neutral');
+      }
+    }
+  }
+});
+
+test('attention states have a useful notice even without an error from the server', () => {
+  assert.match(taskNoticeMessage({ ...task, status: 'needs_file', source: 'folder' })!, /重新选择原来的文件夹.*已上传的内容会保留/);
+  assert.match(taskNoticeMessage({ ...task, status: 'duplicate' })!, /确认是否继续/);
+  assert.match(taskNoticeMessage({ ...task, status: 'password', passwordKind: 'share' })!, /分享.*解密密钥/);
+  assert.match(taskNoticeMessage({ ...task, status: 'failed' })!, /重试/);
+});
 
 test('processing labels and counters replace finished transfer details for every source', () => {
   for (const source of ['archive', 'folder', 'mega', 'pixiv'] as const) {

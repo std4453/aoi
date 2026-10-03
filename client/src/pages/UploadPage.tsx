@@ -14,16 +14,9 @@ import ImportSources from '../components/ImportSources';
 import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../components/TaskSummary';
-import { taskErrorMessage, taskProgressDisplay } from '../lib/upload-task-display';
+import { taskNoticeMessage, taskProgressDisplay, taskStates, taskToneStyles } from '../lib/upload-task-display';
+import { TaskNotice, TaskTextAction } from '../components/TaskFeedback';
 import { getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../lib/upload-page-state';
-
-const needsAttention = (task: UploadTask) => ['duplicate', 'password', 'needs_file', 'failed'].includes(task.status);
-const taskFeedbackStyles = {
-  failed: { border: 'border-red-500/60', panel: 'border-red-800/50 bg-red-900/20', text: 'text-red-300' },
-  attention: { border: 'border-amber-500/60', panel: 'border-amber-800/50 bg-amber-500/10', text: 'text-amber-300' },
-  completed: { border: 'border-green-700/70', panel: 'border-green-800/50 bg-green-900/20', text: 'text-green-300' },
-  neutral: { border: '', panel: 'border-gray-700 bg-gray-800/50', text: 'text-gray-400' },
-};
 
 const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
   : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
@@ -179,9 +172,9 @@ function TaskCard({ task }: { task: UploadTask }) {
   const [details, setDetails] = useState(false);
   const [settings, setSettings] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const attention = needsAttention(task);
-  const completed = task.status === 'completed';
-  const feedback = taskFeedbackStyles[task.status === 'failed' ? 'failed' : attention ? 'attention' : completed ? 'completed' : 'neutral'];
+  const state = taskStates[task.status];
+  const feedback = taskToneStyles[state.tone];
+  const notice = taskNoticeMessage(task);
   const hasFiles = hasLocalFiles(task.id);
   const run = async (action: () => Promise<unknown>) => {
     if (busy) return;
@@ -194,7 +187,7 @@ function TaskCard({ task }: { task: UploadTask }) {
   const progress = taskProgressDisplay(task);
   const remote = task.source === 'mega' || task.source === 'pixiv';
   const indeterminate = progress.percentage === undefined;
-  const showProgress = !attention;
+  const showProgress = state.content === 'transfer' || state.content === 'processing';
   return <article className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${feedback.border || (expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-600')}`}>
     <div className="upload-card-header">
       <button type="button" className="upload-card-heading" data-expanded={expanded} aria-expanded={expanded} aria-controls={`task-${task.id}`}
@@ -205,37 +198,34 @@ function TaskCard({ task }: { task: UploadTask }) {
         label={expanded ? '收起任务' : '展开任务'} aria-expanded={expanded} aria-controls={`task-${task.id}`} onClick={() => expand(expanded ? null : task.id)} />
     </div>
     <div id={`task-${task.id}`} className="upload-task-details" data-open={expanded} inert={!expanded}>
-      <div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-3 px-4 pb-4">
-        {completed ? <PackProcessingResult packId={task.packId} onDone={() => dismiss(task.id)} /> : <>
-        {showProgress && <div><div className="mb-2 flex justify-between gap-3 text-xs text-gray-500"><span>{progress.label}{progress.detail && ` · ${progress.detail}`}</span>{!indeterminate && <span className="shrink-0">{progress.percentage}%</span>}</div>
+      <div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-2 px-4 pb-3">
+        {state.content === 'result' ? <PackProcessingResult key={task.packId} packId={task.packId} onDone={() => dismiss(task.id)} /> : <>
+        {showProgress && <div><div className="mb-1.5 flex justify-between gap-3 text-xs leading-4 text-gray-500"><span>{progress.label}{progress.detail && ` · ${progress.detail}`}</span>{!indeterminate && <span className="shrink-0">{progress.percentage}%</span>}</div>
           <div role="progressbar" aria-label={progress.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percentage} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`h-full rounded-full bg-blue-500 ${indeterminate ? `w-1/3 ${task.status === 'paused' ? '' : 'animate-pulse'}` : 'transition-all duration-300'}`} style={indeterminate ? undefined : { width: `${progress.percentage}%` }} /></div></div>}
-        {task.error && <p role="status" className={`break-words rounded-xl border p-3 text-sm ${feedback.panel} ${feedback.text}`}>{taskErrorMessage(task)}</p>}
-        {task.status === 'duplicate' && <div className="flex flex-col gap-3">
-          <p className={`rounded-lg bg-amber-500/10 px-3 py-2 text-sm ${feedback.text}`}>此图包可能已被上传过，请确认是否继续。</p>
+        {notice && <TaskNotice tone={state.tone}>{notice}</TaskNotice>}
+        {task.status === 'duplicate' && task.matches.length > 0 && <div className="flex flex-col gap-2">
           {task.matches.map(pack => <DuplicateCard key={pack.id} pack={pack} disabled={busy} onSelect={() => navigate(`/packs/${pack.id}`)} />)}
         </div>}
         {(task.status === 'password' || task.status === 'failed') && (task.source === 'mega' || task.source === 'archive') && <div className="space-y-2">
-          {task.status === 'password' && !task.error && <p className={`text-xs ${feedback.text}`}>{task.passwordKind === 'share' ? '请填写此 MEGA 分享的密码或解密密钥后继续。' : '请填写压缩包的解压密码后继续。'}</p>}
           {task.source === 'mega' && (task.status !== 'password' || task.passwordKind !== 'archive') &&
             <PasswordInput value={sharePassword} onChange={setSharePassword} placeholder="分享密码 / 解密密钥" />}
           {(task.status !== 'password' || task.passwordKind !== 'share') &&
             <PasswordInput value={archivePassword} onChange={setArchivePassword} placeholder="压缩包密码" />}
         </div>}
-        {task.status === 'needs_file' && <p className={`text-sm leading-relaxed ${feedback.text}`}>刷新后需重新选择原来的{task.source === 'folder' ? '文件夹' : '压缩包'}以继续上传。已上传的内容会保留。</p>}
-        {task.status !== 'processing' && taskFiles.length > 1 && <div><Button variant="ghost" className="-ml-3" onClick={() => setDetails(!details)} aria-expanded={details}>
-          {`${taskFiles.filter(file => file.status === 'uploaded').length}/${taskFiles.length} 个文件 · ${details ? '收起详情' : '查看详情'}`}</Button>
-          {details && <div className="mt-2 max-h-52 space-y-1 overflow-y-auto">{taskFiles.map(file => <div key={file.id} className="flex items-center gap-2 text-xs">
+        {state.content !== 'processing' && taskFiles.length > 1 && <div><TaskTextAction onClick={() => setDetails(!details)} aria-expanded={details} aria-controls={`task-files-${task.id}`}>
+          {details ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}{`${taskFiles.filter(file => file.status === 'uploaded').length}/${taskFiles.length} 个文件 · ${details ? '收起详情' : '查看详情'}`}</TaskTextAction>
+          {details && <div id={`task-files-${task.id}`} className="mt-2 max-h-52 space-y-1 overflow-y-auto">{taskFiles.map(file => <div key={file.id} className="flex items-center gap-2 text-xs">
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${file.status === 'uploaded' ? 'bg-green-500' : file.status === 'failed' ? 'bg-red-400' : file.status === 'uploading' ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
             <span className="min-w-0 flex-1 truncate text-gray-400" title={file.path}>{file.path}</span><span className="shrink-0 text-gray-500">{file.status === 'uploaded' ? '完成' : file.status === 'failed' ? '失败' : `${file.size ? Math.round(file.transferred / file.size * 100) : 0}%`}</span>
           </div>)}</div>}</div>}
-        {task.source === 'pixiv' && task.status === 'failed' && <Button variant="ghost" disabled={busy} onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</Button>}
+        {task.source === 'pixiv' && task.status === 'failed' && <TaskTextAction disabled={busy} onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TaskTextAction>}
         {settings && task.source === 'pixiv' && task.status === 'failed' && <div className="rounded-xl border border-gray-800"><PixivSettings onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} /></div>}
         <input ref={input} type="file" className="hidden" {...(task.source === 'folder' ? { webkitdirectory: '', directory: '' } : { accept: '.zip,.rar,.7z' })}
           onChange={event => { const selected = Array.from(event.target.files || []); event.target.value = ''; if (selected.length) void run(() => reselect(task.id, selected)); }} />
         {busy && <p role="status" className="sr-only">正在处理…</p>}
-        {error && <p role="alert" className={`text-sm ${feedback.text}`}>{error}</p>}
+        {error && <TaskNotice role="alert" tone={state.tone}>{error}</TaskNotice>}
         {cancelConfirm ? <>
-          <p className="text-sm text-gray-400">确认取消此任务？本任务已上传的临时内容会被清理。</p>
+          <TaskNotice tone="neutral">确认取消此任务？本任务已上传的临时内容会被清理。</TaskNotice>
           <ActionRow><Button variant="secondary" disabled={busy} onClick={() => setCancelConfirm(false)}>保留任务</Button>
             <Button variant="danger" disabled={busy} onClick={() => { void run(() => dismiss(task.id)); }}>确认取消</Button></ActionRow>
         </> : <ActionRow>
