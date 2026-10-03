@@ -8,6 +8,7 @@ import { getLiveMatches, getVerification, scheduleVerification } from './content
 import { jobQueue } from './job-queue.js';
 import { getArchivePath, getUploadPath, ensureDir } from './storage.js';
 import { parsePixivUrl } from './pixiv-importer.js';
+import { isArchivePasswordError } from './archive-errors.js';
 
 export * from '../db/upload-task-repository.js';
 
@@ -46,7 +47,7 @@ export function syncUploadTask(task: UploadTask): UploadTask {
   } else if (pack.status === 'awaiting_confirmation') {
     patch = { status: 'duplicate', matches: getLiveMatches(pack.id), transferredBytes: task.totalBytes, error: null };
   } else if (pack.status === 'failed') {
-    const password = /需要密码|密码错误|(?:incorrect|wrong|required|missing) password|password (?:is )?required|encrypted/i.test(pack.errorMessage ?? '');
+    const password = isArchivePasswordError(pack.errorMessage ?? '');
     const interrupted = pack.sourceType === 'folder' && /上传中断/.test(pack.errorMessage ?? '');
     patch = { status: interrupted ? 'needs_file' : password ? 'password' : 'failed',
       error: pack.errorMessage, ...(password ? { passwordKind: 'archive' as const } : {}) };

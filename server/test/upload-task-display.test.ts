@@ -31,3 +31,14 @@ test('password prompts retain actionable information', () => {
   assert.match(taskErrorMessage({ ...task, status: 'password', passwordKind: 'share' }), /分享.*解密密钥/);
   assert.match(taskErrorMessage({ ...task, status: 'password', error: 'wrong password' }), /密码不正确/);
 });
+
+test('RAR method errors and entry names cannot masquerade as login failures', () => {
+  const failed = { ...task, filename: 'test.rar', error: '7z 解压失败: ERROR: Unsupported Method : app/RefreshToken.php\nERROR: Unsupported Method : create_password_resets.php\nEncrypted = -' };
+  assert.equal(taskFailureLabel(failed), '解压失败');
+  assert.match(taskErrorMessage(failed), /解压工具不支持此压缩方法/);
+  assert.doesNotMatch(taskErrorMessage(failed), /登录|需要密码|app\/|\.php/);
+  assert.match(taskErrorMessage({ ...failed, error: '7z 解压失败: ERROR: CRC Failed : app/RefreshToken.php' }), /无法解压/);
+  const listing = { ...failed, error: '无法检查压缩包内容: Path = app/RefreshToken.php\nPath = wrong password.png\nEncrypted = -\nChecksum = ' };
+  assert.equal(taskFailureLabel(listing), '解压失败');
+  assert.match(taskErrorMessage(listing), /无法解压/);
+});

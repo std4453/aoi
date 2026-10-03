@@ -19,6 +19,7 @@ import {
 } from './file-classifier.js';
 import { config } from '../config.js';
 import { normalizeRelativePath, resolveWithin } from './safe-path.js';
+import { isArchivePasswordError } from './archive-errors.js';
 
 class ArchiveSafetyError extends Error {
   override name = 'ArchiveSafetyError';
@@ -173,7 +174,7 @@ function inspect7zArchive(
       timeout: config.archiveCommandTimeout,
     }, (err, stdout, stderr) => {
       if (err) {
-        if (/password|encrypted/i.test(`${stderr}\n${stdout}`)) {
+        if (isArchivePasswordError(`${stderr}\n${stdout}`)) {
           reject(new Error(password
             ? '密码错误或压缩包已损坏'
             : '此压缩包需要密码，请在上传任务中填写密码后继续'));
@@ -264,7 +265,7 @@ async function extract7z(archivePath: string, imagesDir: string, videosDir: stri
       if (err && err.code !== 0) {
         const msg = safe7zMessage(stdout, stderr, password);
         fs.rmSync(tempDir, { recursive: true, force: true });
-        if (/password|encrypted/i.test(`${stderr}\n${stdout}`)) {
+        if (isArchivePasswordError(`${stderr}\n${stdout}`)) {
           return reject(new Error(password
             ? '密码错误或压缩包已损坏'
             : '此压缩包需要密码，请在上传任务中填写密码后继续'));
