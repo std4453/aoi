@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Pencil, Plus, Server, Trash2 } from 'lucide-react';
-import type { ServerConnection } from '../../../shared/types';
-import { setServerCapabilities, deleteServer, inspectServer, loadRuntime, login, LoginError, normalizeAddress, runtime, savedServers } from '../lib/connection';
+import type { ServerConnection, ServerHealth } from '../../../shared/types';
+import { cancelConnection, connectServer, deleteServer, inspectServer, loadRuntime, LoginError, normalizeAddress, restoreCachedConnection, runtime, savedServers } from '../lib/connection';
 import { showError } from './Toast';
+import ServerRoleTag from './ServerRoleTag';
 
 const blank = (): ServerConnection => ({
   id: crypto.randomUUID?.() || Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join(''),
@@ -20,13 +21,22 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [records, setRecords] = useState<ServerConnection[]>([]);
   const [draft, setDraft] = useState<ServerConnection>(blank);
-  const [writableByAddress, setWritableByAddress] = useState<Record<string, boolean>>({});
+  const [healthByAddress, setHealthByAddress] = useState<Record<string, ServerHealth>>({});
+  const connectionId = useRef(0);
   const [configured, setConfigured] = useState(false);
   const listPage = runtime.serverSelectionEnabled && location.pathname === '/servers';
   const editing = runtime.serverSelectionEnabled && location.pathname.startsWith('/servers/edit/');
 
+  function cancel() {
+    connectionId.current++;
+    cancelConnection();
+    setBusy(false);
+    setConnectingId(null);
+  }
+
   // Routes separate the list from the form and also support the browser's Back button.
   useEffect(() => {
+    if (location.pathname.startsWith('/servers')) cancel();
     if (location.pathname === '/servers/new') {
       setDraft(blank());
     }
@@ -40,9 +50,10 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     async function start() {
       try {
-        await loadRuntime();
+        await loadRuntime(controller.signal);
         if (cancelled) return;
         setConfigured(true);
         const all = savedServers();
@@ -58,7 +69,9 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
         if (loginError) showError(loginError);
         if (current && !choose && !window.location.pathname.startsWith('/servers')) {
           setDraft(current);
-          await connect(current, true, () => cancelled);
+          const background = restoreCachedConnection(current);
+          if (background) setReady(true);
+          await connect(current, true, background);
           return;
         }
         if (!runtime.serverSelectionEnabled && current) setDraft(current);
@@ -71,43 +84,41 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
       if (!cancelled) setBusy(false);
     }
     void start();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); cancelConnection(); connectionId.current++; };
   }, []);
 
   // Refresh labels without logging in or blocking selection. If a server is
   // offline, retain the capability saved by the last successful connection.
   useEffect(() => {
     if (!configured || !listPage || ready) return;
-    let cancelled = false;
+    const controller = new AbortController();
     void Promise.allSettled(records.map(async server => {
-      const health = await inspectServer(server.address);
-      if (!cancelled) setWritableByAddress(current => ({ ...current, [server.address]: health.writable !== false }));
+      const health = await inspectServer(server.address, controller.signal);
+      if (!controller.signal.aborted) setHealthByAddress(current => ({ ...current, [server.address]: health }));
     }));
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [configured, listPage, ready, records]);
 
-  async function connect(value: ServerConnection, automatic = false, cancelled = () => false) {
+  async function connect(value: ServerConnection, automatic = false, background = false) {
+    const id = ++connectionId.current;
     setBusy(true);
     setConnectingId(value.id);
     let server = value;
     const old = savedServers().find(item => item.id === value.id);
     try {
       server = { ...value, address: normalizeAddress(value.address), alias: value.alias.trim() || value.address };
-      const health = await inspectServer(server.address);
-      if (cancelled()) return;
-      server.writable = health.writable !== false;
-      if (!health.authRequired) server.key = '';
-      await login(server);
-      setServerCapabilities(health);
-      if (!cancelled()) {
-        if (!automatic || window.location.pathname.startsWith('/servers')) navigate('/', { replace: true });
-        setReady(true);
-      }
+      await connectServer(server);
+      if (id !== connectionId.current) return;
+      if (!automatic) navigate('/', { replace: true });
+      setReady(true);
     } catch (error) {
-      if (cancelled()) return;
+      if (id !== connectionId.current || (error instanceof DOMException && error.name === 'AbortError')) return;
+      // Cached sessions remain mounted. The bottom status provides the explicit
+      // server-switch action while each module keeps handling its own requests.
+      if (background) return;
       if (error instanceof LoginError) {
-        if (old && old.address === server.address) {
-          if (runtime.serverSelectionEnabled) navigate(`/servers/edit/${server.id}`, { replace: automatic });
+        if (old && old.address === server.address && runtime.serverSelectionEnabled) {
+          navigate(`/servers/edit/${server.id}`, { replace: automatic });
         }
       } else if (automatic && runtime.serverSelectionEnabled) {
         navigate('/servers', { replace: true });
@@ -118,7 +129,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
         ? '无法连接服务器，请检查地址、网络或证书。'
         : error instanceof Error ? error.message : '连接失败');
     } finally {
-      if (!cancelled()) {
+      if (id === connectionId.current) {
         setBusy(false);
         setConnectingId(null);
       }
@@ -148,7 +159,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
     <main className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center px-6 py-8">
       <section className="w-full max-w-md">
         {!listPage && runtime.serverSelectionEnabled && (
-          <button type="button" disabled={busy} onClick={() => navigate('/servers')} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-6">
+          <button type="button" onClick={() => { cancel(); navigate('/servers'); }} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-6">
             <ArrowLeft size={18} />返回服务器列表
           </button>
         )}
@@ -166,9 +177,9 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
                   {connectingId === server.id ? <Loader2 size={20} className="shrink-0 animate-spin text-blue-400" /> : <Server size={20} className="shrink-0 text-gray-500" />}
                   <span className="min-w-0">
                     <span className="block truncate font-medium">{server.alias}</span>
-                    <span className="flex text-xs text-gray-500 mt-1">
+                    <span className="flex items-center text-xs text-gray-500 mt-1">
                       <span className="truncate">{server.address}</span>
-                      {(writableByAddress[server.address] ?? server.writable) === false && <span className="shrink-0">（只读）</span>}
+                      <ServerRoleTag role={healthByAddress[server.address]?.role ?? server.role} writable={healthByAddress[server.address]?.writable ?? server.writable} />
                     </span>
                   </span>
                 </button>
@@ -206,7 +217,11 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
             </fieldset>
           </form>
         )}
-
+        {connectingId && (
+          <button type="button" onClick={cancel} className="mt-4 w-full rounded-xl bg-gray-800 py-3 text-sm text-gray-200 hover:bg-gray-700">
+            取消连接
+          </button>
+        )}
       </section>
     </main>
   );

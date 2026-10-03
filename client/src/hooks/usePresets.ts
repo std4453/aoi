@@ -1,9 +1,10 @@
-import { serverWritable } from '../lib/connection';
+import { useConnectionState } from './useConnectionState';
 import { useState, useEffect, useCallback } from 'react';
 import { fetchPresets, createPreset, updatePreset, removePreset, setDefaultPreset } from '../api/presets';
 import type { Preset, CompressionOptions } from '../../../shared/types.js';
 
 export function usePresets() {
+  const { serverWritable } = useConnectionState();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -18,7 +19,7 @@ export function usePresets() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [serverWritable]);
 
   useEffect(() => {
     refresh();

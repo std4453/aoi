@@ -6,10 +6,25 @@ export let activeServer: ServerConnection | null = null;
 let token = '';
 export let serverWritable = true;
 export let serverCanDownloadArchive = true;
-export function setServerCapabilities(health: ServerHealth): void {
+function setServerCapabilities(health: Pick<ServerHealth, 'writable' | 'capabilities'>): void {
   serverWritable = health.writable !== false;
   serverCanDownloadArchive = health.capabilities?.generatedArchiveDownload ?? serverWritable;
 }
+
+type ConnectionStatus = 'connected' | 'connecting' | 'failed';
+let snapshot = { status: 'connected' as ConnectionStatus, serverWritable, serverCanDownloadArchive };
+const listeners = new Set<() => void>();
+export const getConnectionState = () => snapshot;
+export function subscribeConnection(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+function setConnectionStatus(status: ConnectionStatus): void {
+  snapshot = { status, serverWritable, serverCanDownloadArchive };
+  for (const listener of listeners) listener();
+}
+let cachedStartup = false;
+let attempt: { controller: AbortController; promise: Promise<void> } | null = null;
 
 export function savedServers(): ServerConnection[] {
   try {
@@ -33,31 +48,78 @@ export function normalizeAddress(value: string): string {
   }
   return url.origin;
 }
-export async function loadRuntime(): Promise<void> {
-  const res = await fetch('/runtime-config.json', { cache: 'no-store' });
+export async function loadRuntime(signal?: AbortSignal): Promise<void> {
+  const res = await fetch('/runtime-config.json', { cache: 'no-store', signal });
   if (!res.ok) throw new Error('无法读取部署配置，请重试');
   runtime = await res.json();
 }
 export class LoginError extends Error {}
-export async function inspectServer(address: string): Promise<ServerHealth> {
-  const res = await fetch(`${address}/api/health`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(8000);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+export async function inspectServer(address: string, signal?: AbortSignal): Promise<ServerHealth> {
+  const res = await fetch(`${address}/api/health`, { cache: 'no-store', signal: requestSignal(signal) });
   if (!res.ok) throw new Error(`服务器响应 HTTP ${res.status}`);
   const health = await res.json() as ServerHealth;
+  signal?.throwIfAborted();
   if (health.service !== 'aoi' || health.status !== 'ok') throw new Error('该地址不是可连接的 AoI 后端');
   return health;
 }
-export async function login(server: ServerConnection): Promise<void> {
+async function login(server: ServerConnection, signal: AbortSignal): Promise<void> {
   const res = await fetch(`${server.address}/api/auth/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: server.key }), cache: 'no-store', signal: AbortSignal.timeout(8000),
+    body: JSON.stringify({ key: server.key }), cache: 'no-store', signal: requestSignal(signal),
   });
   if (res.status === 401) throw new LoginError('Key 不正确，请修改后重试');
   if (!res.ok) throw new Error(`登录失败：HTTP ${res.status}`);
   const result: LoginResponse = await res.json();
+  signal.throwIfAborted();
+  if (typeof result.token !== 'string') throw new Error('服务器返回了无效的登录信息');
   token = result.token;
-  activeServer = { ...server };
+  activeServer = { ...server, token };
+  setServerCapabilities(activeServer);
   saveServer(activeServer);
   localStorage.setItem('aoi.activeServer', server.id);
+}
+export function restoreCachedConnection(server: ServerConnection): boolean {
+  if (!runtime.serverSelectionEnabled || typeof server.token !== 'string') return false;
+  activeServer = { ...server };
+  token = server.token;
+  cachedStartup = true;
+  setServerCapabilities(server);
+  setConnectionStatus('connecting');
+  return true;
+}
+export function cancelConnection(): void {
+  attempt?.controller.abort();
+  attempt = null;
+}
+export function connectServer(server: ServerConnection): Promise<void> {
+  cancelConnection();
+  const controller = new AbortController();
+  const { signal } = controller;
+  setConnectionStatus('connecting');
+  const promise = (async () => {
+    try {
+      const health = await inspectServer(server.address, signal);
+      await login({
+        ...server,
+        key: health.authRequired ? server.key : '',
+        writable: health.writable !== false,
+        role: health.role,
+        capabilities: health.capabilities,
+      }, signal);
+      setConnectionStatus('connected');
+    } catch (error) {
+      if (!signal.aborted) setConnectionStatus('failed');
+      throw error;
+    } finally {
+      if (attempt?.controller === controller) attempt = null;
+    }
+  })();
+  attempt = { controller, promise };
+  return promise;
 }
 export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -69,11 +131,21 @@ export function apiUrl(path: string, resource = false): string {
 }
 export const resourceUrl = (path: string): string => apiUrl(path, true);
 export function returnToServers(): void {
+  cancelConnection();
   sessionStorage.setItem('aoi.chooseServer', '1');
   // Reload also disposes uploads, streams, image pools and in-memory page caches.
   location.assign('/servers');
 }
 export function handleUnauthorized(): void {
+  if (cachedStartup) {
+    if (activeServer) {
+      const { token: _expired, ...server } = activeServer;
+      activeServer = server;
+      saveServer(server);
+    }
+    setConnectionStatus('failed');
+    return;
+  }
   sessionStorage.setItem('aoi.loginError', '登录已失效，请重新连接服务器');
   returnToServers();
 }
@@ -81,7 +153,23 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   if (!serverWritable && !['GET', 'HEAD', 'OPTIONS'].includes((init.method || 'GET').toUpperCase())) {
     throw new Error('当前连接的是只读备服务器');
   }
-  const response = await fetch(apiUrl(path), { ...init, headers: { ...authHeaders(), ...init.headers }, cache: 'no-store' });
-  if (response.status === 401) handleUnauthorized();
+  const requestedToken = token;
+  const requestedServer = activeServer;
+  const request = () => fetch(apiUrl(path), { ...init, headers: { ...authHeaders(), ...init.headers }, cache: 'no-store' });
+  let responseToken = requestedToken;
+  let response = await request();
+  if (response.status === 401 && cachedStartup) {
+    // A server restart rotates its token. Let the background login finish, then
+    // retry reads once with the new token without remounting the current page.
+    await attempt?.promise.catch(() => {});
+    init.signal?.throwIfAborted();
+    if (activeServer?.id === requestedServer?.id && activeServer?.address === requestedServer?.address &&
+        token !== requestedToken && ['GET', 'HEAD'].includes((init.method || 'GET').toUpperCase())) {
+      await response.body?.cancel();
+      responseToken = token;
+      response = await request();
+    }
+  }
+  if (response.status === 401 && token === responseToken) handleUnauthorized();
   return response;
 }

@@ -1,4 +1,4 @@
-import { serverWritable } from '../lib/connection';
+import { useConnectionState } from '../hooks/useConnectionState';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePresets } from '../hooks/usePresets';
@@ -14,6 +14,7 @@ const DEFAULT_OPTIONS: CompressionOptions = {
 };
 
 export default function PresetsPage() {
+  const { serverWritable } = useConnectionState();
   const navigate = useNavigate();
   const { presets, loading, add, edit, remove, setDefault } = usePresets();
   const [showForm, setShowForm] = useState(false);

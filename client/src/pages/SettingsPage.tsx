@@ -1,4 +1,5 @@
-import { activeServer, returnToServers, serverWritable } from '../lib/connection';
+import { useConnectionState } from '../hooks/useConnectionState';
+import { activeServer, returnToServers } from '../lib/connection';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get } from '../api/client';
@@ -6,6 +7,7 @@ import { fetchTags } from '../api/packs';
 import { fetchPresets } from '../api/presets';
 import { formatBytes } from '../lib/utils';
 import { HardDrive, Server, Tag, SlidersHorizontal } from 'lucide-react';
+import ServerRoleTag from '../components/ServerRoleTag';
 import ExternalSourcesSettings from '../components/ExternalSourcesSettings';
 
 interface DiskInfo {
@@ -14,6 +16,7 @@ interface DiskInfo {
 }
 
 export default function SettingsPage() {
+  const { serverWritable } = useConnectionState();
   const navigate = useNavigate();
   const [diskInfo, setDiskInfo] = useState<DiskInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,9 +57,9 @@ export default function SettingsPage() {
             <Server size={18} className="text-blue-400" />
             <span className="text-sm font-medium text-white">服务器</span>
           </div>
-          <span className="min-w-0 ml-auto flex text-sm text-gray-500">
+          <span className="min-w-0 ml-auto flex items-center text-sm text-gray-500">
             <span className="truncate">{activeServer?.alias}</span>
-            {!serverWritable && <span className="shrink-0">（只读）</span>}
+            <ServerRoleTag role={activeServer?.role} writable={serverWritable} />
           </span>
         </button>
         {/* System info */}

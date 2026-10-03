@@ -1,6 +1,7 @@
-import { serverWritable } from '../../lib/connection';
+import { useConnectionState } from '../../hooks/useConnectionState';
 import { useRef, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import ConnectionStatus from '../ConnectionStatus';
 import { Home, Upload, Settings } from 'lucide-react';
 import { saveHomeScrollY, clearHomeScrollY, getLastHomeSearch, saveLastHomeSearch, triggerHomeReset } from '../../lib/homeStore';
 
@@ -11,6 +12,7 @@ const navItems = [
 ];
 
 export default function AppShell() {
+  const { serverWritable } = useConnectionState();
   const location = useLocation();
   const navigate = useNavigate();
   const lastTabClickRef = useRef(0);
@@ -27,6 +29,8 @@ export default function AppShell() {
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-4 pb-24">
         {!serverWritable && ['/upload', '/settings/presets'].includes(location.pathname.replace(/\/+$/, '')) ? <p className="text-gray-400">备服务器不支持此操作，请连接主服务器。</p> : <Outlet />}
       </main>
+
+      <ConnectionStatus />
 
       {/* Bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 bg-gray-950/90 backdrop-blur-lg border-t border-gray-800 safe-bottom">

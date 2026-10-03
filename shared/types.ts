@@ -216,6 +216,9 @@ export interface ServerConnection {
   address: string;
   key: string;
   writable?: boolean;
+  role?: ServerHealth['role'];
+  capabilities?: ServerHealth['capabilities'];
+  token?: string;
 }
 
 export interface ServerHealth {

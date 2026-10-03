@@ -214,6 +214,9 @@ export class Replicator {
     await fs.promises.rm(getPath('thumbnails', id), { recursive: true, force: true });
     await durableFile(config.dirs.thumbnails);
     finishReplicaInstall(manifest);
+    // Wake the idle queue for each committed pack, including recovered installs.
+    // Waiting until pull() finishes keeps a fresh replica unreadable during long downloads.
+    jobQueue.start();
     await fs.promises.rm(stage, { recursive: true, force: true });
   }
   private async recoverInstalls(): Promise<void> {
