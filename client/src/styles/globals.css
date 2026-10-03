@@ -80,6 +80,24 @@
   transition: background-color 150ms ease;
 }
 .upload-return-button:focus-visible { outline: 2px solid var(--color-blue-400); outline-offset: -2px; }
+.upload-progress-fill {
+  position: relative;
+  overflow: hidden;
+}
+.upload-progress-fill[data-active="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 15%, rgb(255 255 255 / 45%) 50%, transparent 85%);
+  transform: translateX(-100%);
+  animation: upload-progress-sweep 1.6s linear infinite;
+  pointer-events: none;
+}
+.upload-task-details[data-open="false"] .upload-progress-fill::after { display: none; }
+@keyframes upload-progress-sweep {
+  0% { transform: translateX(-100%); }
+  75%, 100% { transform: translateX(100%); }
+}
 .upload-task-details {
   display: grid;
   grid-template-rows: 0fr;
@@ -113,6 +131,7 @@
   to { grid-template-rows: 1fr; opacity: 1; transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) {
+  .upload-progress-fill[data-active="true"]::after { animation: none; display: none; }
   .upload-task-details, .upload-task-frame, .upload-task-frame.is-entering, .upload-card-heading, .upload-source-title, .upload-source-icon, .upload-sticky, .upload-sticky[data-visible="true"] { transition-duration: 0.01ms; animation-duration: 0.01ms; }
 }
 

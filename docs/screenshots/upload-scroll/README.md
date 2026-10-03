@@ -2,6 +2,7 @@
 
 Local disposable fixtures, captured on October 3, 2026. No production data or credentials.
 
+- `empty-form-progress.jpg`: extra top spacing in the empty upload card, tighter import-source spacing, and CSS light sweeps clipped to real progress (402 × 874 viewport override).
 - `form-and-task.jpg`: the Pixiv form remains expanded alongside an expanded task (402 × 874 viewport override).
 - `pixiv-sticky.jpg`: after the form leaves the viewport, its compact source button and task-list label stay above the scrolling cards (402 × 600 viewport override).
 

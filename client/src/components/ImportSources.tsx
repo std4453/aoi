@@ -16,7 +16,7 @@ const sources = [{ id: 'pixiv', label: 'Pixiv', Icon: PixivIcon }, { id: 'mega',
 type Source = typeof sources[number]['id'];
 
 export default function ImportSources({ onSelect, title = '导入自', card = false, compact = false, configuredSources = [], availableSources = ['pixiv'] }: { onSelect: (source: Source) => void; title?: string; card?: boolean; compact?: boolean; configuredSources?: readonly string[]; availableSources?: readonly Source[] }) {
-  return <section className={compact ? 'mt-5 flex flex-wrap items-center justify-center gap-2' : card ? 'mt-3 bg-gray-900 rounded-xl p-4 border border-gray-800' : 'mt-6'} aria-label={title}>
+  return <section className={compact ? 'mt-2 flex flex-wrap items-center justify-center gap-2' : card ? 'mt-3 bg-gray-900 rounded-xl p-4 border border-gray-800' : 'mt-6'} aria-label={title}>
     <h3 className={compact ? 'shrink-0 text-xs text-gray-500' : card ? 'text-sm font-medium text-white mb-3' : 'text-sm text-gray-500 mb-3'}>{title}</h3>
     <div className={compact ? 'flex flex-wrap gap-1' : 'flex flex-wrap gap-3'}>
       {sources.filter(source => availableSources.includes(source.id)).map(({ id, label, Icon }) => compact

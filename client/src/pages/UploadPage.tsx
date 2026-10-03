@@ -139,7 +139,7 @@ function UploadForm() {
       dragDepth.current = Math.max(0, dragDepth.current - 1);
       if (!dragDepth.current) setDragging(false);
     }}
-    className={`relative overflow-hidden rounded-xl border transition-colors ${draft.source ? 'bg-gray-900' : 'border-dashed'} ${dragging ? 'border-blue-500' : 'border-gray-700'}`}>
+    className={`relative overflow-hidden rounded-xl border transition-colors ${draft.source ? 'bg-gray-900' : 'border-dashed pt-2'} ${dragging ? 'border-blue-500' : 'border-gray-700'}`}>
     <div className={dragging ? 'invisible pointer-events-none' : ''} inert={dragging}>
     <input ref={archiveInput} type="file" accept={/iPad|iPhone|iPod/.test(navigator.userAgent) ? undefined : '.zip,.rar,.7z'} className="hidden"
       onChange={event => { select(Array.from(event.target.files || []), false); event.target.value = ''; }} />
@@ -209,6 +209,7 @@ function TaskCard({ task }: { task: UploadTask }) {
   const remote = task.source === 'mega' || task.source === 'pixiv';
   const indeterminate = remote && task.status === 'downloading' && task.totalBytes <= 0;
   const showProgress = !completed && !attention;
+  const progressActive = ['uploading', 'downloading', 'processing'].includes(task.status);
   return <article className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${task.status === 'failed' ? 'border-red-500/60' : attention && task.status !== 'duplicate' ? 'border-amber-500/60' : completed ? 'border-green-700/70' : expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-600'}`}>
     <div className="upload-card-header">
       <button type="button" className="upload-card-heading" data-expanded={expanded} aria-expanded={expanded} aria-controls={`task-${task.id}`}
@@ -221,7 +222,7 @@ function TaskCard({ task }: { task: UploadTask }) {
     <div id={`task-${task.id}`} className="upload-task-details" data-open={expanded} inert={!expanded}>
       <div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-3 px-4 pb-4">
         {showProgress && <div><div className="mb-2 flex justify-between gap-3 text-xs text-gray-500"><span>{task.source === 'pixiv' ? 'Pixiv 导入' : task.source === 'mega' ? 'MEGA 导入' : task.source === 'folder' ? '文件夹上传' : '压缩包上传'}{task.totalBytes > 0 && ` · ${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`}</span>{!indeterminate && <span>{progress}%</span>}</div>
-          <div role="progressbar" aria-label={stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={indeterminate ? undefined : progress} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`h-full rounded-full bg-blue-500 ${indeterminate ? 'w-1/3 animate-pulse' : 'transition-all duration-300'}`} style={indeterminate ? undefined : { width: `${progress}%` }} /></div></div>}
+          <div role="progressbar" aria-label={stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={indeterminate ? undefined : progress} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`upload-progress-fill h-full rounded-full bg-blue-500 ${indeterminate ? 'w-1/3' : 'transition-[width] duration-300'}`} data-active={progressActive} style={indeterminate ? undefined : { width: `${progress}%` }} /></div></div>}
         {task.error && <p role="status" className="break-words rounded-xl border border-red-800/50 bg-red-900/20 p-3 text-sm text-red-300">{taskErrorMessage(task)}</p>}
         {task.status === 'duplicate' && <div className="flex flex-col gap-3">
           <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-300">此图包可能已被上传过，请确认是否继续。</p>
