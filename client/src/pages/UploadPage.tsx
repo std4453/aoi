@@ -276,7 +276,9 @@ export default function UploadPage() {
   const { tasks, expandedId, revealRevision, expand, exitingIds, draft, error, loading, refresh } = useUploadTasks();
   const formContainer = useRef<HTMLDivElement>(null);
   const stickyHeader = useRef<HTMLDivElement>(null);
-  const [formPastTop, setFormPastTop] = useState(false);
+  const stickyButton = useRef<HTMLButtonElement>(null);
+  const taskListTitle = useRef<HTMLParagraphElement>(null);
+  const [showSticky, setShowSticky] = useState(false);
   const [enteringIds, setEnteringIds] = useState(new Set<string>());
   const seenTasks = useRef(new Set(tasks.map(task => task.id)));
   const loadedTasks = useRef(!loading);
@@ -298,7 +300,9 @@ export default function UploadPage() {
     window.scrollTo(0, getUploadScrollY());
     const update = () => {
       saveUploadScrollY(window.scrollY);
-      setFormPastTop((formContainer.current?.getBoundingClientRect().bottom ?? 0) < 0);
+      const listTop = taskListTitle.current?.getBoundingClientRect().top ?? formContainer.current?.getBoundingClientRect().bottom ?? 0;
+      const buttonBottom = (stickyButton.current?.offsetTop ?? 0) + (stickyButton.current?.offsetHeight ?? 0);
+      setShowSticky(listTop < buttonBottom);
     };
     update();
     window.addEventListener('scroll', update, { passive: true });
@@ -329,12 +333,13 @@ export default function UploadPage() {
       const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
       const navigationTop = document.querySelector('nav')?.getBoundingClientRect().top ?? viewportBottom;
       const visibleBottom = Math.min(viewportBottom, navigationTop) - 8;
-      const formBottom = formContainer.current?.getBoundingClientRect().bottom ?? 0;
+      const listTop = taskListTitle.current?.getBoundingClientRect().top ?? formContainer.current?.getBoundingClientRect().bottom ?? 0;
+      const buttonBottom = (stickyButton.current?.offsetTop ?? 0) + (stickyButton.current?.offsetHeight ?? 0);
       const headerHeight = stickyHeader.current?.offsetHeight ?? 0;
-      let visibleTop = viewportTop + (formBottom < 0 ? headerHeight : 0) + 8;
+      let visibleTop = viewportTop + (listTop < buttonBottom ? headerHeight : 0) + 8;
       let delta = taskRevealDelta(rect.top, rect.bottom, visibleTop, visibleBottom);
       // Scrolling down may reveal the floating header. Include that new obstruction.
-      visibleTop = viewportTop + (formBottom - delta < 0 ? headerHeight : 0) + 8;
+      visibleTop = viewportTop + (listTop - delta < buttonBottom ? headerHeight : 0) + 8;
       delta = taskRevealDelta(rect.top, rect.bottom, visibleTop, visibleBottom);
       if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
     }, 260);
@@ -345,8 +350,8 @@ export default function UploadPage() {
     <div className="mb-4 flex min-h-9 items-center justify-between gap-3"><h2 className="text-xl font-bold text-white">上传图包</h2>
       {tasks.length > 0 && <span className="text-xs text-gray-500">{tasks.length} 个任务</span>}</div>
     <div ref={formContainer} className="mb-4"><UploadForm /></div>
-    <div ref={stickyHeader} className="upload-sticky" data-visible={formPastTop} inert={!formPastTop} aria-hidden={!formPastTop} aria-label="返回上传表单">
-      <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })}
+    <div ref={stickyHeader} className="upload-sticky" data-visible={showSticky} inert={!showSticky} aria-hidden={!showSticky} aria-label="返回上传表单">
+      <button ref={stickyButton} type="button" onClick={() => window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })}
         className={`upload-return-button ${draft.source ? 'border-solid bg-gray-900 hover:bg-gray-800' : 'border-dashed bg-transparent hover:bg-gray-900'}`}>
         {draft.source ? <TaskSourceTitle source={draft.source} name={draftTitle(draft.source)} />
           : <span className="flex items-center justify-center gap-2 text-sm text-gray-400"><Upload size={16} aria-hidden="true" />上传图包</span>}
@@ -355,7 +360,7 @@ export default function UploadPage() {
     </div>
     {error && <div role="alert" className="mb-4 rounded-xl border border-red-800/50 bg-red-900/20 p-3 text-sm text-red-300">{error}<Button variant="ghost" onClick={() => { void refresh(); }}>重试</Button></div>}
     {loading && <p role="status" className="py-4 text-center text-sm text-gray-500">正在读取上传任务…</p>}
-    {tasks.length > 0 && <p className="mb-3 text-xs text-gray-500">任务列表</p>}
+    {tasks.length > 0 && <p ref={taskListTitle} className="mb-3 text-xs text-gray-500">任务列表</p>}
     <div aria-label="上传任务列表">{tasks.map(task => <div id={`upload-card-${task.id}`} key={task.id} inert={exitingIds.has(task.id)}
       onAnimationEnd={event => {
         if (event.target === event.currentTarget) setEnteringIds(previous => new Set([...previous].filter(id => id !== task.id)));
