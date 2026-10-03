@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUploadTasks } from './useUploadTasks';
-import { showError, showTaskToast, type TaskToastHandle } from '../../components/Toast';
+import { showError } from '../../components/Toast';
+import { showTaskToast, type TaskToastHandle } from './TaskToast';
 import { uploadView } from './view-state';
 import { taskStates } from './task-display';
 

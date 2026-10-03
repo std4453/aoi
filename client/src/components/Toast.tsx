@@ -1,19 +1,18 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle, Info, AlertTriangle, Loader2, Check, ChevronRight } from 'lucide-react';
-import type { UploadTask } from '../../../shared/types';
 import { IconButton } from './Button';
-import { TaskSummaryContent } from '../features/uploads/TaskPresentation';
-import { taskStates } from '../features/uploads/task-display';
 
-type ToastType = 'default' | 'info' | 'success' | 'error' | 'warning' | 'loading';
+export type ToastType = 'default' | 'info' | 'success' | 'error' | 'warning' | 'loading';
 
 interface ToastOptions {
   position?: 'top' | 'bottom';
   duration?: number | null;
   onClick?: () => void;
   action?: { label: string; onClick: () => void; ariaLabel?: string; icon?: 'check' | 'arrow' };
-  task?: UploadTask;
+  content?: ReactNode;
 }
+
+export type PersistentToastOptions = Omit<ToastOptions, 'duration' | 'content'>;
 
 interface ToastItem {
   id: number;
@@ -30,7 +29,7 @@ type RemoveToastListener = (id: number) => void;
 
 let addListener: AddToastListener | null = null;
 let removeListener: RemoveToastListener | null = null;
-let updateTaskListener: ((id: number, task: UploadTask, options: TaskToastOptions) => void) | null = null;
+let updateListener: ((id: number, content: ReactNode, type: ToastType, options: PersistentToastOptions) => void) | null = null;
 
 function addToast(message: string, type: ToastType = 'default'): number {
   return addListener?.(message, type) ?? -1;
@@ -40,23 +39,13 @@ function removeToast(id: number): void {
   removeListener?.(id);
 }
 
-/** Persistent task notification with one action and an independently clickable body. */
-export interface TaskToastHandle {
-  close: () => void;
-  update: (task: UploadTask, options: TaskToastOptions) => void;
-}
-
-type TaskToastOptions = Omit<ToastOptions, 'position' | 'duration' | 'task'> & { message?: string };
-
-function taskToastType(task: UploadTask): ToastType {
-  const tone = taskStates[task.status].tone;
-  return tone === 'neutral' ? 'default' : tone;
-}
-
-export function showTaskToast(task: UploadTask, options: TaskToastOptions): TaskToastHandle {
-  const { message = '', ...actions } = options;
-  const id = addListener?.(message, taskToastType(task), { ...actions, task, position: 'bottom', duration: null }) ?? -1;
-  return { close: () => removeToast(id), update: (next, nextOptions) => updateTaskListener?.(id, next, nextOptions) };
+/** Custom notification content with explicit update and animated close controls. */
+export function showPersistentToast(content: ReactNode, type: ToastType = 'default', options: PersistentToastOptions = {}) {
+  const id = addListener?.('', type, { ...options, content, duration: null }) ?? -1;
+  return {
+    close: () => removeToast(id),
+    update: (next: ReactNode, nextType: ToastType, nextOptions: PersistentToastOptions) => updateListener?.(id, next, nextType, nextOptions),
+  };
 }
 
 /** Show a default (gray) toast. Auto-dismisses after 2.5s. */
@@ -217,17 +206,16 @@ export default function Toast() {
       setTimeout(() => dismissNow(id), EXIT_DURATION);
     };
 
-    updateTaskListener = (id, task, options) => {
-      const { message = '', ...actions } = options;
+    updateListener = (id, content, type, options) => {
       setToasts(prev => prev.map(toast => toast.id === id && !toast.exiting
-        ? { ...toast, message, type: taskToastType(task), options: { ...toast.options, ...actions, task } }
+        ? { ...toast, type, options: { ...toast.options, ...options, content } }
         : toast));
     };
 
     return () => {
       addListener = null;
       removeListener = null;
-      updateTaskListener = null;
+      updateListener = null;
       timerRef.current.forEach(clearTimeout);
       timerRef.current.clear();
     };
@@ -245,9 +233,9 @@ export default function Toast() {
             key={t.id}
             className={`pointer-events-auto flex items-center gap-2 ${cfg.bg} border ${cfg.border} ${cfg.text} text-sm rounded-xl shadow-lg backdrop-blur-md ${t.exiting ? 'animate-toast-exit' : 'animate-toast-enter'} ${position === 'bottom' ? 'w-max max-w-[90vw] px-2 py-1' : 'w-max max-w-[90vw] px-4 py-3'}`}
           >
-            {!t.options.task && <Icon size={16} className={`${cfg.iconClass} shrink-0 ${t.type === 'loading' ? 'animate-spin' : ''}`} />}
-            <button type="button" className={`flex-1 min-w-0 text-left ${t.options.task ? 'py-1' : 'break-words'}`} onClick={() => { t.options.onClick?.(); if (t.type !== 'loading') dismiss(t.id); }}>
-              {t.options.task ? <TaskSummaryContent task={t.options.task} message={t.message || undefined} layout="toast" /> : t.message}
+            {t.options.content === undefined && <Icon size={16} className={`${cfg.iconClass} shrink-0 ${t.type === 'loading' ? 'animate-spin' : ''}`} />}
+            <button type="button" className={`flex-1 min-w-0 text-left ${t.options.content !== undefined ? 'py-1' : 'break-words'}`} onClick={() => { t.options.onClick?.(); if (t.type !== 'loading') dismiss(t.id); }}>
+              {t.options.content ?? t.message}
             </button>
             {t.options.action && <IconButton className="h-7 w-7" label={t.options.action.ariaLabel ?? t.options.action.label}
               icon={t.options.action.icon === 'check' ? <Check size={16} /> : <ChevronRight size={16} />}
