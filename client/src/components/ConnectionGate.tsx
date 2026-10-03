@@ -157,7 +157,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center px-6 py-8">
-      <section className="w-full max-w-md">
+      <section className="min-w-0 w-full max-w-md">
         {!listPage && runtime.serverSelectionEnabled && (
           <button type="button" onClick={() => { cancel(); navigate('/servers'); }} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-6">
             <ArrowLeft size={18} />返回服务器列表
@@ -170,7 +170,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
         </div>
 
         {listPage ? (
-          <fieldset disabled={busy} className="space-y-3">
+          <fieldset disabled={busy} className="min-w-0 space-y-3">
             {records.map(server => (
               <div key={server.id} className="flex items-center gap-1 rounded-xl border border-gray-800 bg-gray-900 p-2">
                 <button type="button" onClick={() => void connect(server)} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-gray-800/50">
@@ -198,7 +198,7 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
           </fieldset>
         ) : (
           <form onSubmit={event => { event.preventDefault(); void connect(draft); }}>
-            <fieldset disabled={busy} className="space-y-5">
+            <fieldset disabled={busy} className="min-w-0 space-y-5">
               {runtime.serverSelectionEnabled && <>
                 <label className="block text-sm">别名
                   <input className="mt-2 w-full rounded-xl bg-gray-900 border border-gray-700 p-3" value={draft.alias} placeholder="例如：家里的服务器" onChange={event => setDraft({ ...draft, alias: event.target.value })} />
