@@ -1,4 +1,5 @@
-import { serverWritable, serverCanDownloadArchive } from '../lib/connection';
+import { useConnectionState } from '../hooks/useConnectionState';
+
 import { resourceUrl } from '../lib/connection';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -26,6 +27,7 @@ const DEFAULT_OPTIONS: CompressionOptions = {
 };
 
 export default function PackDetailPage() {
+  const { serverWritable, serverCanDownloadArchive } = useConnectionState();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [pack, setPack] = useState<Pack | null>(null);

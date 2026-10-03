@@ -75,6 +75,9 @@
 
 @theme {
   --root-font-size: 16px;
+  /* Keep large dark surfaces in sRGB across Chromium paint/compositing paths. */
+  --color-gray-900: #101828;
+  --color-gray-950: #030712;
 }
 
 html {
