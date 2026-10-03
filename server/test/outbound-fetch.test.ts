@@ -165,3 +165,84 @@ test('cancelling a stalled CONNECT and closing its transport releases the proxy 
   await closed;
   assert.equal(socket.destroyed, true);
 });
+
+/** Minimal offline SOCKS5 server: parses fragmented greeting, optional auth and CONNECT. */
+async function socksProxy(targetPort: number, reject = false, authenticate = false) {
+  const { createServer: createTcpServer } = await import('node:net');
+  const sockets = new Set<Socket>();
+  const commands: Array<{ host: string; port: number }> = [];
+  let authentications = 0;
+  const server = createTcpServer(socket => {
+    sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('error', () => {});
+    let buffer = Buffer.alloc(0);
+    let stage = 'greeting';
+    const receive = (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (stage === 'greeting') {
+        if (buffer.length < 2 || buffer.length < 2 + buffer[1]) return;
+        assert.equal(buffer[0], 5);
+        assert.ok(buffer.subarray(2, 2 + buffer[1]).includes(authenticate ? 2 : 0));
+        buffer = buffer.subarray(2 + buffer[1]);
+        socket.write(Buffer.from([5, authenticate ? 2 : 0]));
+        stage = authenticate ? 'auth' : 'connect';
+      }
+      if (stage === 'auth') {
+        if (buffer.length < 2 || buffer.length < 3 + buffer[1]) return;
+        const usernameLength = buffer[1]; const passwordLength = buffer[2 + usernameLength];
+        if (buffer.length < 3 + usernameLength + passwordLength) return;
+        assert.equal(buffer[0], 1);
+        assert.equal(buffer.subarray(2, 2 + usernameLength).toString(), 'test-user');
+        assert.equal(buffer.subarray(3 + usernameLength, 3 + usernameLength + passwordLength).toString(), 'test-password');
+        buffer = buffer.subarray(3 + usernameLength + passwordLength); authentications++;
+        socket.write(Buffer.from([1, 0])); stage = 'connect';
+      }
+      if (stage !== 'connect' || buffer.length < 5) return;
+      assert.equal(buffer[0], 5); assert.equal(buffer[1], 1);
+      const addressLength = buffer[3] === 1 ? 4 : buffer[3] === 3 ? buffer[4] + 1 : 16;
+      if (buffer.length < 6 + addressLength) return;
+      const host = buffer[3] === 1 ? [...buffer.subarray(4, 8)].join('.') : buffer.subarray(5, 4 + addressLength).toString();
+      const port = buffer.readUInt16BE(4 + addressLength);
+      commands.push({ host, port }); stage = 'tunnel';
+      const reply = Buffer.from([5, reject ? 5 : 0, 0, 1, 127, 0, 0, 1, 0, 0]);
+      if (reject) { socket.end(reply); return; }
+      assert.equal(port, targetPort);
+      const remainder = buffer.subarray(6 + addressLength);
+      const upstream = connect(targetPort, '127.0.0.1'); sockets.add(upstream);
+      upstream.on('close', () => sockets.delete(upstream)); upstream.on('error', () => socket.destroy());
+      socket.on('close', () => upstream.destroy()); upstream.on('close', () => socket.destroy());
+      socket.removeListener('data', receive);
+      upstream.on('connect', () => { socket.write(reply); if (remainder.length) upstream.write(remainder); socket.pipe(upstream).pipe(socket); });
+    };
+    socket.on('data', receive);
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  return { url: `socks5://${authenticate ? 'test-user:test-password@' : ''}127.0.0.1:${address.port}`, commands, authentications: () => authentications,
+    async close() { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+}
+
+for (const authenticate of [false, true]) {
+  test(`SOCKS5 handshake and data forwarding${authenticate ? ' with credentials' : ''}`, { timeout: 7000 }, async t => {
+    let targetRequests = 0;
+    const target = await serve(createServer((request, response) => {
+      targetRequests++;
+      assert.equal(request.url, '/socks'); assert.equal(request.headers['proxy-authorization'], undefined);
+      response.end('through SOCKS5');
+    })); t.after(() => target.close());
+    const proxy = await socksProxy(Number(new URL(target.url).port), false, authenticate); t.after(() => proxy.close());
+    const outbound = createOutboundFetch(proxy.url); t.after(() => outbound.close());
+    const response = await outbound.fetch(`${target.url}/socks`);
+    assert.equal(await response.text(), 'through SOCKS5');
+    assert.equal(targetRequests, 1); assert.deepEqual(proxy.commands, [{ host: '127.0.0.1', port: Number(new URL(target.url).port) }]);
+    assert.equal(proxy.authentications(), authenticate ? 1 : 0);
+  });
+}
+
+test('SOCKS5 CONNECT rejection never falls back to a reachable direct target', { timeout: 7000 }, async t => {
+  let targetRequests = 0;
+  const target = await serve(createServer((_request, response) => { targetRequests++; response.end('unexpected'); })); t.after(() => target.close());
+  const proxy = await socksProxy(Number(new URL(target.url).port), true); t.after(() => proxy.close());
+  const outbound = createOutboundFetch(proxy.url); t.after(() => outbound.close());
+  await assert.rejects(outbound.fetch(target.url));
+  assert.ok(proxy.commands.length > 0); assert.equal(targetRequests, 0);
+});

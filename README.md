@@ -76,11 +76,15 @@ npm run dev
 
 前端运行在 `http://localhost:5173`，自动代理 API 请求到后端 `localhost:3000`。
 
-### 上传与 MEGA 导入
+### 上传任务
 
-上传页可同时保留多条任务，最新任务显示在顶部；点击卡片展开详情，其他任务折叠显示状态和进度。点击「继续上传」可返回上传表单创建下一条任务。上传时可以切换页面，上传标签的角标显示未确认任务数；密码、重复内容确认和错误都在卡片内处理。其他页面出现待处理事件时，底部通知可跳转到对应任务，成功通知的勾选按钮可直接确认完成并移除任务。
+上传页可同时保留多条任务，最新任务显示在顶部；点击卡片展开详情，其他任务折叠显示状态和进度。顶部表单始终展开，可继续创建下一条任务；滚动后可点击吸顶入口返回表单。上传时可以切换页面，上传标签的角标显示未确认任务数；密码、重复内容确认和错误都在卡片内处理。其他页面出现待处理事件时，底部通知可跳转到对应任务，成功通知的勾选按钮可直接确认完成并移除任务。
 
 刷新页面后，服务端保留任务和处理结果。浏览器无法自动恢复本地文件访问权，本地文件或文件夹上传需要重新选择原文件后续传；MEGA 下载和已提交的服务端处理可继续运行。完成任务经用户确认后从任务列表移除，已导入图包仍保留。
+
+多任务持久化新增幂等迁移 `010_add_upload_tasks`，随服务启动自动执行。分享链接及恢复所需密码只保存在服务端任务元数据，不出现在任务列表响应中；任务确认或取消后删除对应记录。
+
+### MEGA 导入
 
 MEGA 导入接受 `https://mega.nz/file/…#…`、`https://mega.nz/folder/…#…`、旧版分享和 `#P!` 密码保护链接，也支持文件夹分享中的子文件或子文件夹。单文件必须是 ZIP、RAR 或 7z；文件夹按原层级导入其中的图片和视频。分享密码或缺失的解密密钥与压缩包密码分别填写，密码错误时可在任务卡片内重试。RAR、7z 和加密压缩包依然需要服务器安装 `7z`。
 
@@ -97,9 +101,11 @@ npm run dev
 
 Linux/macOS 可用 `AOI_PROXY_URL=http://127.0.0.1:8889 npm run dev`。支持 HTTP、HTTPS 和 SOCKS5 代理（例如 `socks5://127.0.0.1:8888`），也支持代理 URL 中的用户名和密码；凭证中的特殊字符需要 URL 编码。未配置或留空时直连，不自动读取操作系统代理设置。MEGA API 和文件数据请求共用代理，连接失败不会回退直连；TLS 校验保持开启。实现使用 `undici` 的独立 `ProxyAgent`，不修改全局网络设置，也不影响主备同步。
 
+原生 SOCKS5 支持从 [Undici 7.23.0](https://github.com/nodejs/undici/releases/tag/v7.23.0) 引入，本项目使用 `^7.30.0` 范围；提交的锁文件固定已验证版本，CI 和 Docker 使用 `npm ci`。更新锁文件时需运行代理通信、Pixiv 登录与导入回归；SOCKS5 不是 MEGAJS 的依赖版本要求。
+
 Compose 和 PM2 配置均透传此变量。Docker 中的 `127.0.0.1` 指容器自身，宿主机代理需填写容器可达的地址（Docker Desktop 通常为 `host.docker.internal`），并确保代理允许该连接；修改 Compose 环境后执行 `docker compose up -d`，PM2 使用 `pm2 restart ecosystem.config.cjs --update-env`。
 
-多任务持久化新增幂等迁移 `010_add_upload_tasks`，随服务启动自动执行。分享链接及恢复所需密码只保存在服务端任务元数据，不出现在任务列表响应中；任务确认或取消后删除对应记录。接入参考 [MEGAJS 公开分享下载文档](https://mega.js.org/docs/1.0/tutorial/downloading) 和 [MEGA 官方开源密码链接实现](https://github.com/meganz/webclient/blob/master/js/ui/export.js)。
+接入参考 [MEGAJS 公开分享下载文档](https://mega.js.org/docs/1.0/tutorial/downloading) 和 [MEGA 官方开源密码链接实现](https://github.com/meganz/webclient/blob/master/js/ui/export.js)。
 
 ### 生产构建
 
