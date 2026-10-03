@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage } from '../../client/src/lib/upload-task-display.ts';
+import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage } from '../../client/src/features/uploads/task-display.ts';
 import type { UploadTask } from '../../shared/types.js';
 
 const task: UploadTask = {

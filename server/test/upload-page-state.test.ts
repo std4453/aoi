@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { taskRevealDelta, saveUploadScrollY, getUploadScrollY, setHandledRevealRevision, getHandledRevealRevision } from '../../client/src/lib/upload-page-state.ts';
+import { taskRevealDelta, saveUploadScrollY, getUploadScrollY, setHandledRevealRevision, getHandledRevealRevision } from '../../client/src/features/uploads/view-state.ts';
 
 test('expanded cards scroll only as far as needed inside the unobscured viewport', () => {
   assert.equal(taskRevealDelta(150, 400, 100, 700), 0, 'fully visible cards stay in place');

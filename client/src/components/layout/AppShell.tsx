@@ -3,8 +3,8 @@ import { useRef, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import ConnectionStatus from '../ConnectionStatus';
 import { Home, Upload, Settings } from 'lucide-react';
-import { useUploadTasks } from '../../hooks/useUploadTasks';
-import UploadTaskNotifications from '../UploadTaskNotifications';
+import { useUploadTasks } from '../../features/uploads/useUploadTasks';
+import UploadTaskNotifications from '../../features/uploads/UploadTaskNotifications';
 import { saveHomeScrollY, clearHomeScrollY, getLastHomeSearch, saveLastHomeSearch, triggerHomeReset } from '../../lib/homeStore';
 
 const navItems = [

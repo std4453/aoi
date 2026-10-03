@@ -6,7 +6,7 @@ import test from 'node:test';
 import type { UploadTask, Pack } from '../../shared/types.js';
 import { corpus, fixtureBytes, sha256, verifyRarCorpus } from '../../scripts/check-rar.mjs';
 import { startTestServer, stopTestServer } from './helpers/server-process.js';
-import { taskErrorMessage } from '../../client/src/lib/upload-task-display.ts';
+import { taskErrorMessage } from '../../client/src/features/uploads/task-display.ts';
 
 test('installed 7z decodes the pinned RAR4/RAR5 corpus byte for byte', () => {
   verifyRarCorpus();

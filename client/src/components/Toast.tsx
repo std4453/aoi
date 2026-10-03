@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertCircle, CheckCircle, Info, AlertTriangle, Loader2, Check, ChevronRight } from 'lucide-react';
 import type { UploadTask } from '../../../shared/types';
 import { IconButton } from './Button';
-import { TaskSummaryContent } from './TaskSummary';
-import { taskStates } from '../lib/upload-task-display';
+import { TaskSummaryContent } from '../features/uploads/TaskPresentation';
+import { taskStates } from '../features/uploads/task-display';
 
 type ToastType = 'default' | 'info' | 'success' | 'error' | 'warning' | 'loading';
 

@@ -1,5 +1,5 @@
-import type { UploadTask } from '../../../shared/types';
-import { formatBytes } from './utils';
+import type { UploadTask } from '../../../../shared/types';
+import { formatBytes } from '../../lib/utils';
 
 export type TaskTone = 'neutral' | 'warning' | 'success' | 'error';
 
@@ -15,13 +15,6 @@ export const taskStates = {
   completed: { label: '已完成', tone: 'success', content: 'result' },
   failed: { label: '失败', tone: 'error', content: 'attention' },
 } as const satisfies Record<UploadTask['status'], { label: string; tone: TaskTone; content: 'transfer' | 'processing' | 'attention' | 'result' }>;
-
-export const taskToneStyles = {
-  neutral: { border: '', panel: 'border-gray-700 bg-gray-800/50', text: 'text-gray-400', icon: 'text-gray-400' },
-  warning: { border: 'border-amber-500/60', panel: 'border-amber-800/50 bg-amber-500/10', text: 'text-amber-300', icon: 'text-amber-400' },
-  success: { border: 'border-green-700/70', panel: 'border-green-800/50 bg-green-900/20', text: 'text-green-300', icon: 'text-green-400' },
-  error: { border: 'border-red-500/60', panel: 'border-red-800/50 bg-red-900/20', text: 'text-red-300', icon: 'text-red-400' },
-} satisfies Record<TaskTone, { border: string; panel: string; text: string; icon: string }>;
 
 export function taskNoticeMessage(task: UploadTask): string | undefined {
   if (taskStates[task.status].content !== 'attention') return;

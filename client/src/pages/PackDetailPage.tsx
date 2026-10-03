@@ -1,3 +1,4 @@
+import { uploadView } from '../features/uploads/view-state';
 import { useConnectionState } from '../hooks/useConnectionState';
 
 import { resourceUrl } from '../lib/connection';
@@ -389,7 +390,7 @@ export default function PackDetailPage() {
         </div>
       )}
       {pack.sourceType === 'folder' && (['uploading', 'verifying', 'awaiting_confirmation'].includes(pack.status) || (pack.originalFormat === 'pixiv' && pack.status === 'failed')) && !pack.verification?.allowsPreview && (
-        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => navigate(`/upload?folder=${encodeURIComponent(pack.id)}`)}>
+        <button disabled={!serverWritable} className="mb-4 px-4 py-2 rounded-xl bg-blue-600 text-white" onClick={() => { uploadView.requestReveal(pack.id); navigate('/upload'); }}>
           {pack.originalFormat === 'pixiv' ? '查看导入进度' : '继续完成上传'}
         </button>
       )}

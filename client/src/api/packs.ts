@@ -1,4 +1,3 @@
-import { forgetUploadTask } from '../lib/uploadTask';
 import { apiFetch } from '../lib/connection';
 import type { ArchiveUploadRequest, DuplicateArchiveResponse, PackThumbnail } from '../../../shared/types.js';
 import { get, post, patch, del, put } from './client';
@@ -24,7 +23,6 @@ export function fetchPack(id: string): Promise<Pack> {
 
 export async function removePack(id: string): Promise<void> {
   await del<void>(`/packs/${id}`);
-  forgetUploadTask(id);
 }
 
 export function renamePack(id: string, name: string): Promise<Pack> {

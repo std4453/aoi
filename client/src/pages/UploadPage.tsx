@@ -1,52 +1,23 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronUp, FileArchive, FolderOpen, Tag, Upload } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ChevronDown, ChevronUp, FileArchive, FolderOpen, Upload } from 'lucide-react';
 import type { UploadTask } from '../../../shared/types';
-import { useUploadTasks } from '../hooks/useUploadTasks';
-import { fetchTags } from '../api/packs';
+import { useUploadCards, useUploadDraft } from '../features/uploads/useUploadTasks';
 import { formatBytes } from '../lib/utils';
 import { DuplicateCard } from '../components/DuplicateUploadModal';
 import { TextInput, PasswordInput } from '../components/Form';
-import TagSelector from '../components/TagSelector';
-import PackProcessingResult from '../components/PackProcessingResult';
+import TagSelectField from '../components/TagSelectField';
+import PackProcessingResult from '../features/uploads/PackProcessingResult';
 import ImportSources from '../components/ImportSources';
 import PixivSettings from '../components/PixivSettings';
 import { ActionRow, Button, IconButton } from '../components/Button';
-import { TaskSourceTitle, TaskSummaryContent } from '../components/TaskSummary';
-import { taskNoticeMessage, taskProgressDisplay, taskStates, taskToneStyles } from '../lib/upload-task-display';
-import { TaskActionRow, TaskNotice, TaskTextAction } from '../components/TaskFeedback';
-import { getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../lib/upload-page-state';
+import { TaskSourceTitle, TaskSummaryContent } from '../features/uploads/TaskPresentation';
+import { taskNoticeMessage, taskProgressDisplay, taskStates } from '../features/uploads/task-display';
+import { TaskSurface, TaskActionRow, TaskNotice, TaskTextAction } from '../features/uploads/TaskPresentation';
+import { uploadView, getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../features/uploads/view-state';
 
 const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
   : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
-
-function UploadTags() {
-  const { draft, setDraft, starting } = useUploadTasks();
-  const [selector, setSelector] = useState<null | 'open' | 'closing'>(null);
-  const [tags, setTags] = useState<Array<{ id: string; name: string }>>([]);
-  const [error, setError] = useState('');
-  const selectedKey = draft.tagIds.join(',');
-  useEffect(() => {
-    if (!selectedKey) return;
-    let active = true;
-    setError('');
-    void fetchTags().then(tags => { if (active) setTags(tags); }).catch(() => { if (active) setError('标签名称暂时无法加载'); });
-    return () => { active = false; };
-  }, [selectedKey]);
-  return <div className="mt-3">
-    <button type="button" onClick={() => setSelector('open')} disabled={starting} aria-expanded={selector === 'open'} aria-label={draft.tagIds.length ? `选择标签，已选择 ${draft.tagIds.length} 个` : '选择标签'}
-      className="flex w-full items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-400 transition-colors hover:bg-gray-700 disabled:opacity-50">
-      <Tag size={16} className="shrink-0" /> <span className="flex min-w-0 flex-1 flex-wrap gap-1 text-left">{draft.tagIds.length
-        ? draft.tagIds.map(id => <span key={id} className="max-w-full truncate rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300">{tags.find(tag => tag.id === id)?.name ?? '…'}</span>)
-        : '选择标签'}</span><ChevronDown size={14} className="shrink-0" />
-    </button>
-    {error && <p role="status" className="mt-2 text-xs text-amber-400">{error}</p>}
-    {selector && createPortal(<TagSelector visible={selector === 'open'} selectedIds={draft.tagIds}
-      onConfirm={tagIds => { setDraft({ tagIds }); setSelector('closing'); }}
-      onClose={() => setSelector('closing')} onClosed={() => setSelector(null)} />, document.body)}
-  </div>;
-}
 
 async function readDirectory(directory: FileSystemDirectoryEntry, root = directory.name): Promise<File[]> {
   const files: File[] = [];
@@ -68,7 +39,7 @@ async function readDirectory(directory: FileSystemDirectoryEntry, root = directo
 }
 
 function UploadForm() {
-  const { draft, setDraft, resetDraft, start, starting, metadataLoading, metadataError } = useUploadTasks();
+  const { draft, setDraft, resetDraft, start, starting, metadataLoading, metadataError, error: draftError } = useUploadDraft();
   const formId = useId();
   const archiveInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -150,9 +121,9 @@ function UploadForm() {
       {draft.source === 'mega' && <PasswordInput value={draft.sharePassword} onChange={sharePassword => setDraft({ sharePassword })} placeholder="分享密码 / 解密密钥" disabled={starting} />}
       {(draft.source === 'archive' || draft.source === 'mega') && <PasswordInput value={draft.archivePassword} onChange={archivePassword => setDraft({ archivePassword })} placeholder="压缩包密码" disabled={starting} />}
     </form>}
-    {draft.source && <UploadTags />}
+    {draft.source && <div className="mt-3"><TagSelectField value={draft.tagIds} onChange={tagIds => setDraft({ tagIds })} disabled={starting} /></div>}
     {settings && draft.source === 'pixiv' && <div className="mt-3 rounded-xl border border-gray-800"><PixivSettings onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} /></div>}
-    {error && <p role="alert" className="mt-3 text-sm text-red-400">{error}</p>}
+    {(error || draftError) && <p role="alert" className="mt-3 text-sm text-red-400">{error || draftError}</p>}
     {draft.source && <ActionRow className="mt-3"><Button variant="secondary" onClick={() => { setSettings(false); setError(''); resetDraft(); }} disabled={starting}>取消上传</Button>
       <Button variant="primary" type="submit" form={formId} disabled={!canStart || starting || scanning}>{starting ? '正在创建任务…' : remote ? '开始导入' : '开始上传'}</Button></ActionRow>}
     </div></div>
@@ -161,7 +132,7 @@ function UploadForm() {
 }
 
 function TaskCard({ task }: { task: UploadTask }) {
-  const { expandedId, expand, dismiss, pause, resume, continueTask, reselect, hasLocalFiles, files } = useUploadTasks();
+  const { expandedId, expand, dismiss, pause, resume, continueTask, reselect, hasLocalFiles, files } = useUploadCards();
   const navigate = useNavigate();
   const expanded = expandedId === task.id;
   const [busy, setBusy] = useState(false);
@@ -173,7 +144,6 @@ function TaskCard({ task }: { task: UploadTask }) {
   const [settings, setSettings] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const state = taskStates[task.status];
-  const feedback = taskToneStyles[state.tone];
   const notice = taskNoticeMessage(task);
   const hasFiles = hasLocalFiles(task.id);
   const run = async (action: () => Promise<unknown>) => {
@@ -188,7 +158,7 @@ function TaskCard({ task }: { task: UploadTask }) {
   const remote = task.source === 'mega' || task.source === 'pixiv';
   const indeterminate = progress.percentage === undefined;
   const showProgress = state.content === 'transfer' || state.content === 'processing';
-  return <article className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${feedback.border || (expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-600')}`}>
+  return <TaskSurface task={task} expanded={expanded}>
     <div className="upload-card-header">
       <button type="button" className="upload-card-heading" data-expanded={expanded} aria-expanded={expanded} aria-controls={`task-${task.id}`}
         onClick={() => expand(expanded ? null : task.id)}>
@@ -241,11 +211,12 @@ function TaskCard({ task }: { task: UploadTask }) {
         </>}
       </div></div>
     </div>
-  </article>;
+  </TaskSurface>;
 }
 
 export default function UploadPage() {
-  const { tasks, expandedId, revealRevision, expand, exitingIds, draft, error, loading, refresh } = useUploadTasks();
+  const { tasks, expandedId, revealRevision, exitingIds, error, loading, refresh } = useUploadCards();
+  const { draft } = useUploadDraft();
   const formContainer = useRef<HTMLDivElement>(null);
   const stickyHeader = useRef<HTMLDivElement>(null);
   const stickyButton = useRef<HTMLButtonElement>(null);
@@ -255,10 +226,6 @@ export default function UploadPage() {
   const [enteringIds, setEnteringIds] = useState(new Set<string>());
   const seenTasks = useRef(new Set(tasks.map(task => task.id)));
   const loadedTasks = useRef(!loading);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTask = searchParams.get('task');
-  const requestedFolder = searchParams.get('folder');
-
   // Only newly arriving tasks animate. Mounting a cached list on a tab switch does not.
   useLayoutEffect(() => {
     if (loading) return;
@@ -289,10 +256,7 @@ export default function UploadPage() {
     };
   }, [loading]);
 
-  useEffect(() => {
-    const task = requestedTask ? tasks.find(task => task.id === requestedTask) : requestedFolder ? tasks.find(task => task.packId === requestedFolder) : undefined;
-    if (task) { expand(task.id); setSearchParams({}, { replace: true }); }
-  }, [requestedTask, requestedFolder, tasks, expand, setSearchParams]);
+  useEffect(() => { uploadView.resolveReveal(tasks, loading); }, [tasks, loading]);
 
   useLayoutEffect(() => {
     if (!expandedId || revealRevision === getHandledRevealRevision()) return;

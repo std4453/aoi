@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { PackThumbnail } from '../../../shared/types';
-import { fetchThumbnails } from '../api/packs';
-import { resourceUrl } from '../lib/connection';
-import { Button } from './Button';
-import { TaskActionRow, TaskNotice } from './TaskFeedback';
+import type { PackThumbnail } from '../../../../shared/types';
+import { fetchThumbnails } from '../../api/packs';
+import { resourceUrl } from '../../lib/connection';
+import { Button } from '../../components/Button';
+import { TaskActionRow, TaskNotice } from './TaskPresentation';
 
 function PreviewSkeleton() {
   return <span aria-hidden="true" className="absolute inset-0 rounded-lg bg-gray-800 motion-safe:animate-pulse" />;

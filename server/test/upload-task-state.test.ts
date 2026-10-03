@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { retainPendingTasks, selectionAfterRemoval } from '../../client/src/lib/upload-task-state.ts';
+import { retainPendingTasks, selectionAfterRemoval } from '../../client/src/features/uploads/view-state.ts';
 
 const tasks = ['first', 'middle', 'last'].map(id => ({ id }));
 

@@ -1,17 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useUploadTasks } from '../hooks/useUploadTasks';
-import { showError, showTaskToast, type TaskToastHandle } from './Toast';
-import { taskStates } from '../lib/upload-task-display';
+import { useUploadTasks } from './useUploadTasks';
+import { showError, showTaskToast, type TaskToastHandle } from '../../components/Toast';
+import { uploadView } from './view-state';
+import { taskStates } from './task-display';
 
 export default function UploadTaskNotifications() {
-  const { tasks, expand, dismiss } = useUploadTasks();
+  const { tasks, dismiss } = useUploadTasks();
   const location = useLocation();
   const navigate = useNavigate();
   const seen = useRef(new Map<string, string>());
   const visible = useRef(new Map<string, TaskToastHandle>());
-  const actions = useRef({ expand, dismiss, navigate });
-  actions.current = { expand, dismiss, navigate };
+  const actions = useRef({ expand: uploadView.expand, dismiss, navigate });
+  actions.current = { expand: uploadView.expand, dismiss, navigate };
 
   useEffect(() => {
     const onUpload = location.pathname.replace(/\/+$/, '') === '/upload';
