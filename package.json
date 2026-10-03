@@ -12,6 +12,7 @@
     "build:server": "npm --prefix server run build",
     "start": "cd server && node dist/server/src/index.js",
     "test": "npm --prefix server test",
+    "test:rar": "npm --prefix server run test:rar",
     "check": "npm run build && npm test"
   },
   "devDependencies": {

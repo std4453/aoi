@@ -27,17 +27,20 @@ WORKDIR /app
 COPY server/package*.json ./
 RUN npm ci --omit=dev
 
+FROM node:22-bookworm-slim AS archive-tools
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/install-7zip.sh /tmp/install-7zip.sh
+RUN sh /tmp/install-7zip.sh /opt/7zip
+
 FROM node:22-bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/std4453/aoi"
 
-# Debian separates the RAR codecs into its non-free archive.
-RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends p7zip-full p7zip-rar \
-    && 7z i | grep -q ' Rar ' \
-    && 7z i | grep -q ' Rar5 ' \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=archive-tools /opt/7zip/7z /usr/local/bin/7z
+COPY --from=archive-tools /opt/7zip/7zip-LICENSE.txt /usr/local/share/licenses/7zip-LICENSE.txt
 
 WORKDIR /app
 COPY --from=production-dependencies /app/node_modules ./node_modules

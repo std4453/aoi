@@ -51,12 +51,12 @@ ugoira 保存为独立 `.ugoira` 文件，属于逻辑图片媒体（API `mediaT
 - ZIP 可由 Node.js 直接处理；RAR、7z、加密压缩包及 ZIP fallback 需要系统提供 `7z`
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install -y p7zip-full
-
-# macOS
-brew install p7zip
+# Linux / macOS：安装与 CI、Docker 一致的完整 7-Zip（固定版本并校验 SHA-256）
+sh scripts/install-7zip.sh /tmp/aoi-7zip
+export PATH=/tmp/aoi-7zip:$PATH
 ```
+
+部分软件包只包含 RAR 格式识别器或未压缩条目支持；能列出 Rar/Rar5 不代表能解压实际的压缩文件。
 
 ## 快速开始
 
@@ -429,6 +429,8 @@ MIT
 
 ### RAR 解压环境
 
-本地需安装完整 7-Zip，并将安装目录加入 PATH（Windows 默认 `C:\Program Files\7-Zip`），重启服务使其生效。Docker 运行镜像固定为 Node 22 / Debian Bookworm，安装 `p7zip-full` 和 non-free 仓库的 `p7zip-rar`，构建时检查 RAR/RAR5 格式支持；仅安装 `p7zip-full` 不足以提供 RAR 解码。`npm run check` 包含生成式 RAR 图片解压测试。
+本地需安装完整 7-Zip，并将命令 `7z` 放入 PATH（Windows 默认安装目录为 `C:\Program Files\7-Zip`），重启服务使其生效。CI 与 Docker 使用同一安装脚本，固定官方 7-Zip 26.03 并验证发行包 SHA-256，避免精简软件包缺少 RAR 解码器。运行镜像保留上游许可证。
+
+`npm run test:rar` 可单独运行 RAR 基线：固定的 RAR4/RAR5 压缩、固实压缩、正文加密和文件名加密样例逐文件校验哈希，另覆盖上传、预览、生成、下载、密码重试、重启恢复、取消和损坏包错误提示。完整 `npm run check` 同样包含这些测试；CI 还会在最终 Docker 镜像中离线解压相同样例，失败则不发布。正常测试不下载样例，不需要 RAR 压缩器。详见 [RAR 测试基线](server/test/fixtures/rar/README.md)。
 
 界面与交互约定见 [设计系统规范](docs/design-system.md)。
