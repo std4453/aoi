@@ -3,6 +3,7 @@ import test from 'node:test';
 import { MockAgent } from 'undici';
 import { FanboxClient } from '../src/services/fanbox-client.js';
 import { FanboxChallengeClient } from '../src/services/fanbox-challenge.js';
+import { readExternalConfig } from '../src/config/external-sources.js';
 
 const api = 'https://api.fanbox.cc';
 const solver = 'http://127.0.0.1:43132';
@@ -20,6 +21,31 @@ function setup(enabled = true) {
     (previous, cookies) => { rotations.push([previous, ...cookies]); }, enabled ? resolver : undefined);
   return { agent, client, resolver, rotations };
 }
+
+test('server-managed solver proxy omits request proxy while keeping authenticated AoI outbound separate', async () => {
+  const configured = readExternalConfig({ AOI_FLARESOLVERR_URL: solver, AOI_FLARESOLVERR_PROXY_MODE: 'server' }, 'http://user:password@proxy.test:8080');
+  assert.equal(configured.flaresolverr.proxyUrl, undefined);
+  const agent = new MockAgent(); agent.disableNetConnect();
+  agent.get(solver).intercept({ path: '/v1', method: 'POST', body: body => {
+    assert.equal('proxy' in JSON.parse(body), false);
+    return true;
+  } }).reply(200, result(), { headers: jsonHeaders });
+  try {
+    const resolver = new FanboxChallengeClient(configured.flaresolverr.url!, configured.flaresolverr.proxyUrl, agent);
+    assert.deepEqual(await (await resolver.resolve(api + pathname, '')).json(), envelope);
+    agent.assertNoPendingInterceptors();
+  } finally { await agent.close(); }
+});
+
+test('solver proxy mode preserves inheritance and rejects ambiguous configuration', () => {
+  const base = { AOI_FLARESOLVERR_URL: solver };
+  assert.equal(readExternalConfig(base, 'http://proxy.test:8080/').flaresolverr.proxyUrl, 'http://proxy.test:8080/');
+  assert.equal(readExternalConfig({ ...base, AOI_FLARESOLVERR_PROXY_URL: 'http://override.test:8080' }, 'http://proxy.test:8080/').flaresolverr.proxyUrl, 'http://override.test:8080/');
+  assert.throws(() => readExternalConfig(base, 'http://user:password@proxy.test:8080'), /without URL credentials/);
+  assert.throws(() => readExternalConfig({ ...base, AOI_FLARESOLVERR_PROXY_MODE: 'server', AOI_FLARESOLVERR_PROXY_URL: 'http://proxy.test:8080' }), /cannot be combined/);
+  assert.throws(() => readExternalConfig({ AOI_FLARESOLVERR_PROXY_MODE: 'server' }), /requires AOI_FLARESOLVERR_URL/);
+  assert.throws(() => readExternalConfig({ ...base, AOI_FLARESOLVERR_PROXY_MODE: 'invalid' }));
+});
 
 test('disabled solver reports the challenge without another request; JSON errors never invoke it', async () => {
   for (const enabled of [false, true]) {
