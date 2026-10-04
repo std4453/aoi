@@ -34,7 +34,7 @@ import {
   toPublicPack,
 } from '../db/repositories.js';
 import { removePackFiles, ensureDir, getArchivePath, getThumbnailsDir, getExtractedImagesDir, getExtractedVideosDir, getFolderStagingDir, getUploadPath, getPath } from '../services/storage.js';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { jobQueue } from '../services/job-queue.js';
 import { normalizeRelativePath, resolveWithin } from '../services/safe-path.js';
 import { buildJpegOutputPaths } from '../services/jpeg-output-path.js';

@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
 import pLimit from 'p-limit';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import {
   getExtractedImagesDir,
   getGeneratedDir,

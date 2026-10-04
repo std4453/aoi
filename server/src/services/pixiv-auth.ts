@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { resolveWithin } from './safe-path.js';
 import type { PixivSettings } from '../../../shared/types.js';
 

@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { getFileCategory } from './file-classifier.js';
 import { readFanboxSettings, rotateFanboxSession } from './fanbox-auth.js';
 import { FanboxChallengeClient, type FanboxChallengeResolver } from './fanbox-challenge.js';

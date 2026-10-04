@@ -16,7 +16,7 @@ delete process.env.AUTH_KEY;
 fs.writeFileSync(process.env.AOI_BROWSER_LOGIN_KEY_FILE, 'b'.repeat(64), { mode: 0o600 });
 const { BrowserLogin, browserLogin } = await import('../src/services/browser-login.js');
 const { readFanboxSettings } = await import('../src/services/fanbox-auth.js');
-const { config } = await import('../src/config.js');
+const { config } = await import('../src/config/index.js');
 const { registerBrowserLoginRoutes } = await import('../src/routes/browser-login.js');
 const { default: Fastify } = await import('fastify');
 const agent = new MockAgent();

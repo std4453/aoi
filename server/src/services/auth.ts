@@ -1,7 +1,7 @@
 import { protocolVersion } from '../version.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 
 // A process-scoped credential keeps the configured key out of resource URLs.
 // Restarting the service invalidates it; clients reauthenticate with their saved key.

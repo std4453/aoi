@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { fetch } from 'undici';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { saveFanboxSettings, validateFanboxSession } from './fanbox-auth.js';
 import { exchangePixivCode, savePixivSettings } from './pixiv-auth.js';
 import { resolveWithin } from './safe-path.js';

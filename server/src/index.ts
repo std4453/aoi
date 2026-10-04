@@ -10,7 +10,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from './config.js';
+import { config } from './config/index.js';
 import { backupDb, closeDb, getDbPath, initDb } from './db/connection.js';
 import { registerPackRoutes } from './routes/packs.js';
 import { registerPixivRoutes } from './routes/pixiv.js';

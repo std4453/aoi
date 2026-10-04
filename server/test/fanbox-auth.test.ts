@@ -10,7 +10,7 @@ process.env.DATA_DIR = dataDir;
 process.env.FANBOX_SESSION_ID = 'environment-session';
 process.env.FANBOX_COOKIES_FILE = '';
 const { readFanboxSettings, saveFanboxSettings, sessionFromCookieFile, rotateFanboxSession } = await import('../src/services/fanbox-auth.js');
-const { config } = await import('../src/config.js');
+const { config } = await import('../src/config/index.js');
 const { registerFanboxRoutes } = await import('../src/routes/fanbox.js');
 const app = Fastify();
 await app.register(registerFanboxRoutes);

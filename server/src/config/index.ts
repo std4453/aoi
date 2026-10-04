@@ -1,14 +1,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { parseProxyUrl } from './services/outbound-fetch.js';
-import { readExternalConfig } from './config/external-sources.js';
+import { parseProxyUrl } from '../services/outbound-fetch.js';
+import { readExternalConfig } from './external-sources.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = __dirname.includes(`${path.sep}dist${path.sep}server${path.sep}`)
-  ? path.resolve(__dirname, '../../../..')
-  : path.resolve(__dirname, '../..');
+  ? path.resolve(__dirname, '../../../../..')
+  : path.resolve(__dirname, '../../..');
 const defaultDataDir = path.join(projectRoot, 'data');
 
 const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(value => value === 'true' || value === '1');

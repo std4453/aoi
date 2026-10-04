@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { beginMutation } from './state.js';
 import { getPack } from '../db/repositories.js';
 import { replicaReady } from '../db/snapshot-repository.js';

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { publisher } from '../replication/replicator.js';
 import { cachedManifest, cachedSignature } from '../replication/snapshots.js';
 import { canonicalJson, digest, safeContentFile } from '../replication/protocol.js';

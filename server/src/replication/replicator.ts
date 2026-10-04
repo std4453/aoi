@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { beginReplicaInstall, finishReplicaInstall, installedManifest, pendingInstallations, markReplicaRemoving, readState, removeReplicaPack, replicaReady, retryReplicaProcessing, saveReplicaIndex, writeState } from '../db/snapshot-repository.js';
 import { getPath, removePackFiles } from '../services/storage.js';
 import { getPack, hasAnyActiveJob, listPacks } from '../db/repositories.js';

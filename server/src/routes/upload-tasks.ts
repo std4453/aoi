@@ -8,7 +8,7 @@ import { createUploadTask, getUploadTaskMetadata, updateUploadTaskMetadata, upda
 import { continueFolderVerification } from '../services/content-verification.js';
 import { getUploadPath, removePackFiles } from '../services/storage.js';
 import { jobQueue } from '../services/job-queue.js';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { withUploadLock } from '../services/archive-deduplication.js';
 import { validateMegaUrl } from '../services/mega-link.js';
 import { parseFanboxUrl } from '../services/fanbox-client.js';

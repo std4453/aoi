@@ -387,7 +387,7 @@ FRONTEND_ONLY=true SERVER_SELECTION_ENABLED=true docker compose up -d
 ├── server/
 │   └── src/
 │       ├── index.ts          # Fastify 入口
-│       ├── config.ts         # 配置 (Zod 校验)
+│       ├── config/           # 配置 (Zod 校验)
 │       ├── db/               # 原生 SQLite、迁移与仓储
 │       ├── plugins/tus.ts    # tus 上传插件
 │       ├── routes/           # API 路由

@@ -1,7 +1,7 @@
 import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { resolveWithin } from './safe-path.js';
 import type { FanboxSettings } from '../../../shared/types.js';
 

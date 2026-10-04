@@ -1,6 +1,6 @@
 import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { getDb } from '../db/connection.js';
 import { getPack, getLatestJob, setPackTags, updatePackStats, updatePackStructureType } from '../db/repositories.js';
 import { ensureDir, getExtractedImagesDir, getExtractedVideosDir } from './storage.js';

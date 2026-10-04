@@ -17,7 +17,7 @@ import {
   moveFilesFromTemp,
   type ExtractStats,
 } from './file-classifier.js';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { normalizeRelativePath, resolveWithin } from './safe-path.js';
 import { isArchivePasswordError } from './archive-errors.js';
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { normalizeRelativePath } from './safe-path.js';
 import type { CompressionOptions, FileSelection } from '../types.js';
 

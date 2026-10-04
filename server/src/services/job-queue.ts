@@ -1,5 +1,5 @@
 import { archiveErrorCode, jobFailureCode, taskErrorCode } from './task-errors.js';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { beginMutation } from '../replication/state.js';
 import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification.js';
 import { EventEmitter } from 'node:events';

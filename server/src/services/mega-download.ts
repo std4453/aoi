@@ -6,7 +6,7 @@ import { PassThrough, Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { API, File as MegaFile } from 'megajs';
 import type { MegaMetadata, TaskErrorCode } from '../../../shared/types.js';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { normalizeRelativePath, resolveWithin } from './safe-path.js';
 import { MegaPasswordError, resolveMegaUrl } from './mega-link.js';
 import { createOutboundFetch } from './outbound-fetch.js';

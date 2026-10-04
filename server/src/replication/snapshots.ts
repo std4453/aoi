@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { contentRevision, initializeDataset, readManifestCache, saveManifestCache, sourceView } from '../db/snapshot-repository.js';
 import { getPack, hasAnyActiveJob } from '../db/repositories.js';
 import { resolveWithin } from '../services/safe-path.js';

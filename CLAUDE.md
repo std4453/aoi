@@ -41,7 +41,7 @@ pack-server/
 ├── server/
 │   └── src/
 │       ├── index.ts             # Fastify 入口，注册路由和插件
-│       ├── config.ts            # Zod 校验的配置，默认端口 3000
+│       ├── config/              # Zod 校验的配置，默认端口 3000
 │       ├── types.ts             # 重导出 shared/types.ts
 │       ├── db/
 │       │   ├── connection.ts    # 原生 SQLite、单实例锁、完整性检查与在线备份

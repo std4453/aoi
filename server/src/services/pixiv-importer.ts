@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { fetch, ProxyAgent, type Dispatcher } from 'undici';
 import { z } from 'zod';
 import sharp from 'sharp';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { getDb } from '../db/connection.js';
 import { getPack, getLatestJob, updatePackStats, updatePackStructureType, setPackTags } from '../db/repositories.js';
 import { ensureDir, getExtractedImagesDir } from './storage.js';
