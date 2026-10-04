@@ -7,8 +7,8 @@ import { useUploadCards, useUploadDraft } from '../features/uploads/useUploadTas
 import { DuplicateCard } from '../components/DuplicateUploadModal';
 import { PasswordInput } from '../components/Form';
 import PackProcessingResult from '../features/uploads/PackProcessingResult';
-import FanboxSettings from '../components/FanboxSettings';
-import PixivSettings from '../components/PixivSettings';
+import FanboxSettingsDialog from '../components/FanboxSettingsDialog';
+import PixivSettingsDialog from '../components/PixivSettingsDialog';
 import { Button, IconButton, TextButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../features/uploads/TaskPresentation';
 import { taskNoticeMessage, taskProgressDisplay, taskStates, taskNeedsLogin } from '../features/uploads/task-display';
@@ -74,8 +74,8 @@ function TaskCard({ task }: { task: UploadTask }) {
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${file.status === 'uploaded' ? 'bg-green-500' : file.status === 'failed' ? 'bg-red-400' : file.status === 'uploading' ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
             <span className="min-w-0 flex-1 truncate text-gray-400" title={file.path}>{file.path}</span><span className="shrink-0 text-gray-500">{file.status === 'uploaded' ? '完成' : file.status === 'failed' ? '失败' : `${file.size ? Math.round(file.transferred / file.size * 100) : 0}%`}</span>
           </div>)}</div>}</div>}
-        {settings && task.source === 'pixiv' && task.status === 'failed' && <PixivSettings onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
-        {settings && task.source === 'fanbox' && task.status === 'failed' && <FanboxSettings onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
+        {settings && task.source === 'pixiv' && task.status === 'failed' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
+        {settings && task.source === 'fanbox' && task.status === 'failed' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
         <input ref={input} type="file" className="hidden" {...(task.source === 'folder' ? { webkitdirectory: '', directory: '' } : { accept: '.zip,.rar,.7z' })}
           onChange={event => { const selected = Array.from(event.target.files || []); event.target.value = ''; if (selected.length) void run(() => reselect(task.id, selected)); }} />
         {busy && <p role="status" className="sr-only">正在处理…</p>}

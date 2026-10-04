@@ -3,8 +3,8 @@ import { useUploadDraft } from './useUploadTasks';
 import { formatBytes } from '../../lib/utils';
 import { TextInput, PasswordInput } from '../../components/Form';
 import TagSelectField from '../../components/TagSelectField';
-import FanboxSettings from '../../components/FanboxSettings';
-import PixivSettings from '../../components/PixivSettings';
+import FanboxSettingsDialog from '../../components/FanboxSettingsDialog';
+import PixivSettingsDialog from '../../components/PixivSettingsDialog';
 import { ActionRow, Button, TextButton } from '../../components/Button';
 
 export default function UploadDraftForm({ scanning, error, onCancel }: {
@@ -38,7 +38,7 @@ export default function UploadDraftForm({ scanning, error, onCancel }: {
       <ActionRow className="mt-4"><Button variant="secondary" onClick={() => { setSettings(false); onCancel(); resetDraft(); }} disabled={starting}>取消上传</Button>
         <Button variant="primary" type="submit" form={formId} disabled={!canStart || starting || scanning}>{starting ? '正在创建任务…' : remote ? '开始导入' : '开始上传'}</Button></ActionRow>
     </form>
-    {settings && draft.source === 'pixiv' && <PixivSettings onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
-    {settings && draft.source === 'fanbox' && <FanboxSettings onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
+    {settings && draft.source === 'pixiv' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
+    {settings && draft.source === 'fanbox' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
   </>;
 }

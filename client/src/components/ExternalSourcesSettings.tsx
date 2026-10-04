@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { fetchPixivSettings } from '../api/pixiv';
 import ImportSources from './ImportSources';
-import PixivSettings from './PixivSettings';
-import FanboxSettings from './FanboxSettings';
+import PixivSettingsDialog from './PixivSettingsDialog';
+import FanboxSettingsDialog from './FanboxSettingsDialog';
 import { fetchFanboxSettings } from '../api/fanbox';
 
 export default function ExternalSourcesSettings() {
@@ -16,7 +16,7 @@ export default function ExternalSourcesSettings() {
   useEffect(refresh, []);
   return <>
     <ImportSources card title="外部来源" availableSources={['pixiv', 'fanbox']} configuredSources={configured} onSelect={source => { if (source !== 'mega') setSelected(source); }} />
-    {selected === 'pixiv' && <PixivSettings onClose={() => { setSelected(null); refresh(); }} />}
-    {selected === 'fanbox' && <FanboxSettings onClose={() => { setSelected(null); refresh(); }} />}
+    {selected === 'pixiv' && <PixivSettingsDialog onClose={() => { setSelected(null); refresh(); }} />}
+    {selected === 'fanbox' && <FanboxSettingsDialog onClose={() => { setSelected(null); refresh(); }} />}
   </>;
 }
