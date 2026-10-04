@@ -208,11 +208,13 @@ const viewerServer = tlsCertFile
 // This proxy binds only container loopback. Browsers use no upstream credentials.
 const proxyServer = http.createServer((req, res) => send(res, 405, { error: 'https_required' }));
 proxyServer.on('connect', async (req, socket, head) => {
+  // Clients can reset even before the upstream connects or after a rejection.
+  socket.on('error', () => socket.destroy());
   const current = session;
   if (!current || Date.parse(current.expiresAt) <= Date.now()) { socket.end('HTTP/1.1 407 Proxy Authentication Required\r\n\r\n'); return; }
   try {
     const upstream = await connectViaProxy(req.url, current.proxyUrl);
-    if (session !== current || Date.parse(current.expiresAt) <= Date.now()) { upstream.destroy(); socket.destroy(); return; }
+    if (socket.destroyed || session !== current || Date.parse(current.expiresAt) <= Date.now()) { upstream.destroy(); socket.destroy(); return; }
     socket.write('HTTP/1.1 200 Connection established\r\n\r\n');
     if (head.length) upstream.write(head);
     peers.add(socket); peers.add(upstream);
