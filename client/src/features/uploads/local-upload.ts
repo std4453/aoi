@@ -77,8 +77,8 @@ export function createLocalUploadExecutor(report: Reports, dependencies = defaul
 
   function fail(runtime: Runtime, error: unknown) {
     if (runtime.cancelled || runtime.done) return;
-    localUpdate(runtime, { status: 'failed', error: message(error) });
-    void persist(runtime, { status: 'failed', error: message(error) });
+    localUpdate(runtime, { status: 'failed', error: message(error), errorCode: 'UPLOAD_FAILED', errorCategory: 'upload' });
+    void persist(runtime, { status: 'failed', error: message(error), errorCode: 'UPLOAD_FAILED' });
   }
 
   async function handoff(runtime: Runtime, uploadId?: string) {
@@ -88,7 +88,7 @@ export function createLocalUploadExecutor(report: Reports, dependencies = defaul
     runtime.timer = undefined;
     await runtime.save;
     if (runtime.cancelled) { runtime.handingOff = false; return; }
-    localUpdate(runtime, { progress: 100, status: 'processing', error: null });
+    localUpdate(runtime, { progress: 100, status: 'processing', error: null, errorCode: null, errorCategory: null });
     try {
       if (runtime.source === 'archive') {
         await report.complete(runtime.id, { uploadId: uploadId!, archivePassword: runtime.archivePassword });
@@ -234,9 +234,9 @@ export function createLocalUploadExecutor(report: Reports, dependencies = defaul
           };
         });
       }
-      await persist(runtime, { status: 'uploading', error: null });
+      await persist(runtime, { status: 'uploading', error: null, errorCode: null });
       if (runtime.cancelled) return;
-      localUpdate(runtime, { status: 'uploading', error: null });
+      localUpdate(runtime, { status: 'uploading', error: null, errorCode: null, errorCategory: null });
       schedule(runtime);
     })().catch(async error => {
       if (runtime.cancelled) return;
@@ -269,8 +269,8 @@ export function createLocalUploadExecutor(report: Reports, dependencies = defaul
       runtime.archivePassword = passwords.archivePassword ?? runtime.archivePassword;
       runtime.paused = false;
       for (const file of runtime.files) if (file.status === 'failed') file.status = 'pending';
-      localUpdate(runtime, { status: 'uploading', error: null });
-      await persist(runtime, { status: 'uploading', error: null });
+      localUpdate(runtime, { status: 'uploading', error: null, errorCode: null, errorCategory: null });
+      await persist(runtime, { status: 'uploading', error: null, errorCode: null });
       if (runtime.source === 'archive' && runtime.files.every(file => file.status === 'uploaded')) {
         await handoff(runtime, runtime.uploads.get(id)?.url?.split('/').pop());
       } else schedule(runtime);

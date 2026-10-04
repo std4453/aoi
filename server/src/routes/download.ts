@@ -1,4 +1,4 @@
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
 import { getGeneratedPath } from '../services/storage.js';

@@ -145,3 +145,27 @@ test('folder processing resumes after files were partially moved', async () => {
   assert.equal(result.structureType, 'flat');
   assert.equal(fs.existsSync(stagingDir), false);
 });
+
+test('upload job lookup excludes compression and breaks timestamp ties by insertion order', () => {
+  const pack = repositories.createPack({ name: 'upload jobs', originalFilename: 'pack.zip', originalSize: 1, originalFormat: 'zip' });
+  assert.equal(repositories.getLatestUploadJob(pack.id), undefined);
+  const first = repositories.createJob(pack.id, 'extract');
+  const latest = repositories.createJob(pack.id, 'thumbnail');
+  const compressed = repositories.createJob(pack.id, 'compress');
+  connection.getDb().prepare('UPDATE jobs SET created_at = ? WHERE pack_id = ?').run('2026-01-01 00:00:00', pack.id);
+  const options = JSON.stringify({ autoName: true, autoTags: false });
+  repositories.updateJobOptions(latest.id, options);
+  repositories.updatePackArchivePassword(pack.id, 'synthetic-password');
+  assert.equal(repositories.getLatestUploadJob(pack.id)?.id, latest.id);
+  assert.equal(repositories.getLatestUploadJob(pack.id)?.options, options);
+  assert.equal(repositories.getJob(first.id)?.options, null);
+  assert.equal(repositories.getJob(compressed.id)?.options, null);
+  assert.equal(repositories.getPack(pack.id)?.archivePassword, 'synthetic-password');
+  assert.throws(() => connection.getDb().transaction(() => {
+    repositories.updateJobOptions(latest.id, '{}');
+    repositories.updatePackArchivePassword(pack.id, null);
+    throw new Error('rollback');
+  })(), /rollback/);
+  assert.equal(repositories.getJob(latest.id)?.options, options);
+  assert.equal(repositories.getPack(pack.id)?.archivePassword, 'synthetic-password');
+});

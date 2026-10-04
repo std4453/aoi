@@ -1,8 +1,9 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fetch, type Dispatcher, type Response } from 'undici';
+import { fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { resolveWithin } from './safe-path.js';
 import type { PixivSettings } from '../../../shared/types.js';
 
@@ -14,8 +15,8 @@ export function readPixivSettings(): { refreshToken: string; source: PixivSettin
     const saved = z.object({ refreshToken: refreshTokenSchema }).parse(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')));
     return { ...saved, source: saved.refreshToken ? 'settings' : 'none' };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取 Pixiv 登录配置');
-    return { refreshToken: config.pixivRefreshToken, source: config.pixivRefreshToken ? 'environment' : 'none' };
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new TaskError('AUTH_REQUIRED', '无法读取 Pixiv 登录配置');
+    return { refreshToken: config.pixiv.refreshToken, source: config.pixiv.refreshToken ? 'environment' : 'none' };
   }
 }
 
@@ -32,7 +33,7 @@ export async function readPixivJson(response: Response): Promise<unknown> {
   let bytes = 0;
   for await (const chunk of response.body!) {
     bytes += chunk.length;
-    if (bytes > 8 * 1024 * 1024) throw new Error('Pixiv 响应过大');
+    if (bytes > 8 * 1024 * 1024) throw new TaskError('RESOURCE_LIMIT', 'Pixiv 响应过大');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -42,6 +43,25 @@ export async function readPixivJson(response: Response): Promise<unknown> {
 // Public Pixiv mobile OAuth client parameters (also used by gallery-dl).
 // No user credential is embedded here. Tokens are sent only to the fixed OAuth/API hosts.
 const appHeaders = { 'User-Agent': 'PixivIOSApp/7.19.1 (iOS 16.7.2; iPhone12,8)', 'App-OS': 'ios', 'App-OS-Version': '16.7.2', 'App-Version': '7.19.1' };
+
+/** Same PKCE exchange as gallery-dl oauth:pixiv; the returned token is saved unchanged. */
+export async function exchangePixivCode(code: string, verifier: string): Promise<string> {
+  const proxyUrl = config.pixiv.proxyUrl || config.outboundProxyUrl;
+  const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+  try {
+    const response = await fetch('https://oauth.secure.pixiv.net/auth/token', {
+      dispatcher, method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000),
+      headers: { 'User-Agent': 'PixivAndroidApp/5.0.234 (Android 11; Pixel 5)' },
+      body: new URLSearchParams({ client_id: 'MOBrBDS8blbauoSck0ZfDbtuzpyT', client_secret: 'lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj',
+        grant_type: 'authorization_code', code, code_verifier: verifier, include_policy: 'true',
+        redirect_uri: 'https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback' }),
+    });
+    if (!response.ok) { await response.body?.cancel(); throw new Error(); }
+    const result = z.object({ refresh_token: z.string().min(1).max(8192).regex(/^[^\s]+$/) }).parse(await readPixivJson(response));
+    return result.refresh_token;
+  } catch { throw new Error('Pixiv 授权码换取失败，请重新打开浏览器登录，并检查代理'); }
+  finally { await dispatcher?.destroy(); }
+}
 
 export class PixivAuth {
   private accessToken = '';
@@ -66,14 +86,14 @@ export class PixivAuth {
         body: new URLSearchParams({ client_id: 'MOBrBDS8blbauoSck0ZfDbtuzpyT', client_secret: 'lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj',
           grant_type: 'refresh_token', refresh_token: this.refreshToken, get_secure_url: '1' }),
       });
-    } catch { throw new Error('无法连接 Pixiv 登录服务，请检查代理配置'); }
+    } catch { throw new TaskError('NETWORK_ERROR', '无法连接 Pixiv 登录服务，请检查代理配置'); }
     if (!response.ok) {
       await response.body?.cancel();
-      throw new Error('Pixiv 登录失败，请在设置中更新 refresh-token');
+      throw new TaskError([400, 401, 403].includes(response.status) ? 'AUTH_REQUIRED' : response.status === 429 ? 'RATE_LIMITED' : 'NETWORK_ERROR', 'Pixiv 登录失败，请在设置中更新 refresh-token');
     }
     const envelope = await readPixivJson(response);
     const result = z.object({ response: z.object({ access_token: z.string().min(1), expires_in: z.number().positive() }) }).safeParse(envelope);
-    if (!result.success) throw new Error('Pixiv 登录失败，请在设置中更新 refresh-token');
+    if (!result.success) throw new TaskError('AUTH_REQUIRED', 'Pixiv 登录失败，请在设置中更新 refresh-token');
     this.accessToken = result.data.response.access_token;
     this.expiresAt = Date.now() + Math.max(0, result.data.response.expires_in - 60) * 1000;
     return this.accessToken;
@@ -90,18 +110,20 @@ export class PixivAuth {
           dispatcher: this.dispatcher, redirect: 'manual', signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]),
           headers: { ...appHeaders, Authorization: `Bearer ${token}` },
         });
-      } catch { throw new Error('无法连接 Pixiv，请检查服务端网络或代理'); }
+      } catch { throw new TaskError('NETWORK_ERROR', '无法连接 Pixiv，请检查服务端网络或代理'); }
       if (response.status === 401 && attempt === 0) {
         await response.body?.cancel(); this.accessToken = ''; continue;
       }
       if (!response.ok) {
         await response.body?.cancel();
-        throw new Error(`Pixiv 请求失败（HTTP ${response.status}），请检查登录态或作品权限`);
+        throw new TaskError(response.status === 401 ? 'AUTH_REQUIRED' : response.status === 403 ? 'ACCESS_DENIED'
+          : response.status === 404 ? 'SOURCE_UNAVAILABLE' : response.status === 429 ? 'RATE_LIMITED' : 'DOWNLOAD_FAILED',
+          `Pixiv 请求失败（HTTP ${response.status}），请检查登录态或作品权限`);
       }
       const data = await readPixivJson(response);
-      if (!data || typeof data !== 'object' || 'error' in data) throw new Error('Pixiv 作品不可访问，请检查登录态或作品权限');
+      if (!data || typeof data !== 'object' || 'error' in data) throw new TaskError('ACCESS_DENIED', 'Pixiv 作品不可访问，请检查登录态或作品权限');
       return data;
     }
-    throw new Error('Pixiv 登录已失效，请更新 refresh-token');
+    throw new TaskError('AUTH_REQUIRED', 'Pixiv 登录已失效，请更新 refresh-token');
   }
 }

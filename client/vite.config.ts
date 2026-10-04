@@ -11,7 +11,8 @@ export default defineConfig({
       '/runtime-config.json': { target: 'http://localhost:3000' },
       '/api': {
         target: 'http://localhost:3000',
-        changeOrigin: true,
+        // Preserve the browser origin for the login routes' same-origin check.
+        changeOrigin: false,
       },
       '/files': {
         target: 'http://localhost:3000',

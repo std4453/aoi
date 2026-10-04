@@ -1,15 +1,17 @@
+import { isTaskErrorCode } from '../../../shared/task-errors.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
 import type { CreateUploadTaskRequest, UploadTask } from '../../../shared/types.js';
 import { getPack, getPackFiles, listTags, hasAnyActiveJob, deletePack, updatePackStatus } from '../db/repositories.js';
 import { createUploadTask, getUploadTaskMetadata, updateUploadTaskMetadata, updateUploadTask,
-  getSyncedUploadTask, listSyncedUploadTasks, deleteUploadTask, retryPackTask, createPixivUploadTask } from '../services/upload-tasks.js';
+  getSyncedUploadTask, listSyncedUploadTasks, deleteUploadTask, retryPackTask, createPostUploadTask } from '../services/upload-tasks.js';
 import { continueFolderVerification } from '../services/content-verification.js';
 import { getUploadPath, removePackFiles } from '../services/storage.js';
 import { jobQueue } from '../services/job-queue.js';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { withUploadLock } from '../services/archive-deduplication.js';
 import { validateMegaUrl } from '../services/mega-link.js';
+import { parseFanboxUrl } from '../services/fanbox-client.js';
 import { parsePixivUrl } from '../services/pixiv-importer.js';
 
 function password(value: unknown): string | undefined {
@@ -19,7 +21,7 @@ function password(value: unknown): string | undefined {
 }
 
 function validateCreate(input: CreateUploadTaskRequest): CreateUploadTaskRequest {
-  if (!input || !['archive', 'folder', 'mega', 'pixiv'].includes(input.source)) throw new Error('Invalid source');
+  if (!input || !['archive', 'folder', 'mega', 'pixiv', 'fanbox'].includes(input.source)) throw new Error('Invalid source');
   if (input.autoName !== undefined && typeof input.autoName !== 'boolean') throw new Error('Invalid autoName');
   if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 200 || /[\0\r\n]/.test(input.name)) throw new Error('Invalid name');
   if (input.filename !== undefined && (typeof input.filename !== 'string' || input.filename.length > 255 || /[\0\r\n\\/]/.test(input.filename))) throw new Error('Invalid filename');
@@ -28,9 +30,9 @@ function validateCreate(input: CreateUploadTaskRequest): CreateUploadTaskRequest
   if (input.source === 'mega') {
     validateMegaUrl(input.url!);
   }
-  if (input.source === 'pixiv') {
-    if (typeof input.url !== 'string' || input.url.length > 2048) throw new Error('Invalid Pixiv URL');
-    parsePixivUrl(input.url);
+  if (input.source === 'pixiv' || input.source === 'fanbox') {
+    if (typeof input.url !== 'string' || input.url.length > 2048) throw new Error('Invalid post URL');
+    (input.source === 'fanbox' ? parseFanboxUrl : parsePixivUrl)(input.url);
   }
   password(input.archivePassword);
   password(input.sharePassword);
@@ -46,7 +48,7 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
   fastify.post<{ Body: CreateUploadTaskRequest }>('/api/upload-tasks', async (request, reply) => {
     try {
       const input = validateCreate(request.body);
-      const task = input.source === 'pixiv' ? createPixivUploadTask(input) : createUploadTask(input);
+      const task = ['pixiv', 'fanbox'].includes(input.source) ? createPostUploadTask(input) : createUploadTask(input);
       if (task.source === 'mega') {
         const { startMegaImport } = await import('../services/mega-import.js');
         void startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name });
@@ -56,11 +58,11 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });
-  fastify.patch<{ Params: { id: string }; Body: { uploadId?: string; packId?: string; progress?: number; transferredBytes?: number; status?: UploadTask['status']; error?: string | null } }>('/api/upload-tasks/:id', async (request, reply) => {
+  fastify.patch<{ Params: { id: string }; Body: { uploadId?: string; packId?: string; progress?: number; transferredBytes?: number; status?: UploadTask['status']; error?: string | null; errorCode?: UploadTask['errorCode'] } }>('/api/upload-tasks/:id', async (request, reply) => {
     const task = getSyncedUploadTask(request.params.id);
     if (!task) return reply.code(404).send({ error: 'Upload task not found' });
     try {
-      if (['mega', 'pixiv'].includes(task.source) || ['completed', 'processing', 'duplicate', 'password'].includes(task.status)) throw new Error('Task is controlled by the server');
+      if (task.isRemote || ['completed', 'processing', 'duplicate', 'password'].includes(task.status)) throw new Error('Task is controlled by the server');
       const input = request.body ?? {};
       const patch: Partial<UploadTask> = {};
       if (input.uploadId !== undefined) {
@@ -90,6 +92,11 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
         if (input.error !== null && (typeof input.error !== 'string' || input.error.length > 4_096)) throw new Error('Invalid error');
         patch.error = input.error;
       }
+      if (input.errorCode !== undefined) {
+        if (input.errorCode !== null && !isTaskErrorCode(input.errorCode)) throw new Error('Invalid error code');
+        patch.errorCode = input.errorCode;
+      }
+      if (patch.status === 'failed' && !patch.errorCode) patch.errorCode = 'UPLOAD_FAILED';
       if (patch.status === 'uploading' && task.status === 'needs_file' && task.packId) {
         const pack = getPack(task.packId);
         if (pack?.sourceType === 'folder' && pack.status === 'failed') updatePackStatus(pack.id, 'uploading');

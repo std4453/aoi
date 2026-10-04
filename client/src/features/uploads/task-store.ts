@@ -69,7 +69,7 @@ export function createUploadTaskStore(dependencies = defaults) {
     const task = await dependencies.api.createUploadTask(input);
     mutationRevision++;
     replaceTask(task);
-    if (task.source === 'archive' || task.source === 'folder') void executor.begin(task, local.files, local.tagIds, local.archivePassword);
+    if (!task.isRemote) void executor.begin(task, local.files, local.tagIds, local.archivePassword);
     return task;
   }
   async function resume(id: string, passwords: { archivePassword?: string; sharePassword?: string } = {}) {

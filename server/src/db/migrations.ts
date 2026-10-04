@@ -9,6 +9,7 @@ import m007 from './migrations/007_add_archive_md5.js';
 import m008 from './migrations/008_add_content_verification.js';
 import m009 from './migrations/009_add_snapshots.js';
 import m010 from './migrations/010_add_upload_tasks.js';
+import m011 from './migrations/011_add_task_error_codes.js';
 
 export interface Migration {
   name: string;
@@ -26,6 +27,7 @@ const migrations: Migration[] = [
   m008,
   m009,
   m010,
+  m011,
 ];
 
 export function runMigrations(db: Database.Database): void {

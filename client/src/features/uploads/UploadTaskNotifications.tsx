@@ -1,13 +1,17 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUploadTasks } from './useUploadTasks';
 import { showError } from '../../components/Toast';
 import { showTaskToast, type TaskToastHandle } from './TaskToast';
+import FanboxSettingsDialog from '../../components/FanboxSettingsDialog';
+import PixivSettingsDialog from '../../components/PixivSettingsDialog';
+import type { UploadTask } from '../../../../shared/types';
 import { uploadView } from './view-state';
-import { taskStates } from './task-display';
+import { taskStates, taskNeedsLogin } from './task-display';
 
 export default function UploadTaskNotifications() {
-  const { tasks, dismiss } = useUploadTasks();
+  const { tasks, dismiss, resume } = useUploadTasks();
+  const [loginTask, setLoginTask] = useState<UploadTask | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const seen = useRef(new Map<string, string>());
@@ -20,19 +24,19 @@ export default function UploadTaskNotifications() {
     const currentIds = new Set(tasks.map(task => task.id));
     for (const [id, handle] of visible.current) {
       const task = tasks.find(item => item.id === id);
-      if (onUpload || !task || taskStates[task.status].tone === 'neutral') {
+      if (!task || (onUpload && !taskNeedsLogin(task)) || taskStates[task.status].tone === 'neutral') {
         handle.close();
         visible.current.delete(id);
       }
     }
     for (const id of seen.current.keys()) if (!currentIds.has(id)) seen.current.delete(id);
     for (const task of tasks) {
-      const signature = `${task.status}:${task.error ?? ''}`;
+      const signature = `${task.status}:${task.errorCode ?? ''}:${task.error ?? ''}`;
       const state = taskStates[task.status];
       const message = state.tone === 'neutral' ? undefined : state.label;
       const previous = seen.current.get(task.id);
       seen.current.set(task.id, signature);
-      if (!message || onUpload || (previous === signature && !visible.current.has(task.id))) continue;
+      if (!message || (onUpload && !taskNeedsLogin(task)) || (previous === signature && !visible.current.has(task.id))) continue;
       const goToTask = () => {
         actions.current.expand(task.id);
         actions.current.navigate('/upload');
@@ -48,9 +52,9 @@ export default function UploadTaskNotifications() {
         });
       };
       const options = {
-        message,
-        onClick: goToTask,
-        action: task.status === 'completed'
+        message: taskNeedsLogin(task) ? '需要登录' : message,
+        onClick: taskNeedsLogin(task) ? () => setLoginTask(task) : goToTask,
+        action: taskNeedsLogin(task) ? { label: '登录', icon: 'arrow' as const, ariaLabel: `登录并重试 ${task.name}`, onClick: () => setLoginTask(task) } : task.status === 'completed'
           ? { label: '完成', icon: 'check' as const, ariaLabel: `确认完成 ${task.name}`, onClick: acknowledge }
           : { label: '查看', icon: 'arrow' as const, ariaLabel: `查看 ${task.name}`, onClick: goToTask },
       };
@@ -64,5 +68,10 @@ export default function UploadTaskNotifications() {
     visible.current.forEach(handle => handle.close());
     visible.current.clear();
   }, []);
-  return null;
+  const saved = () => {
+    if (!loginTask) return;
+    void resume(loginTask.id).catch(error => showError(error instanceof Error ? error.message : '重试失败'));
+  };
+  return loginTask?.source === 'pixiv' ? <PixivSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} />
+    : loginTask?.source === 'fanbox' ? <FanboxSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : null;
 }

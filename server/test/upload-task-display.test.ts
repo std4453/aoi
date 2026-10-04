@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage } from '../../client/src/features/uploads/task-display.ts';
+import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage, taskNeedsLogin } from '../../client/src/features/uploads/task-display.ts';
+import { taskErrorCategories } from '../../shared/task-errors.js';
 import type { UploadTask } from '../../shared/types.js';
 
 const task: UploadTask = {
-  id: 'test', source: 'archive', name: 'test', filename: 'test.zip',
+  id: 'test', source: 'archive', isRemote: false, errorCode: null, errorCategory: null, name: 'test', filename: 'test.zip',
   totalBytes: 100, transferredBytes: 100, progress: 100, status: 'failed',
   packId: 'pack', uploadId: 'upload', matches: [], error: null,
   createdAt: '', updatedAt: '',
 };
 
 test('all sources share status semantics without leaking transfer details into results', () => {
-  for (const source of ['archive', 'folder', 'mega', 'pixiv'] as const) {
+  for (const source of ['archive', 'folder', 'mega', 'pixiv', 'fanbox'] as const) {
     for (const status of ['uploading', 'downloading', 'paused', 'processing', 'needs_file', 'password', 'duplicate', 'failed', 'completed'] as const) {
       const current = { ...task, source, status, error: 'stale transfer failure' };
       const state = taskStates[status];
@@ -36,7 +37,7 @@ test('attention states have a useful notice even without an error from the serve
 });
 
 test('processing labels and counters replace finished transfer details for every source', () => {
-  for (const source of ['archive', 'folder', 'mega', 'pixiv'] as const) {
+  for (const source of ['archive', 'folder', 'mega', 'pixiv', 'fanbox'] as const) {
     const processing = { ...task, source, status: 'processing' as const, progress: 25,
       processing: { stage: 'verifying' as const, queued: false, completed: 1024, total: 4096 } };
     assert.deepEqual(taskProgressDisplay(processing), {
@@ -82,35 +83,45 @@ test('queued stages share concise labels without exposing stale counters', () =>
   }
 });
 
-test('saved archive diagnostics become a concise error without local paths', () => {
-  const failed = { ...task, error: '无法检查压缩包内容: ERROR C:\\private\\archives\\original.zip Cannot open the file as [zip] archive ERRORS: Is not archive' };
-  assert.equal(taskFailureLabel(failed), '解压失败');
-  assert.equal(taskErrorMessage(failed), '压缩包已损坏或格式不正确，请检查文件后重新上传。');
-  assert.doesNotMatch(taskErrorMessage(failed), /private|ERROR|original\.zip/);
+const failure = (errorCode: NonNullable<UploadTask['errorCode']>, patch: Partial<UploadTask> = {}): UploadTask => ({
+  ...task, ...patch, errorCode, errorCategory: taskErrorCategories[errorCode],
 });
 
-test('failure stages use available evidence and unknown diagnostics stay private', () => {
-  assert.equal(taskFailureLabel({ ...task, error: 'thumbnail failed' }), '预览生成失败');
-  assert.equal(taskFailureLabel({ ...task, error: 'checksum mismatch' }), '校验失败');
+test('stable error codes decide presentation even when diagnostics contain misleading filenames', () => {
+  const invalid = failure('ARCHIVE_INVALID', { error: 'private/path/RefreshToken.php wrong password.png' });
+  assert.equal(taskFailureLabel(invalid), '解压失败');
+  assert.match(taskErrorMessage(invalid), /压缩包已损坏/);
+  const unsupported = failure('ARCHIVE_UNSUPPORTED', { error: 'arbitrary third-party wording' });
+  assert.match(taskErrorMessage(unsupported), /解压工具不支持此压缩方法/);
+  assert.equal(taskNeedsLogin(unsupported), false);
+  assert.equal(taskFailureLabel(failure('PREVIEW_FAILED')), '预览生成失败');
+  assert.equal(taskFailureLabel(failure('VERIFICATION_FAILED')), '校验失败');
+  assert.match(taskErrorMessage(failure('NETWORK_ERROR')), /网络及代理/);
+  assert.doesNotMatch(taskErrorMessage(invalid), /private|RefreshToken|password.png/);
+});
+
+test('uncoded historical diagnostics remain private and do not infer login state', () => {
+  const historical = { ...task, source: 'pixiv' as const, isRemote: true, error: '登录 private/RefreshToken.php' };
+  assert.equal(taskNeedsLogin(historical), false);
+  assert.doesNotMatch(taskErrorMessage(historical), /private|RefreshToken|登录/);
   assert.equal(taskFailureLabel({ ...task, packId: null }), '上传失败');
-  assert.equal(taskFailureLabel({ ...task, source: 'mega', packId: null }), '下载失败');
-  assert.equal(taskFailureLabel(task), '处理失败');
-  assert.doesNotMatch(taskErrorMessage({ ...task, error: 'secret stack trace /srv/private' }), /secret|stack|private/);
-  assert.match(taskErrorMessage({ ...task, error: 'fetch failed ECONNRESET' }), /网络及代理/);
+  assert.equal(taskFailureLabel({ ...historical, packId: null }), '下载失败');
 });
 
-test('password prompts retain actionable information', () => {
+test('password prompts use the explicit code and password kind', () => {
   assert.match(taskErrorMessage({ ...task, status: 'password', passwordKind: 'share' }), /分享.*解密密钥/);
-  assert.match(taskErrorMessage({ ...task, status: 'password', error: 'wrong password' }), /密码不正确/);
+  assert.match(taskErrorMessage(failure('PASSWORD_INCORRECT', { status: 'password' })), /密码不正确/);
 });
 
-test('RAR method errors and entry names cannot masquerade as login failures', () => {
-  const failed = { ...task, filename: 'test.rar', error: '7z 解压失败: ERROR: Unsupported Method : app/RefreshToken.php\nERROR: Unsupported Method : create_password_resets.php\nEncrypted = -' };
-  assert.equal(taskFailureLabel(failed), '解压失败');
-  assert.match(taskErrorMessage(failed), /解压工具不支持此压缩方法/);
-  assert.doesNotMatch(taskErrorMessage(failed), /登录|需要密码|app\/|\.php/);
-  assert.match(taskErrorMessage({ ...failed, error: '7z 解压失败: ERROR: CRC Failed : app/RefreshToken.php' }), /无法解压/);
-  const listing = { ...failed, error: '无法检查压缩包内容: Path = app/RefreshToken.php\nPath = wrong password.png\nEncrypted = -\nChecksum = ' };
-  assert.equal(taskFailureLabel(listing), '解压失败');
-  assert.match(taskErrorMessage(listing), /无法解压/);
+test('FANBOX access, content and challenge failures have distinct actions', () => {
+  const fanbox = { source: 'fanbox' as const, isRemote: true };
+  assert.match(taskErrorMessage(failure('NO_SUPPORTED_MEDIA', fanbox)), /文字、压缩包及外部嵌入链接/);
+  assert.equal(taskErrorMessage(failure('ACCESS_DENIED', fanbox)), 'FANBOX 帖子不可访问。');
+  assert.equal(taskFailureLabel(failure('ACCESS_DENIED', fanbox)), '需要登录');
+  assert.equal(taskFailureLabel(failure('AUTH_REQUIRED', { source: 'pixiv' })), '需要登录');
+  for (const code of ['NETWORK_ERROR', 'SOURCE_BLOCKED', 'CHALLENGE_FAILED', 'RATE_LIMITED'] as const) {
+    assert.equal(taskNeedsLogin(failure(code, fanbox)), false);
+  }
+  assert.equal(taskErrorMessage(failure('SOURCE_BLOCKED', fanbox)), 'FANBOX 拦截了服务器请求，请稍后重试。');
+  assert.equal(taskErrorMessage(failure('CHALLENGE_FAILED', fanbox)), 'FANBOX 验证未完成，请稍后重试。');
 });

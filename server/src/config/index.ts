@@ -1,21 +1,19 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { parseProxyUrl } from './services/outbound-fetch.js';
+import { parseProxyUrl } from '../services/outbound-fetch.js';
+import { readExternalConfig } from './external-sources.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = __dirname.includes(`${path.sep}dist${path.sep}server${path.sep}`)
-  ? path.resolve(__dirname, '../../../..')
-  : path.resolve(__dirname, '../..');
+  ? path.resolve(__dirname, '../../../../..')
+  : path.resolve(__dirname, '../../..');
 const defaultDataDir = path.join(projectRoot, 'data');
 
 const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(value => value === 'true' || value === '1');
 
 const configSchema = z.object({
-  pixivProxyUrl: z.string().url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
-  pixivCookie: z.string().max(8192).refine(value => !/[\r\n]/.test(value)).default(''),
-  pixivRefreshToken: z.string().max(8192).regex(/^[^\s]*$/).default(''),
   frontendOnly: flag,
   snapshotEnabled: z.enum(['true', 'false', '1', '0']).default('true').transform(value => value === 'true' || value === '1'),
   replicaSourceUrl: z.string().url().optional().transform(value => {
@@ -50,9 +48,6 @@ const configSchema = z.object({
 });
 
 const parsed = configSchema.parse({
-  pixivProxyUrl: process.env.PIXIV_PROXY_URL || undefined,
-  pixivCookie: process.env.PIXIV_COOKIE,
-  pixivRefreshToken: process.env.PIXIV_REFRESH_TOKEN,
   frontendOnly: process.env.FRONTEND_ONLY,
   snapshotEnabled: process.env.AOI_SNAPSHOT_ENABLED,
   replicaSourceUrl: process.env.AOI_REPLICA_SOURCE_URL,
@@ -85,6 +80,7 @@ if (Boolean(parsed.tlsCertFile) !== Boolean(parsed.tlsKeyFile)) {
 
 export const config = {
   ...parsed,
+  ...readExternalConfig(process.env, parsed.outboundProxyUrl),
   isReplica: Boolean(parsed.replicaSourceUrl),
   dirs: {
     uploads: path.join(parsed.dataDir, 'uploads'),

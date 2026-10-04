@@ -1,0 +1,10 @@
+*
+!broker.mjs
+!session-runtime.mjs
+!session-runner.py
+!browser-worker.py
+!capture.py
+!proxy-tunnel.mjs
+!chromium.sh
+!chromium-policy.json
+!rootfs/**

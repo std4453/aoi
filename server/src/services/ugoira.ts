@@ -5,7 +5,7 @@ import yauzl from 'yauzl';
 import { ZipArchive } from 'archiver';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import type { UgoiraManifest } from '../../../shared/types.js';
 
 export const ugoiraFramesSchema = z.array(z.object({

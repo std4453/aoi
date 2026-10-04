@@ -1,18 +1,20 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fetch, ProxyAgent, type Dispatcher } from 'undici';
 import { z } from 'zod';
 import sharp from 'sharp';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { getDb } from '../db/connection.js';
-import { getPack, getLatestJob, updatePackStats, updatePackStructureType, createTag, listTags, setPackTags } from '../db/repositories.js';
+import { getPack, getLatestJob, updatePackStats, updatePackStructureType, setPackTags } from '../db/repositories.js';
 import { ensureDir, getExtractedImagesDir } from './storage.js';
 import { resolveWithin } from './safe-path.js';
 import { scheduleVerification } from './content-verification.js';
 import { PixivAuth, readPixivJson, readPixivSettings } from './pixiv-auth.js';
 import { createUgoira, ugoiraFramesSchema } from './ugoira.js';
-import type { Tag } from '../../../shared/types.js';
+import { ensureImportTags as ensurePixivTags } from './import-tags.js';
+export { ensureImportTags as ensurePixivTags } from './import-tags.js';
 
 export function parsePixivUrl(value: string): { id: string; url: string } {
   const url = new URL(value.trim());
@@ -54,7 +56,7 @@ export class PixivClient {
   }
 
   private accessError(): Error {
-    return new Error(this.auth
+    return new TaskError('ACCESS_DENIED', this.auth
       ? 'Pixiv 拒绝访问：当前登录账号无权查看该作品，请检查作品权限，或在外部来源设置中更新 Pixiv refresh-token。'
       : 'Pixiv 拒绝匿名访问，且未配置 refresh-token。该作品可能需要登录才能下载（也可能已删除或限制访问）。请打开「外部来源 → Pixiv」，使用 gallery-dl oauth:pixiv 获取 refresh-token，保存后重试。');
   }
@@ -74,13 +76,13 @@ export class PixivClient {
         },
       });
     } catch {
-      throw new Error('无法连接 Pixiv，请检查服务端网络或 PIXIV_PROXY_URL 后重试');
+      throw new TaskError('NETWORK_ERROR', '无法连接 Pixiv，请检查服务端网络或 PIXIV_PROXY_URL 后重试');
     }
     if (!response.ok) {
       await response.body?.cancel();
       if ([401, 403].includes(response.status)) throw this.accessError();
-      if (response.status === 404) throw new Error(!image && !this.auth ? 'Pixiv 找不到作品，可能已删除或仅登录可见。当前未配置 refresh-token；请核对网址，或在「外部来源 → Pixiv」配置登录态后重试。' : 'Pixiv 作品或原图不存在，可能已被删除');
-      if (response.status === 429) throw new Error('Pixiv 请求过于频繁，请稍后重试');
+      if (response.status === 404) throw new TaskError(!image && !this.auth ? 'AUTH_REQUIRED' : 'SOURCE_UNAVAILABLE', !image && !this.auth ? 'Pixiv 找不到作品，可能已删除或仅登录可见。当前未配置 refresh-token；请核对网址，或在「外部来源 → Pixiv」配置登录态后重试。' : 'Pixiv 作品或原图不存在，可能已被删除');
+      if (response.status === 429) throw new TaskError('RATE_LIMITED', 'Pixiv 请求过于频繁，请稍后重试');
       throw new Error(`Pixiv 请求失败（HTTP ${response.status}）`);
     }
     return response;
@@ -128,12 +130,12 @@ export class PixivClient {
     let size = 0;
     try {
       if (!zip && !response.headers.get('content-type')?.startsWith('image/')) throw new Error('Pixiv 返回的文件不是图片');
-      if (Number(response.headers.get('content-length')) > limit) throw new Error('Pixiv 图片超出导入大小限制');
+      if (Number(response.headers.get('content-length')) > limit) throw new TaskError('RESOURCE_LIMIT', 'Pixiv 图片超出导入大小限制');
       await pipeline(
         Readable.fromWeb(response.body! as Parameters<typeof Readable.fromWeb>[0]),
         new Transform({ transform(chunk: Buffer, _encoding, callback) {
           size += chunk.length;
-          callback(size > limit ? new Error('Pixiv 图片超出导入大小限制') : null, chunk);
+          callback(size > limit ? new TaskError('RESOURCE_LIMIT', 'Pixiv 图片超出导入大小限制') : null, chunk);
         } }),
         fs.createWriteStream(temporary),
       );
@@ -157,19 +159,12 @@ let proxy: ProxyAgent | undefined;
 export function getPixivClient(): PixivClient {
   const { refreshToken } = readPixivSettings();
   if (!client || refreshToken !== clientToken) {
-    if (config.pixivProxyUrl) proxy ??= new ProxyAgent(config.pixivProxyUrl);
-    client = new PixivClient(proxy, config.pixivCookie, refreshToken);
+    const proxyUrl = config.pixiv.proxyUrl || config.outboundProxyUrl;
+    if (proxyUrl) proxy ??= new ProxyAgent(proxyUrl);
+    client = new PixivClient(proxy, config.pixiv.cookie, refreshToken);
     clientToken = refreshToken;
   }
   return client;
-}
-
-export function ensurePixivTags(names: string[]): Tag[] {
-  return getDb().transaction(() => {
-    const existing = new Map(listTags().map(tag => [tag.name, tag]));
-    const safe = [...new Set(names.map(name => name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200)).filter(Boolean))].slice(0, 1000);
-    return safe.map(name => existing.get(name) ?? createTag(name));
-  })();
 }
 
 export async function importPixivPack(
@@ -180,7 +175,7 @@ export async function importPixivPack(
 ): Promise<void> {
   signal?.throwIfAborted();
   const pack = getPack(packId);
-  if (!pack || pack.originalFormat !== 'pixiv') throw new Error('Pixiv 图包不存在');
+  if (!pack || pack.originalFormat !== 'pixiv') throw new TaskError('SOURCE_UNAVAILABLE', 'Pixiv 图包不存在');
   const { id } = parsePixivUrl(pack.originalFilename);
   const { metadata, pages, ugoira } = await pixiv.artwork(id, signal);
   signal?.throwIfAborted();
@@ -195,7 +190,7 @@ export async function importPixivPack(
       const destination = resolveWithin(directory, `${id}.ugoira`);
       await createUgoira(zipPath, destination, ugoira.frames);
       bytes = (await fs.promises.stat(destination)).size;
-      if (bytes > config.maxUploadSize) throw new Error('ugoira 超出导入大小限制');
+      if (bytes > config.maxUploadSize) throw new TaskError('RESOURCE_LIMIT', 'ugoira 超出导入大小限制');
       onProgress(1, 1, bytes);
     } finally { await fs.promises.rm(zipPath, { force: true }); }
   }

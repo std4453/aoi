@@ -8,6 +8,7 @@ export interface UploadTaskUpdate {
   transferredBytes?: number;
   status?: 'uploading' | 'paused' | 'needs_file' | 'failed';
   error?: string | null;
+  errorCode?: UploadTask['errorCode'];
 }
 
 export const fetchUploadTasks = () => get<UploadTask[]>('/upload-tasks');

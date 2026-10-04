@@ -1,9 +1,11 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import { createHmac, pbkdf2, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 
 const deriveKey = promisify(pbkdf2);
 
-export class MegaPasswordError extends Error {
+export class MegaPasswordError extends TaskError {
+  constructor(message: string, code: 'PASSWORD_REQUIRED' | 'PASSWORD_INCORRECT' = 'PASSWORD_REQUIRED') { super(code, message); }
   override name = 'MegaPasswordError';
 }
 
@@ -40,7 +42,7 @@ export async function resolveMegaUrl(input: string, password?: string): Promise<
     const mac = algorithm === 1
       ? createHmac('sha256', body).update(macKey).digest()
       : createHmac('sha256', macKey).update(body).digest();
-    if (!timingSafeEqual(mac, payload.subarray(-32))) throw new MegaPasswordError('分享密码错误或链接已损坏');
+    if (!timingSafeEqual(mac, payload.subarray(-32))) throw new MegaPasswordError('分享密码错误或链接已损坏', 'PASSWORD_INCORRECT');
     const key = Buffer.from(payload.subarray(40, 40 + keyLength));
     for (let i = 0; i < key.length; i++) key[i] ^= derived[i];
     return `https://mega.nz/${type === 0 ? 'folder' : 'file'}/${payload.subarray(2, 8).toString('base64url')}#${key.toString('base64url')}`;
@@ -52,7 +54,7 @@ export async function resolveMegaUrl(input: string, password?: string): Promise<
   const key = password?.trim() || (legacy ? parts[2] : parts[0]);
   if (!key) throw new MegaPasswordError('此分享缺少解密密钥，请输入分享方提供的密钥');
   if (!/^[\w-]+$/.test(key) || Buffer.from(key, 'base64url').length !== (folder ? 16 : 32)) {
-    throw new MegaPasswordError('MEGA 解密密钥格式错误');
+    throw new MegaPasswordError('MEGA 解密密钥格式错误', 'PASSWORD_INCORRECT');
   }
   const child = legacy ? parts[3] : parts[2];
   return `https://mega.nz/${folder ? 'folder' : 'file'}/${handle}#${key}${child ? `/file/${child}` : ''}`;

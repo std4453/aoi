@@ -1,4 +1,5 @@
-import { config } from '../config.js';
+import { archiveErrorCode, jobFailureCode, taskErrorCode } from './task-errors.js';
+import { config } from '../config/index.js';
 import { beginMutation } from '../replication/state.js';
 import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification.js';
 import { EventEmitter } from 'node:events';
@@ -77,11 +78,14 @@ class JobQueue extends EventEmitter {
   private async runJob(job: Job): Promise<void> {
     try {
       switch (job.type) {
+        case 'fanbox':
         case 'pixiv': {
           const controller = new AbortController();
           this.importAbort = { packId: job.packId, controller };
-          const { importPixivPack } = await import('./pixiv-importer.js');
-          await importPixivPack(job.packId, (completed, total, bytes) => {
+          const importPost = job.type === 'fanbox'
+            ? (await import('./fanbox-importer.js')).importFanboxPack
+            : (await import('./pixiv-importer.js')).importPixivPack;
+          await importPost(job.packId, (completed, total, bytes) => {
             this.emitProgress(job.id, {
               jobId: job.id, status: 'running', phase: 'downloading', completed, total,
               percentage: Math.floor(completed / total * 100),
@@ -144,7 +148,7 @@ class JobQueue extends EventEmitter {
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
-      updateJobStatus(job.id, 'failed', 0, message);
+      updateJobStatus(job.id, 'failed', 0, message, job.type === 'extract' ? archiveErrorCode(err) : taskErrorCode(err, jobFailureCode(job.type)));
       console.error(`Job ${job.id} failed:`, message);
 
       try {

@@ -73,12 +73,13 @@ export interface Preset {
 export interface Job {
   id: string;
   packId: string;
-  type: 'extract' | 'thumbnail' | 'compress' | 'verify' | 'pixiv';
+  type: 'extract' | 'thumbnail' | 'compress' | 'verify' | 'pixiv' | 'fanbox';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   options: string | null;
   result: string | null;
   error: string | null;
+  errorCode?: TaskErrorCode | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -151,11 +152,23 @@ export interface ArchiveUploadRequest {
   allowDuplicate?: boolean;
 }
 
+export type RemoteTaskType = 'pixiv' | 'fanbox' | 'mega';
+export type UploadTaskType = 'archive' | 'folder' | RemoteTaskType;
+
 export type UploadTaskState = 'uploading' | 'downloading' | 'paused' | 'needs_file' | 'processing' | 'duplicate' | 'password' | 'completed' | 'failed';
+
+export type TaskErrorCategory = 'authentication' | 'access' | 'network' | 'source' | 'storage' | 'password'
+  | 'extraction' | 'verification' | 'preview' | 'upload' | 'download' | 'processing';
+export type TaskErrorCode = 'AUTH_REQUIRED' | 'ACCESS_DENIED' | 'NETWORK_ERROR' | 'RATE_LIMITED'
+  | 'SOURCE_UNAVAILABLE' | 'SOURCE_QUOTA' | 'NO_SUPPORTED_MEDIA' | 'SOURCE_BLOCKED' | 'CHALLENGE_FAILED'
+  | 'STORAGE_FULL' | 'RESOURCE_LIMIT' | 'PASSWORD_REQUIRED' | 'PASSWORD_INCORRECT'
+  | 'ARCHIVE_INVALID' | 'ARCHIVE_UNSUPPORTED' | 'EXTRACTION_FAILED'
+  | 'VERIFICATION_FAILED' | 'PREVIEW_FAILED' | 'UPLOAD_FAILED' | 'DOWNLOAD_FAILED' | 'PROCESSING_FAILED';
 
 export interface UploadTask {
   id: string;
-  source: 'archive' | 'folder' | 'mega' | 'pixiv';
+  source: UploadTaskType;
+  isRemote: boolean;
   name: string;
   filename: string;
   totalBytes: number;
@@ -173,6 +186,8 @@ export interface UploadTask {
   uploadId: string | null;
   matches: DuplicatePack[];
   error: string | null;
+  errorCode: TaskErrorCode | null;
+  errorCategory: TaskErrorCategory | null;
   passwordKind?: 'share' | 'archive';
   createdAt: string;
   updatedAt: string;
@@ -180,7 +195,7 @@ export interface UploadTask {
 
 export interface CreateUploadTaskRequest {
   autoName?: boolean;
-  source: UploadTask['source'];
+  source: UploadTaskType;
   name: string;
   filename?: string;
   fileSize?: number;
@@ -234,6 +249,33 @@ export interface PixivSettings {
   configured: boolean;
   source: 'settings' | 'environment' | 'none';
   refreshToken?: string;
+  browserLoginEnabled?: boolean;
+}
+
+export interface FanboxMetadata {
+  title: string;
+  author: string;
+  tags: Tag[];
+  imageCount: number;
+  videoCount: number;
+  skippedCount: number;
+}
+
+export interface FanboxSettings {
+  sessionId?: string;
+  configured: boolean;
+  source: 'settings' | 'environment' | 'cookie_file' | 'none';
+  browserLoginEnabled?: boolean;
+}
+
+export type BrowserLoginProvider = 'pixiv' | 'fanbox';
+
+export interface BrowserLoginSession {
+  provider?: BrowserLoginProvider;
+  completed?: boolean;
+  id: string;
+  expiresAt: string;
+  browserUrl: string;
 }
 
 export interface UgoiraManifest {

@@ -2,7 +2,7 @@ import { beginMutation } from '../replication/state.js';
 import fp from 'fastify-plugin';
 import { Server } from '@tus/server';
 import { FileStore } from '@tus/file-store';
-import { config } from '../config.js';
+import { config } from '../config/index.js';
 import { ensureDir } from '../services/storage.js';
 
 export const tusPlugin = fp(async function (fastify) {

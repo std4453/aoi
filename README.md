@@ -20,7 +20,7 @@ AoI（Angel of Images），你的本地图片管家。
 
 ### 上传任务交互
 
-压缩包、文件夹、Pixiv 和 MEGA 共用服务端持久化任务列表：传输 → 解包（压缩包）→ 校验与重复检测 → 生成预览 → 完成。传输结束不代表处理成功；上传页继续显示后续阶段、进度和错误。未知进度不显示虚假的百分比，重复内容在卡片内等待用户明确选择继续或取消。切换 tab 或刷新后任务仍然保留；本地文件在刷新后需要重新选择，服务端下载继续执行。一次只展开一个任务，其他任务折叠为紧凑状态行；表单草稿在切换任务时保留。
+压缩包、文件夹、Pixiv、FANBOX 和 MEGA 共用服务端持久化任务列表：传输 → 解包（压缩包）→ 校验与重复检测 → 生成预览 → 完成。传输结束不代表处理成功；上传页继续显示后续阶段、进度和错误。未知进度不显示虚假的百分比，重复内容在卡片内等待用户明确选择继续或取消。切换 tab 或刷新后任务仍然保留；本地文件在刷新后需要重新选择，服务端下载继续执行。一次只展开一个任务，其他任务折叠为紧凑状态行；表单草稿在切换任务时保留。
 
 失败任务直接显示原因，并可删除；下载、校验和预览生成失败可重试，解包失败需检查文件或密码后重新上传。取消须确认，服务端中止下载/校验或等待当前解包/预览步骤安全结束，再删除文件与任务，保留已创建的标签。外部来源设置采用与导入入口相同的图标，点击打开配置弹窗，Pixiv 访问失败时可在上传页直接配置登录态并重试。
 
@@ -35,6 +35,14 @@ AoI（Angel of Images），你的本地图片管家。
 默认无需登录即可导入公开作品；被删除、无访问权限或限流的作品会显示失败原因。每幅作品最多 1000 页，单张图片 / 动画源 ZIP 上限 100 MiB，总下载量受 `MAX_UPLOAD_SIZE` 限制，像素数受 `MAX_IMAGE_PIXELS` 限制。重试/重启恢复会重新下载，避免混用作品修改前后的页面。Pixiv 接口或访问策略发生变化可能影响导入。导入结果复用文件夹图包存储（`originalFormat: pixiv`），来源网址保存在 `originalFilename`，无需数据库迁移。
 
 ugoira 保存为独立 `.ugoira` 文件，属于逻辑图片媒体（API `mediaType: ugoira`），按一个作品文件统计。文件本身是 ZIP，包含原始帧文件和 `manifest.json`：`{"format":"aoi-ugoira","version":1,"frames":[{"file":"000000.jpg","delay":125}]}`，延迟单位为毫秒。最多 1000 帧、单帧 32 MiB、解压总量不超过 512 MiB 或 `MAX_EXTRACTED_SIZE`，不向文件系统解压不可信路径。图片列表用首帧生成封面，查看器提供播放/暂停；压缩打包保留完整 `.ugoira`，不会把动画转成单张 JPEG。下载的文件可通过文件夹或 ZIP 再次导入。副本同步完整动画文件，副本服务也需更新到支持此格式的版本。
+
+Pixiv 和 FANBOX 均支持可选的官方浏览器登录，默认未启用。启用后可在配置弹窗中启动独立浏览器会话，手动完成官方登录后自动保存凭据；仍可切换手动输入。Pixiv 网页会话可供后续 FANBOX 官方授权复用，独立于 App refresh token。Chromium、Selkies 和会话管理打包为单个常驻容器，登录时只启停内部进程，不创建容器或 Pod。配置、K8s 部署边界和本地验证见 [浏览器登录服务](docs/browser-login-local.md)。
+
+### FANBOX 导入配置
+
+「导入自 → FANBOX」导入单个帖子内受支持的图片和视频，跳过文字、压缩包、封面和外部嵌入链接；复用上传任务、进度、去重确认、重试与重启恢复。需要登录时，在「设置 → 外部来源 → FANBOX」提供浏览器 Cookie 中的 `FANBOXSESSID` 值；配置弹窗支持按需回填，普通状态查询不返回凭据。
+
+新增可选环境变量 `FANBOX_SESSION_ID`（初始会话）和 `FANBOX_COOKIES_FILE`（可持续更新的 Netscape Cookie 文件，每次请求读取）；网络复用 `AOI_PROXY_URL`。遇到 Cloudflare HTML 拦截时可选用 `AOI_FLARESOLVERR_URL` 指向受信任的 FlareSolverr 服务，默认不启用；需要独立容器依赖及 FANBOX 请求头补充，见 [FlareSolverr 本地联调](docs/flaresolverr-local.md)。没有新增 npm 依赖或数据库迁移。Cookie 文件更新及响应 Cookie 轮换不等于永不过期，浏览器登录失效时仍需重新登录。获取方式、配置优先级、开源持续登录方案与验证边界见 [FANBOX 导入与登录态](docs/fanbox-import.md)。
 
 ## 技术栈
 
@@ -379,7 +387,7 @@ FRONTEND_ONLY=true SERVER_SELECTION_ENABLED=true docker compose up -d
 ├── server/
 │   └── src/
 │       ├── index.ts          # Fastify 入口
-│       ├── config.ts         # 配置 (Zod 校验)
+│       ├── config/           # 配置 (Zod 校验)
 │       ├── db/               # 原生 SQLite、迁移与仓储
 │       ├── plugins/tus.ts    # tus 上传插件
 │       ├── routes/           # API 路由

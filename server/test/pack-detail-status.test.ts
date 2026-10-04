@@ -3,8 +3,8 @@ import test from 'node:test';
 import { shouldPollPack, shouldReloadPackPreview } from '../../client/src/lib/packStatus.js';
 import type { Pack } from '../../shared/types.js';
 
-test('details poll server-side Pixiv downloads through completion or failure', () => {
-  const pixiv = { sourceType: 'folder', originalFormat: 'pixiv' } as const;
+for (const source of ['pixiv', 'fanbox']) test(`details poll server-side ${source} downloads through completion or failure`, () => {
+  const pixiv = { sourceType: 'folder', originalFormat: source } as const;
   for (const status of ['uploading', 'verifying', 'thumbnailing', 'awaiting_confirmation'] as const) {
     assert.equal(shouldPollPack({ ...pixiv, status }), true);
   }
