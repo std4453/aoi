@@ -44,8 +44,8 @@ export function sessionFromCookieFile(text: string, now = Date.now()): string {
 }
 
 export function readFanboxSettings(): { sessionId: string; source: FanboxSettings['source'] } {
-  if (config.fanboxCookiesFile) {
-    try { return { sessionId: sessionFromCookieFile(readBoundedFile(config.fanboxCookiesFile)), source: 'cookie_file' }; }
+  if (config.fanbox.cookiesFile) {
+    try { return { sessionId: sessionFromCookieFile(readBoundedFile(config.fanbox.cookiesFile)), source: 'cookie_file' }; }
     catch { throw new Error('无法读取有效的 FANBOX Cookie 文件，请检查文件内容、有效期和权限'); }
   }
   try {
@@ -54,13 +54,13 @@ export function readFanboxSettings(): { sessionId: string; source: FanboxSetting
     return { sessionId, source: sessionId ? 'settings' : 'none' };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取 FANBOX 登录配置');
-    const sessionId = validateFanboxSession(config.fanboxSessionId);
+    const sessionId = validateFanboxSession(config.fanbox.sessionId);
     return { sessionId, source: sessionId ? 'environment' : 'none' };
   }
 }
 
 export function saveFanboxSettings(sessionId: string): void {
-  if (config.fanboxCookiesFile) throw new Error('FANBOX 正在使用服务端 Cookie 文件，请更新该文件');
+  if (config.fanbox.cookiesFile) throw new Error('FANBOX 正在使用服务端 Cookie 文件，请更新该文件');
   const value = validateFanboxSession(sessionId);
   fs.mkdirSync(config.dataDir, { recursive: true });
   const temporary = `${settingsPath()}.${randomUUID()}.tmp`;

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { parseProxyUrl } from './services/outbound-fetch.js';
+import { readExternalConfig } from './config/external-sources.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,17 +14,6 @@ const defaultDataDir = path.join(projectRoot, 'data');
 const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(value => value === 'true' || value === '1');
 
 const configSchema = z.object({
-  flaresolverrUrl: z.string().url().optional(),
-  flaresolverrProxyUrl: z.string().optional().transform(parseProxyUrl),
-  browserLoginUrl: z.string().url().optional(),
-  browserLoginPublicUrl: z.string().url().optional(),
-  browserLoginKeyFile: z.string().optional(),
-  browserLoginTrustedHttp: flag,
-  fanboxSessionId: z.string().default(''),
-  fanboxCookiesFile: z.string().optional(),
-  pixivProxyUrl: z.string().url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
-  pixivCookie: z.string().max(8192).refine(value => !/[\r\n]/.test(value)).default(''),
-  pixivRefreshToken: z.string().max(8192).regex(/^[^\s]*$/).default(''),
   frontendOnly: flag,
   snapshotEnabled: z.enum(['true', 'false', '1', '0']).default('true').transform(value => value === 'true' || value === '1'),
   replicaSourceUrl: z.string().url().optional().transform(value => {
@@ -58,17 +48,6 @@ const configSchema = z.object({
 });
 
 const parsed = configSchema.parse({
-  flaresolverrUrl: process.env.AOI_FLARESOLVERR_URL || undefined,
-  flaresolverrProxyUrl: process.env.AOI_FLARESOLVERR_PROXY_URL || undefined,
-  browserLoginUrl: process.env.AOI_BROWSER_LOGIN_URL || undefined,
-  browserLoginPublicUrl: process.env.AOI_BROWSER_LOGIN_PUBLIC_URL || undefined,
-  browserLoginKeyFile: process.env.AOI_BROWSER_LOGIN_KEY_FILE || undefined,
-  browserLoginTrustedHttp: process.env.AOI_BROWSER_LOGIN_TRUSTED_HTTP,
-  fanboxSessionId: process.env.FANBOX_SESSION_ID,
-  fanboxCookiesFile: process.env.FANBOX_COOKIES_FILE || undefined,
-  pixivProxyUrl: process.env.PIXIV_PROXY_URL || undefined,
-  pixivCookie: process.env.PIXIV_COOKIE,
-  pixivRefreshToken: process.env.PIXIV_REFRESH_TOKEN,
   frontendOnly: process.env.FRONTEND_ONLY,
   snapshotEnabled: process.env.AOI_SNAPSHOT_ENABLED,
   replicaSourceUrl: process.env.AOI_REPLICA_SOURCE_URL,
@@ -95,37 +74,13 @@ const parsed = configSchema.parse({
   shutdownTimeout: process.env.SHUTDOWN_TIMEOUT,
 });
 
-if (parsed.flaresolverrUrl) {
-  const url = new URL(parsed.flaresolverrUrl);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-    throw new Error('AOI_FLARESOLVERR_URL must be a trusted http(s) origin');
-  }
-  const proxy = parsed.flaresolverrProxyUrl ?? parsed.outboundProxyUrl;
-  if (proxy && (new URL(proxy).username || new URL(proxy).password)) {
-    throw new Error('FlareSolverr temporary requests require a proxy without URL credentials');
-  }
-} else if (parsed.flaresolverrProxyUrl) {
-  throw new Error('AOI_FLARESOLVERR_PROXY_URL requires AOI_FLARESOLVERR_URL');
-}
-
-for (const [value, internal] of [[parsed.browserLoginUrl, true], [parsed.browserLoginPublicUrl, false]] as const) {
-  if (!value) continue;
-  const url = new URL(value);
-  if (url.username || url.password || url.search || url.hash || url.pathname !== '/' ||
-      !(url.protocol === 'https:' || (url.protocol === 'http:' && (['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || internal && parsed.browserLoginTrustedHttp)))) {
-    throw new Error('Browser login URLs require HTTPS or loopback HTTP; private control HTTP requires AOI_BROWSER_LOGIN_TRUSTED_HTTP');
-  }
-}
-if ([parsed.browserLoginUrl, parsed.browserLoginPublicUrl, parsed.browserLoginKeyFile].filter(Boolean).length % 3 !== 0) {
-  throw new Error('Configure all three AOI_BROWSER_LOGIN_URL, AOI_BROWSER_LOGIN_PUBLIC_URL and AOI_BROWSER_LOGIN_KEY_FILE');
-}
-
 if (Boolean(parsed.tlsCertFile) !== Boolean(parsed.tlsKeyFile)) {
   throw new Error('TLS_CERT_FILE and TLS_KEY_FILE must be configured together');
 }
 
 export const config = {
   ...parsed,
+  ...readExternalConfig(process.env, parsed.outboundProxyUrl),
   isReplica: Boolean(parsed.replicaSourceUrl),
   dirs: {
     uploads: path.join(parsed.dataDir, 'uploads'),

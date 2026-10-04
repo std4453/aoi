@@ -158,9 +158,9 @@ let proxy: ProxyAgent | undefined;
 export function getPixivClient(): PixivClient {
   const { refreshToken } = readPixivSettings();
   if (!client || refreshToken !== clientToken) {
-    const proxyUrl = config.pixivProxyUrl || config.outboundProxyUrl;
+    const proxyUrl = config.pixiv.proxyUrl || config.outboundProxyUrl;
     if (proxyUrl) proxy ??= new ProxyAgent(proxyUrl);
-    client = new PixivClient(proxy, config.pixivCookie, refreshToken);
+    client = new PixivClient(proxy, config.pixiv.cookie, refreshToken);
     clientToken = refreshToken;
   }
   return client;

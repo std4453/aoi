@@ -54,9 +54,9 @@ test('not logged in, concurrent operations, stale sessions, and file-managed cre
   await assert.rejects(service.complete('different-session'));
   pool.intercept({ path: `/sessions/${id}`, method: 'DELETE' }).reply(200, { closed: true });
   await service.cancel(id);
-  config.fanboxCookiesFile = '/not-used';
+  config.fanbox.cookiesFile = '/not-used';
   await assert.rejects(service.start(), /Cookie 文件/);
-  config.fanboxCookiesFile = undefined;
+  config.fanbox.cookiesFile = undefined;
 });
 
 test('cleanup failure preserves a retryable handle and never leaks a captured credential in errors', async () => {

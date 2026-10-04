@@ -9,7 +9,7 @@ import { resolveWithin } from './safe-path.js';
 import type { BrowserLoginProvider, BrowserLoginSession } from '../../../shared/types.js';
 
 export function browserLoginEnabled(): boolean {
-  return Boolean(config.browserLoginUrl && config.browserLoginKeyFile && config.browserLoginPublicUrl);
+  return Boolean(config.browserLogin.url && config.browserLogin.keyFile && config.browserLogin.publicUrl);
 }
 const sessionSchema = z.object({ id: z.string().uuid(), expiresAt: z.string().datetime(), launchToken: z.string().regex(/^[a-f0-9]{64}$/) });
 const cookieSchema = z.object({ name: z.literal('PHPSESSID'), value: z.string().min(1).max(8192),
@@ -47,11 +47,11 @@ export class BrowserLogin {
   private async call(method: string, endpoint: string, body?: unknown): Promise<unknown> {
     if (!browserLoginEnabled()) throw new Error('浏览器登录未启用');
     let key: string;
-    try { key = fs.readFileSync(config.browserLoginKeyFile!, 'utf8').trim(); }
+    try { key = fs.readFileSync(config.browserLogin.keyFile!, 'utf8').trim(); }
     catch { throw new Error('无法读取浏览器登录服务凭据'); }
     if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('浏览器登录服务凭据格式不正确');
     try {
-      const response = await fetch(new URL(endpoint, config.browserLoginUrl), {
+      const response = await fetch(new URL(endpoint, config.browserLogin.url), {
         method, headers: { Authorization: `Bearer ${key}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, redirect: 'error',
         ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(180_000),
       });
@@ -80,7 +80,7 @@ export class BrowserLogin {
   }
   start(provider: BrowserLoginProvider = 'fanbox', mobile = false): Promise<BrowserLoginSession> {
     return this.exclusive(async () => {
-      if (provider === 'fanbox' && config.fanboxCookiesFile) throw new Error('FANBOX 正在使用服务端 Cookie 文件');
+      if (provider === 'fanbox' && config.fanbox.cookiesFile) throw new Error('FANBOX 正在使用服务端 Cookie 文件');
       if (this.active?.completed) this.active = undefined;
       this.status(this.active?.provider);
       if (this.active) {
@@ -94,9 +94,9 @@ export class BrowserLogin {
         loginUrl.search = new URLSearchParams({ code_challenge: createHash('sha256').update(this.verifier).digest('base64url'), code_challenge_method: 'S256', client: 'pixiv-android' }).toString();
       } else loginUrl.searchParams.set('return_to', 'https://www.fanbox.cc/user/settings');
       const session = sessionSchema.parse(await this.call('POST', '/sessions', { provider, mobile, url: loginUrl.href,
-        proxyUrl: provider === 'pixiv' ? config.pixivProxyUrl || config.outboundProxyUrl : config.outboundProxyUrl,
+        proxyUrl: provider === 'pixiv' ? config.pixiv.proxyUrl || config.outboundProxyUrl : config.outboundProxyUrl,
         cookies: readWebCookies() }));
-      const browserUrl = new URL('/open', config.browserLoginPublicUrl); browserUrl.hash = session.launchToken;
+      const browserUrl = new URL('/open', config.browserLogin.publicUrl); browserUrl.hash = session.launchToken;
       this.active = { id: session.id, provider, expiresAt: session.expiresAt, browserUrl: browserUrl.href };
       this.schedulePoll(provider);
       return this.active;

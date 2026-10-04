@@ -15,7 +15,7 @@ export function readPixivSettings(): { refreshToken: string; source: PixivSettin
     return { ...saved, source: saved.refreshToken ? 'settings' : 'none' };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取 Pixiv 登录配置');
-    return { refreshToken: config.pixivRefreshToken, source: config.pixivRefreshToken ? 'environment' : 'none' };
+    return { refreshToken: config.pixiv.refreshToken, source: config.pixiv.refreshToken ? 'environment' : 'none' };
   }
 }
 
@@ -45,7 +45,7 @@ const appHeaders = { 'User-Agent': 'PixivIOSApp/7.19.1 (iOS 16.7.2; iPhone12,8)'
 
 /** Same PKCE exchange as gallery-dl oauth:pixiv; the returned token is saved unchanged. */
 export async function exchangePixivCode(code: string, verifier: string): Promise<string> {
-  const proxyUrl = config.pixivProxyUrl || config.outboundProxyUrl;
+  const proxyUrl = config.pixiv.proxyUrl || config.outboundProxyUrl;
   const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
   try {
     const response = await fetch('https://oauth.secure.pixiv.net/auth/token', {

@@ -49,7 +49,7 @@ test('Netscape cookies enforce domain, path, expiry and unique sessions while ig
 
 test('externally updated cookie files are reloaded and never overwritten by server settings or rotation', async () => {
   const filename = path.join(dataDir, 'cookies.txt');
-  config.fanboxCookiesFile = filename;
+  config.fanbox.cookiesFile = filename;
   try {
     fs.writeFileSync(filename, cookie('first'));
     assert.deepEqual(readFanboxSettings(), { sessionId: 'first', source: 'cookie_file' });
@@ -60,7 +60,7 @@ test('externally updated cookie files are reloaded and never overwritten by serv
     assert.equal((await app.inject({ method: 'PUT', url: '/api/settings/fanbox', payload: { sessionId: 'other' } })).statusCode, 400);
     fs.writeFileSync(filename, cookie('expired', '1'));
     assert.throws(readFanboxSettings, /Cookie 文件/);
-  } finally { config.fanboxCookiesFile = undefined; }
+  } finally { config.fanbox.cookiesFile = undefined; }
 });
 
 test('session rotation is persistent, domain scoped and cannot undo a user edit or logout', () => {

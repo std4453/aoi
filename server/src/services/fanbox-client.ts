@@ -204,6 +204,6 @@ export function getFanboxClient(): FanboxClient {
   return client ??= new FanboxClient(
     config.outboundProxyUrl ? new ProxyAgent({ uri: config.outboundProxyUrl, proxyTunnel: true }) : undefined,
     readFanboxSettings, rotateFanboxSession,
-    config.flaresolverrUrl ? new FanboxChallengeClient(config.flaresolverrUrl, config.flaresolverrProxyUrl ?? config.outboundProxyUrl) : undefined,
+    config.flaresolverr.url ? new FanboxChallengeClient(config.flaresolverr.url, config.flaresolverr.proxyUrl ?? config.outboundProxyUrl) : undefined,
   );
 }
