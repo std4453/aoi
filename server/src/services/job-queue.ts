@@ -77,11 +77,14 @@ class JobQueue extends EventEmitter {
   private async runJob(job: Job): Promise<void> {
     try {
       switch (job.type) {
+        case 'fanbox':
         case 'pixiv': {
           const controller = new AbortController();
           this.importAbort = { packId: job.packId, controller };
-          const { importPixivPack } = await import('./pixiv-importer.js');
-          await importPixivPack(job.packId, (completed, total, bytes) => {
+          const importPost = job.type === 'fanbox'
+            ? (await import('./fanbox-importer.js')).importFanboxPack
+            : (await import('./pixiv-importer.js')).importPixivPack;
+          await importPost(job.packId, (completed, total, bytes) => {
             this.emitProgress(job.id, {
               jobId: job.id, status: 'running', phase: 'downloading', completed, total,
               percentage: Math.floor(completed / total * 100),

@@ -21,6 +21,11 @@ export function IconButton({ icon, label, variant = 'ghost', className = '', typ
   return <button {...props} type={type} aria-label={label} className={`${base} inline-flex h-8 w-8 shrink-0 items-center justify-center ${variants[variant]} ${className}`}>{icon}</button>;
 }
 
+/** Inline action inherits surrounding type without adding padding or a minimum hit-area height. */
+export function TextButton({ className = '', type = 'button', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button {...props} type={type} className={`rounded p-0 leading-[inherit] text-blue-400 transition-colors hover:text-blue-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400 disabled:cursor-not-allowed disabled:opacity-50 ${className}`} />;
+}
+
 /** Secondary on the left, primary on the right; equal columns when paired. */
 export function ActionRow({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <div className={`grid auto-cols-fr grid-flow-col gap-2 ${className}`}>{children}</div>;

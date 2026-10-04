@@ -6,13 +6,14 @@ import { z } from 'zod';
 import sharp from 'sharp';
 import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
-import { getPack, getLatestJob, updatePackStats, updatePackStructureType, createTag, listTags, setPackTags } from '../db/repositories.js';
+import { getPack, getLatestJob, updatePackStats, updatePackStructureType, setPackTags } from '../db/repositories.js';
 import { ensureDir, getExtractedImagesDir } from './storage.js';
 import { resolveWithin } from './safe-path.js';
 import { scheduleVerification } from './content-verification.js';
 import { PixivAuth, readPixivJson, readPixivSettings } from './pixiv-auth.js';
 import { createUgoira, ugoiraFramesSchema } from './ugoira.js';
-import type { Tag } from '../../../shared/types.js';
+import { ensureImportTags as ensurePixivTags } from './import-tags.js';
+export { ensureImportTags as ensurePixivTags } from './import-tags.js';
 
 export function parsePixivUrl(value: string): { id: string; url: string } {
   const url = new URL(value.trim());
@@ -157,19 +158,12 @@ let proxy: ProxyAgent | undefined;
 export function getPixivClient(): PixivClient {
   const { refreshToken } = readPixivSettings();
   if (!client || refreshToken !== clientToken) {
-    if (config.pixivProxyUrl) proxy ??= new ProxyAgent(config.pixivProxyUrl);
+    const proxyUrl = config.pixivProxyUrl || config.outboundProxyUrl;
+    if (proxyUrl) proxy ??= new ProxyAgent(proxyUrl);
     client = new PixivClient(proxy, config.pixivCookie, refreshToken);
     clientToken = refreshToken;
   }
   return client;
-}
-
-export function ensurePixivTags(names: string[]): Tag[] {
-  return getDb().transaction(() => {
-    const existing = new Map(listTags().map(tag => [tag.name, tag]));
-    const safe = [...new Set(names.map(name => name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200)).filter(Boolean))].slice(0, 1000);
-    return safe.map(name => existing.get(name) ?? createTag(name));
-  })();
 }
 
 export async function importPixivPack(

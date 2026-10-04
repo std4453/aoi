@@ -1,4 +1,5 @@
 import { IconButton } from './Button';
+import fanboxIcon from '../assets/fanbox.png';
 
 export function PixivIcon({ className = 'w-10 h-10' }: { className?: string }) {
   // Pixiv mark from Simple Icons (CC0): https://simpleicons.org/?q=pixiv
@@ -12,7 +13,12 @@ export function MegaIcon({ className = 'w-10 h-10' }: { className?: string }) {
   return <svg viewBox="0 0 24 24" className={className} aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#d9272e" /><path d="M5.5 16.5v-9H8l4 4.2 4-4.2h2.5v9H16v-5.4l-4 4-4-4v5.4z" fill="white" /></svg>;
 }
 
-const sources = [{ id: 'pixiv', label: 'Pixiv', Icon: PixivIcon }, { id: 'mega', label: 'MEGA', Icon: MegaIcon }] as const;
+export function FanboxIcon({ className = 'w-10 h-10' }: { className?: string }) {
+  // Official FANBOX site icon: https://s.pximg.net/common/images/fanbox/apple-touch-icon.png
+  return <img src={fanboxIcon} className={className} alt="" aria-hidden="true" />;
+}
+
+const sources = [{ id: 'pixiv', label: 'Pixiv', Icon: PixivIcon }, { id: 'mega', label: 'MEGA', Icon: MegaIcon }, { id: 'fanbox', label: 'FANBOX', Icon: FanboxIcon }] as const;
 type Source = typeof sources[number]['id'];
 
 export default function ImportSources({ onSelect, title = '导入自', card = false, compact = false, configuredSources = [], availableSources = ['pixiv'] }: { onSelect: (source: Source) => void; title?: string; card?: boolean; compact?: boolean; configuredSources?: readonly string[]; availableSources?: readonly Source[] }) {

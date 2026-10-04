@@ -14,6 +14,8 @@ import { config } from './config.js';
 import { backupDb, closeDb, getDbPath, initDb } from './db/connection.js';
 import { registerPackRoutes } from './routes/packs.js';
 import { registerPixivRoutes } from './routes/pixiv.js';
+import { registerFanboxRoutes } from './routes/fanbox.js';
+import { registerBrowserLoginRoutes } from './routes/browser-login.js';
 import { registerMegaRoutes } from './routes/mega.js';
 import { registerUploadTaskRoutes } from './routes/upload-tasks.js';
 import { recoverArchiveTaskFiles, recoverUploadTasks, listUploadTasks, getUploadTaskMetadata } from './services/upload-tasks.js';
@@ -112,8 +114,8 @@ function recoverJobs(pendingMegaPackIds = new Set<string>()): void {
       resumeHistoricalVerification(pack.id);
       continue;
     }
-    if (pack.status === 'uploading' && pack.originalFormat === 'pixiv') {
-      ensureRecoveryJob(pack.id, 'pixiv');
+    if (pack.status === 'uploading' && (pack.originalFormat === 'pixiv' || pack.originalFormat === 'fanbox')) {
+      ensureRecoveryJob(pack.id, pack.originalFormat);
     } else if (pack.status === 'uploading' && pack.sourceType === 'archive') {
       try {
         const archivePath = getArchivePath(pack.id, `original.${pack.originalFormat}`);
@@ -275,6 +277,8 @@ async function main() {
     await app.register(registerPackRoutes);
     await app.register(registerPixivRoutes);
     await app.register(registerMegaRoutes);
+    await app.register(registerFanboxRoutes);
+    await app.register(registerBrowserLoginRoutes);
     await app.register(registerUploadTaskRoutes);
     await app.register(registerPresetRoutes);
     await app.register(registerProcessingRoutes);

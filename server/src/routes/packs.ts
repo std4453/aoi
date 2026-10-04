@@ -109,7 +109,7 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
     const job = latestImportJob(pack.id);
     return { pack: toPublicPack(pack), progress: job ? jobQueue.getProgress(job.id) : null,
       matches: pack.status === 'awaiting_confirmation' ? getLiveMatches(pack.id) : [],
-      retryable: pack.status === 'failed' && Boolean(job && ['pixiv', 'verify', 'thumbnail'].includes(job.type)) && !hasAnyActiveJob(pack.id),
+      retryable: pack.status === 'failed' && Boolean(job && ['pixiv', 'fanbox', 'verify', 'thumbnail'].includes(job.type)) && !hasAnyActiveJob(pack.id),
     } satisfies UploadTaskStatus;
   });
   fastify.post<{ Params: { id: string } }>('/api/packs/:id/upload-task/retry', async (request, reply) => {
@@ -117,13 +117,13 @@ export const registerPackRoutes: FastifyPluginAsync = async function (fastify) {
       const pack = getPack(request.params.id);
       if (!pack) return reply.code(404).send({ error: '图包不存在或已删除' });
       const job = latestImportJob(pack.id);
-      if (pack.status !== 'failed' || hasAnyActiveJob(pack.id) || !job || !['pixiv', 'verify', 'thumbnail'].includes(job.type)) {
+      if (pack.status !== 'failed' || hasAnyActiveJob(pack.id) || !job || !['pixiv', 'fanbox', 'verify', 'thumbnail'].includes(job.type)) {
         return reply.code(409).send({ error: '当前任务无法重试，请删除后重新上传' });
       }
       getDb().transaction(() => {
         if (job.type === 'verify') scheduleVerification(pack.id);
         else {
-          updatePackStatus(pack.id, job.type === 'pixiv' ? 'uploading' : 'thumbnailing');
+          updatePackStatus(pack.id, ['pixiv', 'fanbox'].includes(job.type) ? 'uploading' : 'thumbnailing');
           const next = createJob(pack.id, job.type);
           if (job.options) getDb().prepare('UPDATE jobs SET options = ? WHERE id = ?').run(job.options, next.id);
         }

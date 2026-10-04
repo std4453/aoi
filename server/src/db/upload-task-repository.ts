@@ -19,7 +19,7 @@ export function createUploadTask(input: CreateUploadTaskRequest): UploadTask {
   const task: UploadTask = {
     id: randomUUID(), source: input.source, name: input.name, filename: input.filename ?? input.name,
     totalBytes: input.fileSize ?? 0, transferredBytes: 0, progress: 0,
-    status: ['mega', 'pixiv'].includes(input.source) ? 'downloading' : 'uploading', packId: null, uploadId: null,
+    status: ['mega', 'pixiv', 'fanbox'].includes(input.source) ? 'downloading' : 'uploading', packId: null, uploadId: null,
     matches: [], error: null, createdAt: now, updatedAt: now,
   };
   const metadata: UploadTaskMetadata = {

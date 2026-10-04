@@ -9,15 +9,15 @@ import { TextInput, PasswordInput } from '../components/Form';
 import TagSelectField from '../components/TagSelectField';
 import PackProcessingResult from '../features/uploads/PackProcessingResult';
 import ImportSources from '../components/ImportSources';
-import PixivSettings from '../components/PixivSettings';
-import { ActionRow, Button, IconButton } from '../components/Button';
+import { FanboxSettingsDialog, PixivSettingsDialog } from '../components/ExternalSourcesSettings';
+import { ActionRow, Button, IconButton, TextButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../features/uploads/TaskPresentation';
 import { taskNoticeMessage, taskProgressDisplay, taskStates } from '../features/uploads/task-display';
 import { TaskSurface, TaskActionRow, TaskNotice, TaskTextAction } from '../features/uploads/TaskPresentation';
 import { uploadView, getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../features/uploads/view-state';
 
 const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
-  : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
+  : source === 'fanbox' ? 'FANBOX 导入' : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
 
 async function readDirectory(directory: FileSystemDirectoryEntry, root = directory.name): Promise<File[]> {
   const files: File[] = [];
@@ -70,7 +70,7 @@ function UploadForm() {
       finally { setScanning(false); }
     } else select(Array.from(event.dataTransfer.files).slice(0, 1), false);
   };
-  const remote = draft.source === 'mega' || draft.source === 'pixiv';
+  const remote = draft.source === 'mega' || draft.source === 'pixiv' || draft.source === 'fanbox';
   const canStart = remote ? Boolean(draft.url.trim()) : draft.files.length > 0;
   const title = draftTitle(draft.source);
   return <div onDrop={event => { void drop(event); }}
@@ -105,16 +105,16 @@ function UploadForm() {
         <p className="mt-2 text-xs text-gray-500">支持 ZIP、RAR、7Z 压缩包或文件夹</p>
         {scanning && <p role="status" className="mt-2 text-xs text-gray-500">正在读取文件夹…</p>}
       </div>
-      <ImportSources compact availableSources={['pixiv', 'mega']} onSelect={source => { setSettings(false); resetDraft(); setDraft({ source }); }} />
+      <ImportSources compact availableSources={['pixiv', 'mega', 'fanbox']} onSelect={source => { setSettings(false); resetDraft(); setDraft({ source }); }} />
     </> : <form id={formId} onSubmit={event => { event.preventDefault(); if (canStart && !starting && !scanning) void start(); }} className="flex flex-col gap-3">
       {remote && <div className="relative">
         <TextInput type="url" required value={draft.url} onChange={event => setDraft({ url: event.target.value })} disabled={starting}
-          aria-label={draft.source === 'pixiv' ? '作品网址' : '分享链接'} aria-busy={metadataLoading} className={metadataLoading ? 'pr-20' : ''}
-          placeholder={draft.source === 'pixiv' ? '作品网址（Pixiv）' : '分享链接（MEGA 文件或文件夹）'} />
+          aria-label={draft.source === 'fanbox' ? '帖子网址' : draft.source === 'pixiv' ? '作品网址' : '分享链接'} aria-busy={metadataLoading} className={metadataLoading ? 'pr-20' : ''}
+          placeholder={draft.source === 'fanbox' ? '帖子网址（FANBOX）' : draft.source === 'pixiv' ? '作品网址（Pixiv）' : '分享链接（MEGA 文件或文件夹）'} />
         {metadataLoading && <span role="status" className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-500">识别中…</span>}
       </div>}
       {metadataError && <div className="text-xs text-amber-400" role="status">{metadataError}
-        {draft.source === 'pixiv' && <Button variant="ghost" onClick={() => setSettings(!settings)}>配置登录</Button>}</div>}
+        {(draft.source === 'pixiv' || draft.source === 'fanbox') && <> <TextButton onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}</div>}
       <TextInput value={draft.name} onChange={event => setDraft({ name: event.target.value })} aria-label="图包名称"
         placeholder={remote ? '图包名称（自动使用分享标题）' : '图包名称'} maxLength={200} disabled={starting} />
       {!remote && <p className="text-xs text-gray-500">{draft.source === 'folder' ? `${draft.files.length} 个文件` : draft.files[0]?.name} · {formatBytes(draft.files.reduce((sum, file) => sum + file.size, 0))}</p>}
@@ -122,9 +122,10 @@ function UploadForm() {
       {(draft.source === 'archive' || draft.source === 'mega') && <PasswordInput value={draft.archivePassword} onChange={archivePassword => setDraft({ archivePassword })} placeholder="压缩包密码" disabled={starting} />}
     </form>}
     {draft.source && <div className="mt-3"><TagSelectField value={draft.tagIds} onChange={tagIds => setDraft({ tagIds })} disabled={starting} /></div>}
-    {settings && draft.source === 'pixiv' && <div className="mt-3 rounded-xl border border-gray-800"><PixivSettings onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} /></div>}
+    {settings && draft.source === 'pixiv' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
+    {settings && draft.source === 'fanbox' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
     {(error || draftError) && <p role="alert" className="mt-3 text-sm text-red-400">{error || draftError}</p>}
-    {draft.source && <ActionRow className="mt-3"><Button variant="secondary" onClick={() => { setSettings(false); setError(''); resetDraft(); }} disabled={starting}>取消上传</Button>
+    {draft.source && <ActionRow className="mt-4"><Button variant="secondary" onClick={() => { setSettings(false); setError(''); resetDraft(); }} disabled={starting}>取消上传</Button>
       <Button variant="primary" type="submit" form={formId} disabled={!canStart || starting || scanning}>{starting ? '正在创建任务…' : remote ? '开始导入' : '开始上传'}</Button></ActionRow>}
     </div></div>
     {dragging && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-blue-400" role="status"><Upload size={32} /><span className="text-sm">松开以上传压缩包或文件夹</span></div>}
@@ -155,7 +156,7 @@ function TaskCard({ task }: { task: UploadTask }) {
   };
   const taskFiles = files[task.id] || [];
   const progress = taskProgressDisplay(task);
-  const remote = task.source === 'mega' || task.source === 'pixiv';
+  const remote = task.source === 'mega' || task.source === 'pixiv' || task.source === 'fanbox';
   const indeterminate = progress.percentage === undefined;
   const showProgress = state.content === 'transfer' || state.content === 'processing';
   return <TaskSurface task={task} expanded={expanded}>
@@ -172,7 +173,9 @@ function TaskCard({ task }: { task: UploadTask }) {
         {state.content === 'result' ? <PackProcessingResult key={task.packId} packId={task.packId} onDone={() => dismiss(task.id)} /> : <>
         {showProgress && <div><div className="mb-1.5 flex justify-between gap-3 text-xs leading-4 text-gray-500"><span>{progress.label}{progress.detail && ` · ${progress.detail}`}</span>{!indeterminate && <span className="shrink-0">{progress.percentage}%</span>}</div>
           <div role="progressbar" aria-label={progress.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percentage} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`h-full rounded-full bg-blue-500 ${indeterminate ? `w-1/3 ${task.status === 'paused' ? '' : 'animate-pulse'}` : 'transition-all duration-300'}`} style={indeterminate ? undefined : { width: `${progress.percentage}%` }} /></div></div>}
-        {notice && <TaskNotice tone={state.tone}>{notice}</TaskNotice>}
+        {notice && <TaskNotice tone={state.tone}>{notice}
+          {(task.source === 'pixiv' || task.source === 'fanbox') && task.status === 'failed' && <> <TextButton disabled={busy} onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}
+        </TaskNotice>}
         {task.status === 'duplicate' && task.matches.length > 0 && <div className="flex flex-col gap-2">
           {task.matches.map(pack => <DuplicateCard key={pack.id} pack={pack} disabled={busy} onSelect={() => navigate(`/packs/${pack.id}`)} />)}
         </div>}
@@ -188,8 +191,8 @@ function TaskCard({ task }: { task: UploadTask }) {
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${file.status === 'uploaded' ? 'bg-green-500' : file.status === 'failed' ? 'bg-red-400' : file.status === 'uploading' ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
             <span className="min-w-0 flex-1 truncate text-gray-400" title={file.path}>{file.path}</span><span className="shrink-0 text-gray-500">{file.status === 'uploaded' ? '完成' : file.status === 'failed' ? '失败' : `${file.size ? Math.round(file.transferred / file.size * 100) : 0}%`}</span>
           </div>)}</div>}</div>}
-        {task.source === 'pixiv' && task.status === 'failed' && <TaskTextAction disabled={busy} onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TaskTextAction>}
-        {settings && task.source === 'pixiv' && task.status === 'failed' && <div className="rounded-xl border border-gray-800"><PixivSettings onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} /></div>}
+        {settings && task.source === 'pixiv' && task.status === 'failed' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
+        {settings && task.source === 'fanbox' && task.status === 'failed' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
         <input ref={input} type="file" className="hidden" {...(task.source === 'folder' ? { webkitdirectory: '', directory: '' } : { accept: '.zip,.rar,.7z' })}
           onChange={event => { const selected = Array.from(event.target.files || []); event.target.value = ''; if (selected.length) void run(() => reselect(task.id, selected)); }} />
         {busy && <p role="status" className="sr-only">正在处理…</p>}

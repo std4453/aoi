@@ -38,15 +38,23 @@ export function taskProgressDisplay(task: UploadTask): { label: string; detail?:
     return { label, detail, percentage };
   }
   return {
-    label: task.status === 'paused' ? '已暂停' : task.source === 'pixiv' || task.source === 'mega' ? '下载中' : '上传中',
+    label: task.status === 'paused' ? '已暂停' : task.source === 'pixiv' || task.source === 'mega' || task.source === 'fanbox' ? '下载中' : '上传中',
     detail: task.totalBytes > 0 ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}` : undefined,
     percentage: task.totalBytes > 0 ? percentage : undefined,
   };
 }
 
+/** Authentication and entitlement failures need user attention; network failures do not. */
+export function taskNeedsLogin(task: UploadTask): boolean {
+  if (task.status !== 'failed' || !['pixiv', 'fanbox'].includes(task.source)) return false;
+  return /登录(?:失败|已失效|态|或验证|配置)|更新.*refresh.?token|未配置.*refresh.?token|不可访问|拒绝.*访问|无权|赞助/i.test(task.error ?? '') &&
+    !/无法连接|网络|代理|超时|过于频繁/.test(task.error ?? '');
+}
+
 /** Keep implementation diagnostics out of cards, including previously saved errors. */
 export function taskFailureLabel(task: UploadTask): string {
   const error = task.error ?? '';
+  if (taskNeedsLogin(task)) return '需要登录';
   if (/解压|压缩包内容|not archive|as \[\w+\] archive|central directory|end of (?:file|data)|unsupported method/i.test(error)) return '解压失败';
   if (/缩略图|thumbnail/i.test(error)) return '预览生成失败';
   if (/校验|verification|checksum/i.test(error)) return '校验失败';
@@ -66,6 +74,10 @@ export function taskErrorMessage(task: UploadTask): string {
   if (/not archive|as \[\w+\] archive|central directory|end of (?:file|data)|压缩包已损坏/i.test(error)) return '压缩包已损坏或格式不正确，请检查文件后重新上传。';
   if (/ENOSPC|空间不足|no space/i.test(error)) return '存储空间不足，请释放空间后重试。';
   if (taskFailureLabel(task) === '解压失败') return '无法解压此图包，请检查压缩包是否完整后重试。';
+  if (task.source === 'fanbox' && /没有可导入/.test(error)) return '帖子中没有支持的图片或视频，文字、压缩包及外部嵌入链接会被跳过。';
+  if (task.source === 'fanbox' && /FlareSolverr|FANBOX 验证正在进行/.test(error)) return 'FANBOX 验证未完成，请稍后重试。';
+  if (task.source === 'fanbox' && /拦截了服务器请求/.test(error)) return 'FANBOX 拦截了服务器请求，请稍后重试。';
+  if (task.source === 'fanbox' && /不可访问|无权|赞助/.test(error)) return 'FANBOX 帖子不可访问。';
   if (/登录|refresh.?token|unauthorized|authentication/i.test(error)) return '来源登录配置不可用，请检查配置后重试。';
   if (/quota|配额|流量限制/i.test(error)) return '来源服务的下载额度不足，请稍后重试。';
   if (/timeout|timed out|超时|fetch failed|ECONN|ENOTFOUND|network/i.test(error)) return '连接失败或超时，请检查网络及代理配置后重试。';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage } from '../../client/src/features/uploads/task-display.ts';
+import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage, taskNeedsLogin } from '../../client/src/features/uploads/task-display.ts';
 import type { UploadTask } from '../../shared/types.js';
 
 const task: UploadTask = {
@@ -11,7 +11,7 @@ const task: UploadTask = {
 };
 
 test('all sources share status semantics without leaking transfer details into results', () => {
-  for (const source of ['archive', 'folder', 'mega', 'pixiv'] as const) {
+  for (const source of ['archive', 'folder', 'mega', 'pixiv', 'fanbox'] as const) {
     for (const status of ['uploading', 'downloading', 'paused', 'processing', 'needs_file', 'password', 'duplicate', 'failed', 'completed'] as const) {
       const current = { ...task, source, status, error: 'stale transfer failure' };
       const state = taskStates[status];
@@ -36,7 +36,7 @@ test('attention states have a useful notice even without an error from the serve
 });
 
 test('processing labels and counters replace finished transfer details for every source', () => {
-  for (const source of ['archive', 'folder', 'mega', 'pixiv'] as const) {
+  for (const source of ['archive', 'folder', 'mega', 'pixiv', 'fanbox'] as const) {
     const processing = { ...task, source, status: 'processing' as const, progress: 25,
       processing: { stage: 'verifying' as const, queued: false, completed: 1024, total: 4096 } };
     assert.deepEqual(taskProgressDisplay(processing), {
@@ -113,4 +113,22 @@ test('RAR method errors and entry names cannot masquerade as login failures', ()
   const listing = { ...failed, error: '无法检查压缩包内容: Path = app/RefreshToken.php\nPath = wrong password.png\nEncrypted = -\nChecksum = ' };
   assert.equal(taskFailureLabel(listing), '解压失败');
   assert.match(taskErrorMessage(listing), /无法解压/);
+});
+
+
+test('FANBOX failures show concise access errors including previously saved verbose messages', () => {
+  assert.match(taskErrorMessage({ ...task, source: 'fanbox', error: '该 FANBOX 帖子没有可导入的图片或视频' }), /文字、压缩包及外部嵌入链接/);
+  assert.equal(taskErrorMessage({ ...task, source: 'fanbox', error: 'FANBOX 帖子不可访问，请更新登录态' }), 'FANBOX 帖子不可访问。');
+});
+
+test('remote login failures have an actionable task label while proxy failures remain network errors', () => {
+  assert.equal(taskFailureLabel({ ...task, source: 'fanbox', error: 'FANBOX 帖子不可访问，请更新登录态' }), '需要登录');
+  assert.equal(taskFailureLabel({ ...task, source: 'pixiv', error: 'Pixiv 登录已失效，请更新 refresh-token' }), '需要登录');
+  assert.notEqual(taskFailureLabel({ ...task, source: 'pixiv', error: '无法连接 Pixiv 登录服务，请检查代理配置' }), '需要登录');
+  const blocked = { ...task, source: 'fanbox' as const, error: 'FANBOX 拦截了服务器请求，请稍后重试' };
+  assert.notEqual(taskFailureLabel(blocked), '需要登录');
+  assert.equal(taskErrorMessage(blocked), 'FANBOX 拦截了服务器请求，请稍后重试。');
+  const solverFailure = { ...blocked, error: 'FlareSolverr 未能通过 FANBOX 验证，请稍后重试' };
+  assert.equal(taskNeedsLogin(solverFailure), false);
+  assert.equal(taskErrorMessage(solverFailure), 'FANBOX 验证未完成，请稍后重试。');
 });

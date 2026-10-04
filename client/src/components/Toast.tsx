@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle, Info, AlertTriangle, Loader2, Check, ChevronRight } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { IconButton } from './Button';
 
 export type ToastType = 'default' | 'info' | 'success' | 'error' | 'warning' | 'loading';
@@ -223,8 +224,8 @@ export default function Toast() {
 
   if (toasts.length === 0) return null;
 
-  return (
-    <>{(['top', 'bottom'] as const).map(position => <div key={position} className={`fixed left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none ${position === 'top' ? 'top-[max(1rem,env(safe-area-inset-top))]' : 'bottom-[calc(5rem+env(safe-area-inset-bottom))] [:root:has([data-image-viewer])_&]:bottom-[calc(7rem+env(safe-area-inset-bottom))] max-h-[40dvh] overflow-y-auto max-w-[90vw]'}`} aria-live="polite">
+  return createPortal(
+    <>{(['top', 'bottom'] as const).map(position => <div key={position} className={`fixed left-1/2 -translate-x-1/2 z-[200] flex flex-col items-center gap-2 pointer-events-none ${position === 'top' ? 'top-[max(1rem,env(safe-area-inset-top))]' : 'bottom-[calc(5rem+env(safe-area-inset-bottom))] [:root:has([data-image-viewer])_&]:bottom-[calc(7rem+env(safe-area-inset-bottom))] max-h-[40dvh] overflow-y-auto max-w-[90vw]'}`} aria-live="polite">
       {toasts.filter(t => (t.options.position ?? 'top') === position).map(t => {
         const cfg = TYPE_CONFIG[t.type];
         const Icon = cfg.icon;
@@ -243,6 +244,6 @@ export default function Toast() {
           </div>
         );
       })}
-    </div>)}</>
+    </div>)}</>, document.body
   );
 }

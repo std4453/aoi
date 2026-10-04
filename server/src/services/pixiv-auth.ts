@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fetch, type Dispatcher, type Response } from 'undici';
+import { fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { resolveWithin } from './safe-path.js';
@@ -42,6 +42,25 @@ export async function readPixivJson(response: Response): Promise<unknown> {
 // Public Pixiv mobile OAuth client parameters (also used by gallery-dl).
 // No user credential is embedded here. Tokens are sent only to the fixed OAuth/API hosts.
 const appHeaders = { 'User-Agent': 'PixivIOSApp/7.19.1 (iOS 16.7.2; iPhone12,8)', 'App-OS': 'ios', 'App-OS-Version': '16.7.2', 'App-Version': '7.19.1' };
+
+/** Same PKCE exchange as gallery-dl oauth:pixiv; the returned token is saved unchanged. */
+export async function exchangePixivCode(code: string, verifier: string): Promise<string> {
+  const proxyUrl = config.pixivProxyUrl || config.outboundProxyUrl;
+  const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+  try {
+    const response = await fetch('https://oauth.secure.pixiv.net/auth/token', {
+      dispatcher, method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000),
+      headers: { 'User-Agent': 'PixivAndroidApp/5.0.234 (Android 11; Pixel 5)' },
+      body: new URLSearchParams({ client_id: 'MOBrBDS8blbauoSck0ZfDbtuzpyT', client_secret: 'lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj',
+        grant_type: 'authorization_code', code, code_verifier: verifier, include_policy: 'true',
+        redirect_uri: 'https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback' }),
+    });
+    if (!response.ok) { await response.body?.cancel(); throw new Error(); }
+    const result = z.object({ refresh_token: z.string().min(1).max(8192).regex(/^[^\s]+$/) }).parse(await readPixivJson(response));
+    return result.refresh_token;
+  } catch { throw new Error('Pixiv 授权码换取失败，请重新打开浏览器登录，并检查代理'); }
+  finally { await dispatcher?.destroy(); }
+}
 
 export class PixivAuth {
   private accessToken = '';

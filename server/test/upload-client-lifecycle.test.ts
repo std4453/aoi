@@ -215,3 +215,24 @@ test('pack reveal waits for task loading and is consumed once without filtering 
   view.requestReveal('missing'); view.resolveReveal([base], false);
   assert.equal(view.getSnapshot().reveal, null); view.dispose();
 });
+
+test('FANBOX drafts resolve metadata and preserve explicit title/tags through server task creation', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const draft = createUploadDraft({ fetchFanboxMetadata: async () => ({
+    title: 'Post title', author: 'Author', tags: [{ id: 'author', name: 'Author' }], imageCount: 1, videoCount: 1, skippedCount: 2,
+  }) });
+  t.after(() => draft.dispose());
+  draft.setDraft({ source: 'fanbox', url: 'https://sample.fanbox.cc/posts/123' });
+  t.mock.timers.tick(500); await tick();
+  assert.equal(draft.getSnapshot().draft.name, 'Post title');
+  assert.deepEqual(draft.getSnapshot().draft.tagIds, ['author']);
+  draft.setDraft({ name: 'Manual', tagIds: [] });
+  let input: unknown;
+  await draft.submit(async value => { input = value; return { ...base, source: 'fanbox', status: 'downloading' }; });
+  assert.deepEqual(input, { source: 'fanbox', name: 'Manual', autoName: false, filename: undefined, fileSize: 0,
+    tagIds: [], url: 'https://sample.fanbox.cc/posts/123', sharePassword: undefined, archivePassword: undefined });
+  draft.setDraft({ source: 'fanbox', url: 'https://www.fanbox.cc/@sample/posts/456' });
+  await draft.submit(async value => { input = value; return base; });
+  assert.equal((input as { tagIds?: string[] }).tagIds, undefined);
+  assert.equal((input as { name: string }).name, 'FANBOX 导入');
+});

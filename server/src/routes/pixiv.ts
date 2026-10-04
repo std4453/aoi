@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getPack, toPublicPack } from '../db/repositories.js';
 import { parsePixivUrl, getPixivClient, ensurePixivTags } from '../services/pixiv-importer.js';
 import { readPixivSettings, savePixivSettings, refreshTokenSchema } from '../services/pixiv-auth.js';
+import { browserLoginEnabled, clearPixivWebSession } from '../services/browser-login.js';
 import { beginMutation } from '../replication/state.js';
 import { createPixivUploadTask } from '../services/upload-tasks.js';
 import type { PixivImportRequest, PixivMetadata, PixivSettings } from '../../../shared/types.js';
@@ -17,15 +18,17 @@ export const registerPixivRoutes: FastifyPluginAsync = async app => {
   app.get<{ Querystring: { reveal?: string } }>('/api/settings/pixiv', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const { refreshToken, source } = readPixivSettings();
-    return { configured: Boolean(refreshToken), source,
+    return { configured: Boolean(refreshToken), source, ...(browserLoginEnabled() ? { browserLoginEnabled: true } : {}),
       ...(request.query.reveal === '1' ? { refreshToken } : {}),
     } satisfies PixivSettings;
   });
   app.put('/api/settings/pixiv', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const input = z.object({ refreshToken: refreshTokenSchema }).strict().safeParse(request.body);
     if (!input.success) return reply.code(400).send({ error: '无效的 refresh-token' });
     savePixivSettings(input.data.refreshToken);
-    return { configured: Boolean(input.data.refreshToken), source: input.data.refreshToken ? 'settings' : 'none' } satisfies PixivSettings;
+    if (!input.data.refreshToken) clearPixivWebSession();
+    return { configured: Boolean(input.data.refreshToken), source: input.data.refreshToken ? 'settings' : 'none', ...(browserLoginEnabled() ? { browserLoginEnabled: true } : {}) } satisfies PixivSettings;
   });
   app.post('/api/packs/pixiv-metadata', async (request, reply) => {
     try {

@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { ActionRow } from '../../components/Button';
 import { AlertCircle, Check, Copy, Download, FileArchive, FolderOpen, Loader2, LockKeyhole, Pause, Upload } from 'lucide-react';
 import type { UploadTask } from '../../../../shared/types';
-import { MegaIcon, PixivIcon } from '../../components/ImportSources';
+import { MegaIcon, PixivIcon, FanboxIcon } from '../../components/ImportSources';
 import { taskFailureLabel, taskProgressDisplay, taskStates, type TaskTone } from './task-display';
 
 const statusIcons = { uploading: Upload, downloading: Download, processing: Loader2, paused: Pause,
@@ -28,11 +28,12 @@ export function TaskSummaryContent({ task, message, layout = 'card', expanded = 
 }
 
 export function TaskSourceTitle({ source, name, expanded = false }: { source: UploadTask['source']; name: string; expanded?: boolean }) {
-  const sourceLabel = { archive: '压缩包', folder: '文件夹', mega: 'MEGA', pixiv: 'Pixiv' }[source];
+  const sourceLabel = { archive: '压缩包', folder: '文件夹', mega: 'MEGA', pixiv: 'Pixiv', fanbox: 'FANBOX' }[source];
   return <span className="upload-source-title" data-expanded={expanded}>
     <span className="upload-source-icon" title={sourceLabel} aria-label={sourceLabel}>
       {source === 'mega' ? <MegaIcon className="h-full w-full" />
         : source === 'pixiv' ? <PixivIcon className="h-full w-full" />
+        : source === 'fanbox' ? <FanboxIcon className="h-full w-full" />
         : source === 'folder' ? <FolderOpen width="100%" height="100%" aria-hidden="true" />
         : <FileArchive width="100%" height="100%" aria-hidden="true" />}
     </span>

@@ -73,7 +73,7 @@ export interface Preset {
 export interface Job {
   id: string;
   packId: string;
-  type: 'extract' | 'thumbnail' | 'compress' | 'verify' | 'pixiv';
+  type: 'extract' | 'thumbnail' | 'compress' | 'verify' | 'pixiv' | 'fanbox';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   options: string | null;
@@ -155,7 +155,7 @@ export type UploadTaskState = 'uploading' | 'downloading' | 'paused' | 'needs_fi
 
 export interface UploadTask {
   id: string;
-  source: 'archive' | 'folder' | 'mega' | 'pixiv';
+  source: 'archive' | 'folder' | 'mega' | 'pixiv' | 'fanbox';
   name: string;
   filename: string;
   totalBytes: number;
@@ -234,6 +234,33 @@ export interface PixivSettings {
   configured: boolean;
   source: 'settings' | 'environment' | 'none';
   refreshToken?: string;
+  browserLoginEnabled?: boolean;
+}
+
+export interface FanboxMetadata {
+  title: string;
+  author: string;
+  tags: Tag[];
+  imageCount: number;
+  videoCount: number;
+  skippedCount: number;
+}
+
+export interface FanboxSettings {
+  sessionId?: string;
+  configured: boolean;
+  source: 'settings' | 'environment' | 'cookie_file' | 'none';
+  browserLoginEnabled?: boolean;
+}
+
+export type BrowserLoginProvider = 'pixiv' | 'fanbox';
+
+export interface BrowserLoginSession {
+  provider?: BrowserLoginProvider;
+  completed?: boolean;
+  id: string;
+  expiresAt: string;
+  browserUrl: string;
 }
 
 export interface UgoiraManifest {
