@@ -72,6 +72,24 @@ test('cleanup failure preserves a retryable handle and never leaks a captured cr
   await service.cancel(id);
 });
 
+test('completion retries a lost cleanup response without capturing credentials again', async () => {
+  const service = new BrowserLogin();
+  pool.intercept({ path: '/sessions', method: 'POST' }).reply(200, remoteSession());
+  await service.start();
+  pool.intercept({ path: `/sessions/${id}/capture`, method: 'POST' }).reply(200, { sessionId: 'synthetic-retry-session' });
+  pool.intercept({ path: `/sessions/${id}`, method: 'DELETE' }).replyWithError(new Error('connection reset'));
+  try {
+    await assert.rejects(service.complete(id), /无法连接/);
+    assert.equal(readFanboxSettings().sessionId, 'synthetic-retry-session');
+    assert.equal(service.status()?.completed, undefined);
+    pool.intercept({ path: `/sessions/${id}`, method: 'DELETE' }).reply(410, { error: 'session_gone' });
+    await service.complete(id);
+    assert.equal(service.status()?.completed, true);
+    assert.equal(service.status()?.browserUrl, '');
+    assert.equal(service.error('fanbox'), undefined);
+  } finally { await service.close(); }
+});
+
 test('loopback login routes reject cross-site and malformed control requests', async () => {
   const app = Fastify();
   await app.register(registerBrowserLoginRoutes);
@@ -91,6 +109,29 @@ test('loopback login routes reject cross-site and malformed control requests', a
   assert.ok(!completed.body.includes('test-private-cookie'));
   assert.equal(browserLogin.status()?.completed, true);
   await app.close();
+});
+
+test('Vite preserves same-origin login requests without trusting forwarded headers', async () => {
+  const { default: vite } = await import('../../client/vite.config.ts');
+  const proxy = vite.server?.proxy?.['/api'];
+  assert.equal(typeof proxy === 'object' && proxy.changeOrigin, false);
+  const app = Fastify();
+  await app.register(registerBrowserLoginRoutes);
+  const base = '/api/settings/fanbox/browser-login';
+  const headers = { host: 'localhost:5173', origin: 'http://localhost:5173', 'x-aoi-browser-login': '1' };
+  try {
+    pool.intercept({ path: '/sessions', method: 'POST' }).reply(200, remoteSession());
+    const started = await app.inject({ method: 'POST', url: base, headers });
+    assert.equal(started.statusCode, 200, started.body);
+    assert.equal((await app.inject({ method: 'POST', url: base,
+      headers: { ...headers, origin: 'https://evil.example', 'x-forwarded-host': 'evil.example' } })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'POST', url: base,
+      headers: { ...headers, host: 'evil.example', origin: 'http://evil.example' } })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'POST', url: base,
+      headers: { ...headers, 'sec-fetch-site': 'cross-site' } })).statusCode, 403);
+    pool.intercept({ path: `/sessions/${id}`, method: 'DELETE' }).reply(200, { closed: true });
+    assert.equal((await app.inject({ method: 'DELETE', url: `${base}/${id}`, headers })).statusCode, 200);
+  } finally { await app.close(); }
 });
 
 test.after(async () => {

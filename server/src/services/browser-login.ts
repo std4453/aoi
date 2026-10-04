@@ -134,8 +134,10 @@ export class BrowserLogin {
         }
         this.captured = true;
       }
-      await this.call('DELETE', `/sessions/${id}`);
+      try { await this.call('DELETE', `/sessions/${id}`); }
+      catch (error) { if (!(error instanceof BrokerError && error.status === 410)) throw error; }
       clearTimeout(this.poll);
+      this.failure = ''; this.pollErrors = 0;
       this.active = { ...this.active!, completed: true, browserUrl: '' };
     });
   }
