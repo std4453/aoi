@@ -13,7 +13,6 @@ const exec = promisify(execFile);
 const docker = process.env.DOCKER_BIN || 'docker';
 const command = process.argv[2] || 'status';
 const containerName = 'aoi-browser-service-dev';
-const image = process.env.AOI_BROWSER_IMAGE || 'aoi-browser-login:local';
 
 async function freePort(port, host = '127.0.0.1') {
   const listener = net.createServer();
@@ -66,6 +65,7 @@ if (command === 'up' || command === 'restart') {
     try { await fs.access(statePath); throw new Error('Existing test runtime: run status, restart or down first'); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
+  const image = process.env.AOI_BROWSER_IMAGE || previous?.image || 'aoi-browser-login:local';
   // Reuse only our explicit dev configuration when restarting; never fall back
   // to another AoI instance's settings or daily browser state.
   const proxyUrl = process.env.AOI_PROXY_URL ?? previous?.proxyUrl ?? '';
@@ -141,7 +141,7 @@ if (command === 'up' || command === 'restart') {
     },
   });
   app.unref();
-  await fs.writeFile(statePath, JSON.stringify({ appPid: app.pid, containerId, dataDir, lanIp, proxyUrl, pixivProxyUrl, flaresolverrUrl, flaresolverrProxyUrl }), { flag: command === 'restart' ? 'w' : 'wx', mode: 0o600 });
+  await fs.writeFile(statePath, JSON.stringify({ appPid: app.pid, containerId, image, dataDir, lanIp, proxyUrl, pixivProxyUrl, flaresolverrUrl, flaresolverrProxyUrl }), { flag: command === 'restart' ? 'w' : 'wx', mode: 0o600 });
   await appLog.close();
   let ready = false;
   for (let attempt = 0; attempt < 120; attempt++) {

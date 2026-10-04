@@ -12,9 +12,22 @@ AOI_PROXY_URL=http://127.0.0.1:8888 node scripts/flaresolverr/dev.mjs up
 node scripts/flaresolverr/dev.mjs status
 ```
 
-启动器只创建 `aoi-flaresolverr-dev` 容器、`aoi-flaresolverr:local` 镜像及临时 seccomp 配置。端口 `127.0.0.1:43132` 必须空闲；已有同名容器不会被覆盖。镜像拉取遵循 Docker 自身网络配置，`AOI_PROXY_URL` 用于下载固定版本的公开 seccomp 文件。准备过程下载校验过的 Docker 默认 seccomp 规则，只额外允许 Chromium 沙箱需要的 clone/unshare/setns；不使用 privileged、SYS_ADMIN 或 seccomp=unconfined。
+启动器只创建 `aoi-flaresolverr-dev` 容器和本地构建时的 `aoi-flaresolverr:local` 镜像。端口 `127.0.0.1:43132` 必须空闲；已有同名容器不会被覆盖。镜像拉取遵循 Docker 自身网络配置。启动器复用仓库中的 Docker 默认 seccomp 补充规则，只额外允许 Chromium 沙箱需要的 clone/unshare/setns；不使用 privileged、SYS_ADMIN 或 seccomp=unconfined。
 
 官方镜像已在本地以其他名称导入时，可通过 `AOI_FLARESOLVERR_BASE_IMAGE` 指定该镜像；补充脚本会在预期代码不匹配时终止构建。这个选项仅用于本地镜像准备，不是 AoI 的运行配置。
+
+CI 总是构建并测试 amd64 / arm64 镜像，受信任事件自动发布 `ghcr.io/std4453/aoi-flaresolverr`，标签规则见[浏览器服务文档](browser-login-local.md#ci-镜像)。测试已发布产物时无需重新构建：
+
+```sh
+docker pull ghcr.io/std4453/aoi-flaresolverr:pr-<编号>
+node scripts/flaresolverr/dev.mjs down
+AOI_FLARESOLVERR_IMAGE=ghcr.io/std4453/aoi-flaresolverr@sha256:<digest> \
+  node scripts/flaresolverr/dev.mjs up
+AOI_FLARESOLVERR_IMAGE=ghcr.io/std4453/aoi-flaresolverr@sha256:<digest> \
+  node scripts/flaresolverr/smoke.mjs
+```
+
+离线 smoke 使用无外网容器中的合成 JSON 服务，检查真实浏览器请求和临时进程清理，不访问 FANBOX 或用户数据。
 
 启动或重启本地 AoI 时设置：
 

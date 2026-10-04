@@ -11,6 +11,27 @@ AoI 通过 HTTP 创建、检查、结束登录会话。服务在同一容器内�
 - Chromium CDP、原始 Selkies HTTP/WebSocket 和浏览器代理仅监听容器回环地址，不对外发布。
 - 通过已配置的外部 HTTPS origin 校验串流 Host/Origin；TLS 在反向代理终止时，仍设置 Secure Cookie。不会依据 `X-Forwarded-*` 开放控制接口。
 
+## CI 镜像
+
+CI 在每个 PR、main 更新、版本 tag 和手动运行时构建浏览器服务与 FlareSolverr，不按文件路径跳过。两个依赖镜像分别在原生 amd64 / arm64 runner 上构建并运行离线 smoke，成功后发布多架构 manifest：
+
+- `ghcr.io/std4453/aoi-browser-login`
+- `ghcr.io/std4453/aoi-flaresolverr`
+
+标签沿用主镜像规则：PR 使用 `pr-<编号>` 和 `pr-<编号>-sha-<完整 head SHA>`，main 使用 `edge` / SHA，版本 tag 使用版本号，稳定版本另有 `latest`。外部 fork 和不受信任的 PR 仅构建测试，不授予发布凭据；仓库内受信任 PR 自动发布。
+
+本地复验时先拉取 PR 镜像，再用 digest 固定实际产物：
+
+```sh
+docker pull ghcr.io/std4453/aoi-browser-login:pr-<编号>
+AOI_BROWSER_IMAGE=ghcr.io/std4453/aoi-browser-login@sha256:<digest> \
+  node scripts/browser-login/dev.mjs restart
+AOI_BROWSER_IMAGE=ghcr.io/std4453/aoi-browser-login@sha256:<digest> \
+  node scripts/browser-login/smoke.mjs
+```
+
+镜像参数与代理配置会保留在本次专用 runtime 的状态文件中；后续 restart 默认沿用。PR 标签会更新，部署建议固定 digest。发布成功、镜像 smoke 和真实官方登录联调是三项独立验证。
+
 ## 构建和本地启动
 
 镜像默认固定 LinuxServer Chromium digest，由 Docker 选择支持的 CPU 架构。构建时安装 Node.js 22，用于容器内的管理服务。可用 `CHROMIUM_IMAGE` build arg 更新基础镜像；升级后应重新运行镜像测试。
