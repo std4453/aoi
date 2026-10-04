@@ -15,6 +15,7 @@ const schema = z.object({
   }),
   flaresolverr: z.object({
     url: z.string().url().optional(), proxyUrl: z.string().optional().transform(parseProxyUrl),
+    proxyMode: z.enum(['inherit', 'server']).default('inherit'),
   }),
 });
 
@@ -25,19 +26,24 @@ export function readExternalConfig(env: NodeJS.ProcessEnv, outboundProxyUrl?: st
     fanbox: { sessionId: env.FANBOX_SESSION_ID, cookiesFile: env.FANBOX_COOKIES_FILE || undefined },
     browserLogin: { url: env.AOI_BROWSER_LOGIN_URL || undefined, publicUrl: env.AOI_BROWSER_LOGIN_PUBLIC_URL || undefined,
       keyFile: env.AOI_BROWSER_LOGIN_KEY_FILE || undefined, trustedHttp: env.AOI_BROWSER_LOGIN_TRUSTED_HTTP },
-    flaresolverr: { url: env.AOI_FLARESOLVERR_URL || undefined, proxyUrl: env.AOI_FLARESOLVERR_PROXY_URL || undefined },
+    flaresolverr: { url: env.AOI_FLARESOLVERR_URL || undefined, proxyUrl: env.AOI_FLARESOLVERR_PROXY_URL || undefined,
+      proxyMode: env.AOI_FLARESOLVERR_PROXY_MODE },
   });
   if (parsed.flaresolverr.url) {
     const url = new URL(parsed.flaresolverr.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
       throw new Error('AOI_FLARESOLVERR_URL must be a trusted http(s) origin');
     }
-    const proxy = parsed.flaresolverr.proxyUrl ?? outboundProxyUrl;
+    if (parsed.flaresolverr.proxyMode === 'server' && parsed.flaresolverr.proxyUrl) {
+      throw new Error('Server-managed FlareSolverr proxy cannot be combined with AOI_FLARESOLVERR_PROXY_URL');
+    }
+    const proxy = parsed.flaresolverr.proxyMode === 'server' ? undefined : parsed.flaresolverr.proxyUrl ?? outboundProxyUrl;
     if (proxy && (new URL(proxy).username || new URL(proxy).password)) {
       throw new Error('FlareSolverr temporary requests require a proxy without URL credentials');
     }
-  } else if (parsed.flaresolverr.proxyUrl) {
-    throw new Error('AOI_FLARESOLVERR_PROXY_URL requires AOI_FLARESOLVERR_URL');
+    parsed.flaresolverr.proxyUrl = proxy;
+  } else if (parsed.flaresolverr.proxyUrl || parsed.flaresolverr.proxyMode === 'server') {
+    throw new Error('FlareSolverr proxy configuration requires AOI_FLARESOLVERR_URL');
   }
 
   for (const [value, internal] of [[parsed.browserLogin.url, true], [parsed.browserLogin.publicUrl, false]] as const) {

@@ -46,6 +46,9 @@ node scripts/browser-login/dev.mjs restart
 | --- | --- | --- |
 | `AOI_FLARESOLVERR_URL` | 未启用 | 受信任的 HTTP(S) 服务 origin，不带 `/v1`、账号密码、查询参数 |
 | `AOI_FLARESOLVERR_PROXY_URL` | 继承 `AOI_PROXY_URL` | solver 浏览器使用的出站代理 |
+| `AOI_FLARESOLVERR_PROXY_MODE` | `inherit` | `server` 时不传请求级代理，使用 FlareSolverr 服务端配置；不能同时设置 `AOI_FLARESOLVERR_PROXY_URL` |
+
+远端 FlareSolverr 已配置代理时，设置 `AOI_FLARESOLVERR_PROXY_MODE=server`。这样 AoI 可继续使用自己的认证出站代理，而 solver 使用其 `PROXY_URL`、`PROXY_USERNAME`、`PROXY_PASSWORD` 配置。该模式不会验证远端配置；部署端应限制 solver 出站仅能访问预期代理，避免未配置代理时直接访问外网。
 
 控制接口没有独立身份验证，本地启动器只绑定回环，不提供网页入口。服务会收到 FANBOX 会话和请求的元数据，必须受信任；远程部署需要单独规划私网/认证和加密边界。
 
