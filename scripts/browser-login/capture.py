@@ -1,4 +1,4 @@
-"""Read only FANBOX authentication from this disposable container's loopback CDP.
+"""Read only FANBOX authentication from this temporary browser session's loopback CDP.
 
 Stdlib only. Never write credentials, page contents, or request URLs to logs/files.
 The sole output is a bounded JSON result consumed privately by the login broker.

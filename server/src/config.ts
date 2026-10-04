@@ -18,6 +18,7 @@ const configSchema = z.object({
   browserLoginUrl: z.string().url().optional(),
   browserLoginPublicUrl: z.string().url().optional(),
   browserLoginKeyFile: z.string().optional(),
+  browserLoginTrustedHttp: flag,
   fanboxSessionId: z.string().default(''),
   fanboxCookiesFile: z.string().optional(),
   pixivProxyUrl: z.string().url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
@@ -62,6 +63,7 @@ const parsed = configSchema.parse({
   browserLoginUrl: process.env.AOI_BROWSER_LOGIN_URL || undefined,
   browserLoginPublicUrl: process.env.AOI_BROWSER_LOGIN_PUBLIC_URL || undefined,
   browserLoginKeyFile: process.env.AOI_BROWSER_LOGIN_KEY_FILE || undefined,
+  browserLoginTrustedHttp: process.env.AOI_BROWSER_LOGIN_TRUSTED_HTTP,
   fanboxSessionId: process.env.FANBOX_SESSION_ID,
   fanboxCookiesFile: process.env.FANBOX_COOKIES_FILE || undefined,
   pixivProxyUrl: process.env.PIXIV_PROXY_URL || undefined,
@@ -106,12 +108,12 @@ if (parsed.flaresolverrUrl) {
   throw new Error('AOI_FLARESOLVERR_PROXY_URL requires AOI_FLARESOLVERR_URL');
 }
 
-for (const value of [parsed.browserLoginUrl, parsed.browserLoginPublicUrl]) {
+for (const [value, internal] of [[parsed.browserLoginUrl, true], [parsed.browserLoginPublicUrl, false]] as const) {
   if (!value) continue;
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/' ||
-      !(url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)))) {
-    throw new Error('Browser login URLs must be HTTPS origins or loopback HTTP origins');
+      !(url.protocol === 'https:' || (url.protocol === 'http:' && (['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || internal && parsed.browserLoginTrustedHttp)))) {
+    throw new Error('Browser login URLs require HTTPS or loopback HTTP; private control HTTP requires AOI_BROWSER_LOGIN_TRUSTED_HTTP');
   }
 }
 if ([parsed.browserLoginUrl, parsed.browserLoginPublicUrl, parsed.browserLoginKeyFile].filter(Boolean).length % 3 !== 0) {

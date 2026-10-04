@@ -1,0 +1,27 @@
+services:
+  browser:
+    build: .
+    image: aoi-browser-login:local
+    restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "127.0.0.1:43129:43129"
+      - "127.0.0.1:43130:43130"
+    environment:
+      AOI_BROWSER_PUBLIC_ORIGIN: ${AOI_BROWSER_PUBLIC_ORIGIN:-http://127.0.0.1:43130}
+      AOI_BROWSER_TIMEOUT_SECONDS: ${AOI_BROWSER_TIMEOUT_SECONDS:-900}
+    volumes:
+      - type: bind
+        source: ${AOI_BROWSER_KEY_FILE:?Set a path to a dedicated 64-hex key file}
+        target: /run/secrets/browser-key
+        read_only: true
+    tmpfs:
+      - /config:size=805306368,mode=1777
+      - /run/aoi:size=16777216,mode=0700
+    shm_size: 1gb
+    cpus: 2
+    mem_limit: 3gb
+    security_opt:
+      - seccomp=./seccomp.json
+    logging:
+      driver: none

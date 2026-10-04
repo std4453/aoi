@@ -12,6 +12,8 @@ const statePath = path.join(runtime, 'dev.json');
 const exec = promisify(execFile);
 const docker = process.env.DOCKER_BIN || 'docker';
 const command = process.argv[2] || 'status';
+const containerName = 'aoi-browser-service-dev';
+const image = process.env.AOI_BROWSER_IMAGE || 'aoi-browser-login:local';
 
 async function freePort(port, host = '127.0.0.1') {
   const listener = net.createServer();
@@ -31,25 +33,54 @@ async function stopProcess(pid, marker) {
   }
   throw new Error('Test process is still stopping');
 }
+async function stopContainer(id) {
+  if (!id) return;
+  let info;
+  try { info = JSON.parse((await exec(docker, ['inspect', '--format', '{{json .}}', id], { maxBuffer: 256 * 1024 })).stdout); }
+  catch (error) { if (/No such (object|container)/.test(error.stderr || '')) return; throw error; }
+  if (info.Config.Labels?.['io.aoi.workspace'] !== root || info.Name !== `/${containerName}`) throw new Error('Container belongs to another runtime');
+  await exec(docker, ['stop', '-t', '50', id], { timeout: 60000 });
+  await exec(docker, ['rm', id]);
+}
+async function stopRuntime(state) {
+  await stopProcess(state.appPid, 'server/dist/server/src/index.js');
+  if (state.brokerPid) await stopProcess(state.brokerPid, 'scripts/browser-login/broker.mjs'); // Migrate the previous local launcher.
+  await stopContainer(state.containerId);
+}
+function containerProxy(value) {
+  if (!value) return '';
+  const url = new URL(value);
+  // Only the local development launcher translates its host-local proxy.
+  // Production uses an explicit address reachable from the browser container.
+  if (['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) url.hostname = 'host.docker.internal';
+  return url.href;
+}
 if (command === 'up' || command === 'restart') {
   if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('Use Node.js 22 for the local AoI test');
   let previous;
   if (command === 'restart') {
     previous = JSON.parse(await fs.readFile(statePath, 'utf8'));
     if (path.dirname(previous.dataDir) !== runtime || !path.basename(previous.dataDir).startsWith('data-')) throw new Error('Unexpected test directory');
-    await stopProcess(previous.appPid, 'server/dist/server/src/index.js');
-    await stopProcess(previous.brokerPid, 'scripts/browser-login/broker.mjs');
+    await stopRuntime(previous);
   } else {
     try { await fs.access(statePath); throw new Error('Existing test runtime: run status, restart or down first'); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
+  // Reuse only our explicit dev configuration when restarting; never fall back
+  // to another AoI instance's settings or daily browser state.
+  const proxyUrl = process.env.AOI_PROXY_URL ?? previous?.proxyUrl ?? '';
+  const pixivProxyUrl = process.env.PIXIV_PROXY_URL ?? previous?.pixivProxyUrl ?? '';
+  const flaresolverrUrl = process.env.AOI_FLARESOLVERR_URL ?? previous?.flaresolverrUrl ?? '';
+  const flaresolverrProxyUrl = process.env.AOI_FLARESOLVERR_PROXY_URL ?? previous?.flaresolverrProxyUrl ?? '';
   const lanIp = process.env.AOI_BROWSER_LAN_IP ?? previous?.lanIp ?? '';
   if (lanIp && !(net.isIPv4(lanIp) && /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(lanIp))) throw new Error('AOI_BROWSER_LAN_IP must be this machine private IPv4 address');
   const host = lanIp ? '0.0.0.0' : '127.0.0.1';
-  const viewerOrigin = lanIp ? `https://${lanIp}:43130` : 'http://127.0.0.1:43129';
+  const viewerOrigin = lanIp ? `https://${lanIp}:43130` : 'http://127.0.0.1:43130';
   await exec(docker, ['info', '--format', '{{.Architecture}}']);
   await freePort(43127, host); await freePort(43129);
-  if (lanIp) await freePort(43130, host);
+  await freePort(43130, host);
+  const existing = await exec(docker, ['ps', '-aq', '--filter', `name=^/${containerName}$`]);
+  if (existing.stdout.trim()) throw new Error('Existing browser service was not created by this runtime');
   await fs.access(path.join(root, 'server/dist/server/src/index.js'));
   await fs.mkdir(runtime, { recursive: true, mode: 0o700 });
   const dataDir = previous?.dataDir || await fs.mkdtemp(path.join(runtime, 'data-'));
@@ -73,33 +104,49 @@ if (command === 'up' || command === 'restart') {
     if (!certificateValid) await exec('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', privateKeyPath, '-out', certPath, '-config', certificateConfig]);
     await fs.chmod(privateKeyPath, 0o600);
   }
-  const brokerLog = await fs.open(path.join(runtime, 'broker.log'), 'a', 0o600);
+  const keyPath = path.join(runtime, 'broker.key');
+  try { await fs.writeFile(keyPath, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  // Keep secrets in mounted 0600 files, never docker arguments or logs.
+  const proxyFile = path.join(runtime, 'browser-proxy.json');
+  await fs.writeFile(proxyFile, JSON.stringify({
+    fanbox: containerProxy(proxyUrl),
+    pixiv: containerProxy(pixivProxyUrl || proxyUrl),
+  }), { mode: 0o600 });
+  const args = ['run', '-d', '--name', containerName, '--label', `io.aoi.workspace=${root}`,
+    '--log-driver', 'none', '--security-opt', `seccomp=${path.join(root, 'scripts/browser-login/seccomp.json')}`,
+    '--cpus', '2', '--memory', '3g', '--shm-size', '1g',
+    '--tmpfs', '/config:rw,size=768m,mode=1777', '--tmpfs', '/run/aoi:rw,size=16m,mode=700',
+    '--publish', '127.0.0.1:43129:43129', '--publish', `${host}:43130:43130`,
+    '--add-host', 'host.docker.internal:host-gateway',
+    '--mount', `type=bind,source=${keyPath},target=/run/secrets/browser-key,readonly`,
+    '--mount', `type=bind,source=${proxyFile},target=/run/secrets/browser-proxy.json,readonly`,
+    '--env', 'AOI_BROWSER_PROXY_FILE=/run/secrets/browser-proxy.json',
+    '--env', `AOI_BROWSER_PUBLIC_ORIGIN=${viewerOrigin}`,
+    '--env', `AOI_BROWSER_TIMEOUT_SECONDS=${process.env.AOI_BROWSER_TIMEOUT_SECONDS || '900'}`];
+  if (lanIp) args.push('--mount', `type=bind,source=${certPath},target=/run/secrets/viewer.crt,readonly`,
+    '--mount', `type=bind,source=${privateKeyPath},target=/run/secrets/viewer.key,readonly`,
+    '--env', 'AOI_BROWSER_TLS_CERT_FILE=/run/secrets/viewer.crt', '--env', 'AOI_BROWSER_TLS_KEY_FILE=/run/secrets/viewer.key');
+  args.push(image);
+  const containerId = (await exec(docker, args, { timeout: 120000 })).stdout.trim();
   const appLog = await fs.open(path.join(runtime, 'aoi.log'), 'a', 0o600);
-  const broker = spawn(process.execPath, [path.join(root, 'scripts/browser-login/broker.mjs')], {
-    detached: true, stdio: ['ignore', brokerLog.fd, brokerLog.fd],
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, DOCKER_HOST: process.env.DOCKER_HOST,
-      DOCKER_BIN: docker, AOI_BROWSER_RUNTIME: runtime, AOI_BROWSER_IMAGE: process.env.AOI_BROWSER_IMAGE,
-      AOI_BROWSER_TIMEOUT_SECONDS: process.env.AOI_BROWSER_TIMEOUT_SECONDS || '900',
-      AOI_BROWSER_PUBLIC_ORIGIN: viewerOrigin, AOI_BROWSER_TLS_CERT_FILE: lanIp ? certPath : undefined, AOI_BROWSER_TLS_KEY_FILE: lanIp ? privateKeyPath : undefined },
-  });
-  broker.unref();
   const app = spawn(process.execPath, [path.join(root, 'server/dist/server/src/index.js')], {
     cwd: root, detached: true, stdio: ['ignore', appLog.fd, appLog.fd],
     env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: 'production', DATA_DIR: dataDir,
       HOST: host, PORT: '43127', AUTH_KEY: authKey, AOI_SNAPSHOT_ENABLED: 'false', SERVER_SELECTION_ENABLED: 'false',
       AOI_BROWSER_LOGIN_URL: 'http://127.0.0.1:43129', AOI_BROWSER_LOGIN_PUBLIC_URL: viewerOrigin,
       AOI_BROWSER_LOGIN_KEY_FILE: path.join(runtime, 'broker.key'),
-      AOI_FLARESOLVERR_URL: process.env.AOI_FLARESOLVERR_URL || '', AOI_FLARESOLVERR_PROXY_URL: process.env.AOI_FLARESOLVERR_PROXY_URL || '',
-      FANBOX_SESSION_ID: '', FANBOX_COOKIES_FILE: '', PIXIV_REFRESH_TOKEN: '', PIXIV_COOKIE: '', AOI_PROXY_URL: process.env.AOI_PROXY_URL || '', PIXIV_PROXY_URL: process.env.PIXIV_PROXY_URL || '',
+      AOI_FLARESOLVERR_URL: flaresolverrUrl, AOI_FLARESOLVERR_PROXY_URL: flaresolverrProxyUrl,
+      FANBOX_SESSION_ID: '', FANBOX_COOKIES_FILE: '', PIXIV_REFRESH_TOKEN: '', PIXIV_COOKIE: '', AOI_PROXY_URL: proxyUrl, PIXIV_PROXY_URL: pixivProxyUrl,
     },
   });
   app.unref();
-  await fs.writeFile(statePath, JSON.stringify({ appPid: app.pid, brokerPid: broker.pid, dataDir, lanIp }), { flag: command === 'restart' ? 'w' : 'wx', mode: 0o600 });
-  await brokerLog.close(); await appLog.close();
+  await fs.writeFile(statePath, JSON.stringify({ appPid: app.pid, containerId, dataDir, lanIp, proxyUrl, pixivProxyUrl, flaresolverrUrl, flaresolverrProxyUrl }), { flag: command === 'restart' ? 'w' : 'wx', mode: 0o600 });
+  await appLog.close();
   let ready = false;
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 120; attempt++) {
     try {
-      process.kill(app.pid, 0); process.kill(broker.pid, 0);
+      process.kill(app.pid, 0);
       const appReady = await fetch('http://127.0.0.1:43127/healthz', { signal: AbortSignal.timeout(1000) });
       const brokerReady = await fetch('http://127.0.0.1:43129/health', { signal: AbortSignal.timeout(1000) });
       if (appReady.ok && brokerReady.ok) { ready = true; break; }
@@ -118,30 +165,10 @@ if (command === 'up' || command === 'restart') {
 } else if (command === 'down') {
   const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
   if (path.dirname(state.dataDir) !== runtime || !path.basename(state.dataDir).startsWith('data-')) throw new Error('Unexpected test directory');
-  for (const [pid, marker] of [[state.appPid, 'server/dist/server/src/index.js'], [state.brokerPid, 'scripts/browser-login/broker.mjs']]) {
-    try {
-      const info = await exec('ps', ['-p', String(pid), '-o', 'args=']);
-      if (!info.stdout.includes(path.join(root, marker))) throw new Error('PID belongs to another process');
-      process.kill(pid, 'SIGTERM');
-    } catch (error) { if (error.code !== 1 && error.code !== 'ESRCH') throw error; }
-  }
-  for (let i = 0; i < 60; i++) {
-    const result = await exec(docker, ['ps', '-aq', '--filter', 'label=io.aoi.purpose=browser-login-dev']);
-    if (!result.stdout.trim()) break;
-    if (i === 59) throw new Error('Browser cleanup incomplete; dedicated runtime retained');
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  for (const pid of [state.appPid, state.brokerPid]) {
-    for (let i = 0; i < 60; i++) {
-      try { process.kill(pid, 0); }
-      catch (error) { if (error.code === 'ESRCH') break; throw error; }
-      if (i === 59) throw new Error('Test process still stopping; dedicated runtime retained');
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  }
+  await stopRuntime(state);
   // Remove only artifacts created by this launcher, never unrelated directories or Docker volumes.
   await fs.rm(state.dataDir, { recursive: true, force: true });
-  for (const name of ['broker.key', 'broker.log', 'aoi.log', 'dev.json', 'lan-access.txt', 'mobile-access.md', 'viewer.crt', 'viewer.key', 'viewer-cert.cnf']) await fs.rm(path.join(runtime, name), { force: true });
+  for (const name of ['browser-proxy.json', 'broker.key', 'broker.log', 'aoi.log', 'dev.json', 'lan-access.txt', 'mobile-access.md', 'viewer.crt', 'viewer.key', 'viewer-cert.cnf']) await fs.rm(path.join(runtime, name), { force: true });
   await fs.rmdir(runtime);
-  console.log('Dedicated AoI data, credentials and browser session removed. Docker Desktop and cached image retained.');
+  console.log('Dedicated AoI data, credentials and browser service removed. Docker Desktop and cached image retained.');
 } else throw new Error('Usage: node scripts/browser-login/dev.mjs up|restart|status|down');

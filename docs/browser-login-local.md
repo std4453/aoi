@@ -1,93 +1,135 @@
-# 本地浏览器登录联调
+# 可选浏览器登录服务
 
-这是 Pixiv / FANBOX 的可选登录入口：LinuxServer Chromium 提供 Selkies 网页串流，用户手动完成官方登录。Pixiv 使用 PKCE 授权码换取 refresh token 并原样保存；FANBOX 提取并保存会话。默认未启用，继续使用手动输入；启用后弹窗优先显示浏览器登录卡片，也可切回手动输入。此版本没有自动续期、后台保活或多用户调度。
+Pixiv / FANBOX 浏览器登录使用一个常驻服务镜像，基于 LinuxServer Chromium，包含 Selkies 网页串流和 AoI 会话管理。用户手动完成官方登录，AoI 自动取得并保存凭据。默认未启用，继续使用手动输入；启用后仍可切回手动输入。本版本只允许一个活动会话，没有后台保活、自动续期或多用户调度。
 
-## 启动与访问
+## 服务结构
 
-需要 Node.js 22、运行中的 Docker，以及已安装的项目依赖。macOS Docker Desktop 的 CLI 若不在 PATH，可先执行 `export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"`。Docker 使用当前 context；不修改其他容器或卷。
+AoI 通过 HTTP 创建、检查、结束登录会话。服务在同一容器内启停 Chromium 和串流进程，不执行 `docker run/exec/rm`，不访问 Docker socket 或 Kubernetes API。容器在空闲时继续运行，内部浏览器和串流进程停止。
+
+- **43129 控制端口**：独立 Bearer key 认证，只有 AoI 后端可达；`GET /health` 不要求认证，供健康检查使用。
+- **43130 串流端口**：用户通过短期 fragment 令牌交换 HttpOnly / SameSite=Strict Cookie，才能进入当前会话。该端口始终拒绝 `/sessions` 和 CONNECT 请求。
+- Chromium CDP、原始 Selkies HTTP/WebSocket 和浏览器代理仅监听容器回环地址，不对外发布。
+- 通过已配置的外部 HTTPS origin 校验串流 Host/Origin；TLS 在反向代理终止时，仍设置 Secure Cookie。不会依据 `X-Forwarded-*` 开放控制接口。
+
+## 构建和本地启动
+
+镜像默认固定 LinuxServer Chromium digest，由 Docker 选择支持的 CPU 架构。构建时安装 Node.js 22，用于容器内的管理服务。可用 `CHROMIUM_IMAGE` build arg 更新基础镜像；升级后应重新运行镜像测试。
+
+```sh
+docker build -t aoi-browser-login:local scripts/browser-login
+```
+
+本地完整联调需要 Node.js 22、Docker、已安装的项目依赖：
 
 ```sh
 npm run build
-docker pull lscr.io/linuxserver/chromium@sha256:2d32e1b2b28aa92973aa0f58c433c0b045db6e1224d7001eeaa9cde1a474ce13
-AOI_PROXY_URL=http://127.0.0.1:8888 node scripts/browser-login/dev.mjs up
+node scripts/browser-login/dev.mjs up
 node scripts/browser-login/dev.mjs status
 ```
 
-示例中的代理端口 `8888` 需按实际配置修改；无需代理时省略 `AOI_PROXY_URL`。FANBOX 使用 `AOI_PROXY_URL`；Pixiv 优先使用 `PIXIV_PROXY_URL`，未配置则使用 `AOI_PROXY_URL`。浏览器通过容器内回环代理连接适配服务，再复用相同上游代理；支持 HTTP、HTTPS、SOCKS5，代理凭据不进入浏览器。官方 HTTPS 连接保持端到端加密，没有安装根证书或关闭证书验证。
+打开 `http://127.0.0.1:43127/settings`，选择 Pixiv 或 FANBOX 的「浏览器登录」。官方账号密码、验证码和二次验证由用户手动完成。两种来源均自动检测成功、保存并关闭窗口；「我已登录」用于手动重试。外层浏览器不允许自动关闭时，会显示会话已结束，可以手动关闭。
 
-固定 digest 对应 `d759a0f5-ls56`，由 Docker 选择匹配架构。使用前需确认目标架构受镜像支持。仅在创建登录会话时启动容器。
+本地脚本创建一个常驻的 `aoi-browser-service-dev` 容器，仅绑定宿主回环端口。AoI 使用独立随机 DATA_DIR，不读取其他 AoI 实例或日常浏览器配置。已有同名容器或占用端口会导致启动失败，不接管其他服务。`AOI_BROWSER_RUNTIME` 可指定专用目录，默认 `/tmp/aoi-browser-login-dev`。
 
-打开 <http://127.0.0.1:43127/settings>，点击「Pixiv / FANBOX → 浏览器登录」，准备完成后自动打开窗口；如浏览器拦截弹窗，点击「打开浏览器」。手动完成官方登录、验证码和二次验证。Pixiv 和 FANBOX 完成官方登录后均自动检测、保存并关闭窗口；「我已经登录」可作为手动重试入口。成功后关闭弹窗和登录窗口，以顶部通知显示结果。若外层浏览器不允许自动关闭，页面会显示会话已结束，可以手动关闭。无需打开 xdg-open 或本机 Pixiv 客户端。
+需要代理时，给启动命令显式设置 `AOI_PROXY_URL`；Pixiv 可用 `PIXIV_PROXY_URL` 覆盖。本地启动器把宿主回环代理地址转换为容器可达的 `host.docker.internal` 地址，写入专用 0600 配置文件。代理密码不进入 Chromium 参数或日志。支持 HTTP、HTTPS、SOCKS5 上游；官方 HTTPS 保持端到端加密，不安装根证书、不关闭证书校验。
 
-固定分辨率模式在首次连接前启用，Chromium 在桌面就绪后再次最大化，串流按窗口等比缩放。移动端使用 390 × 844 的固定容器桌面和移动端浏览器页面（390 × 760）；桌面使用 1280 × 800。配置弹窗跟随 AoI 页面宽度，登录会话内可取消或重新打开窗口。手动输入会按需回填已保存凭据，包括浏览器取得的凭据；普通状态查询和登录完成响应只返回配置状态。清除登录态在手动输入界面操作。不要在对话中发送账号或凭据。
+构建项目或浏览器镜像后，保留测试数据并重启：
 
-登录入口指定返回 FANBOX 的 `/user/settings`，也兼容官方授权返回首页；允许从首页或设置页读取 `meta#metadata` 中的登录布尔结果（当前结构为 `context.user` 存在有效 userId；不返回账号字段）。同时要求存在适用于 FANBOX API 的唯一有效会话 Cookie，才能保存。不会读取页面正文、访问帖子、下载资源或检查图片；没有验证赞助权限。若用户自行进入其他页面，需要回到首页或设置页再确认。
+```sh
+node scripts/browser-login/dev.mjs restart
+```
 
-串流按键会发送给容器中的 Linux Chromium。macOS 上操作远程地址栏使用 **Ctrl+L / Ctrl+A**。手机继续使用 Selkies 自带的虚拟键盘和剪贴板，本适配不添加自定义粘贴入口、不改变剪贴板配置；手机剪贴板兼容性尚未验证。外层页面监听 `visualViewport` 的尺寸和偏移，将串流缩放到软键盘之外的可视区域；不会改变容器的固定分辨率。不同手机浏览器是否正确报告软键盘区域，仍需真机验证。
-
-容器通过独立的 Chromium `PasswordManagerEnabled: false` 管理策略禁用密码保存提示；策略只读挂载到专用容器，不修改宿主 Chrome 或账号设置。此策略不控制手机自身的密码管理器提示。
-
-## 隔离和清理
-
-- 默认 AoI 监听 `127.0.0.1:43127`，适配服务控制接口监听 `127.0.0.1:43129`；显式局域网测试模式见后文。占用时启动失败，不结束现有服务。
-- 容器名为 `aoi-browser-login-dev`；已存在时拒绝接管。容器 HTTP 端口随机映射到回环地址，并使用随机 Basic Auth；CDP 9222 仅在容器内部回环监听，通过 `docker exec` 调用，不发布端口、不挂载 Docker socket。
-- AoI 使用独立随机 `DATA_DIR`，由启动命令输出；不继承已有 AoI/Pixiv/FANBOX 凭据，仅传入显式配置的 `AOI_PROXY_URL` / `PIXIV_PROXY_URL`。默认运行目录 `/tmp/aoi-browser-login-dev`，权限 `0700`。服务认证 key 和保存的 FANBOX 配置为 `0600`；key 不发送给前端。
-- 为允许后续 FANBOX 官方授权复用 Pixiv 网页会话，仅将 Pixiv 域的 `PHPSESSID` 白名单保存到本次 `DATA_DIR/pixiv-browser-cookies.json`（0600），下次登录注入临时浏览器。它独立于 App refresh token；不保存完整 profile、其他网站 Cookie 或账号资料。清除 Pixiv 登录态时同时删除该文件；FANBOX 清除仅清除 FANBOX 会话。
-- 浏览器 `/config` 是大小受限的 tmpfs，未挂载宿主浏览器目录或持久卷。容器上限为 2 CPU、3 GiB 内存和 1 GiB `/dev/shm`；使用软件渲染，不请求 GPU。
-- 取消、成功或默认 15 分钟超时后删除容器。容器内部还有独立截止计时，即使适配进程意外退出，也会停止容器并由 `--rm` 清除临时状态。Docker 引擎不可用时不能承诺立即清理；恢复后应执行下述清理并核对容器已消失。
-- AoI 的控制入口要求本机 Host、回环来源、同源访问及专用请求头。适配服务控制 API 要求独立 Bearer key；串流入口用短期 fragment 令牌换取 HttpOnly / SameSite=Strict Cookie。它们用于本地开发，不防御已控制本机用户会话的其他进程。
+重启默认沿用本次专用测试配置，可通过环境变量覆盖；设置空字符串可清除相应代理。`restart` 保留本次 DATA_DIR、已保存凭据和控制密钥，关闭未完成的登录会话；兼容迁移之前的本地主机管理进程。清理本次完整测试环境：
 
 ```sh
 node scripts/browser-login/dev.mjs down
-docker ps -a --filter name=aoi-browser-login-dev
 ```
 
-运行中的本地服务使用启动时登记的构建文件。重新执行构建会改变带 hash 的 JS 文件名；构建完成后执行 `node scripts/browser-login/dev.mjs restart` 保留专用 DATA_DIR 并重启，再刷新页面。重新启动时继续传入所需代理配置。未完成的登录会话会关闭。
+`down` 只停止记录并核对归属的进程和容器，删除本次 DATA_DIR、凭据、密钥和日志。Docker、镜像缓存和其他容器保持不变。不使用 `docker system prune`。清理失败时保留专用目录并报错。
 
-`down` 核对记录的进程归属，只结束本次 AoI/适配服务，删除本次测试 DATA_DIR、其中的凭据、适配 key 和日志。保留 Docker Desktop 和镜像缓存。若进程被强制杀死，先等会话超时；清理不完整时命令报错并保留专用目录以便排查，不递归清理其他目录。无需 `docker system prune`。
-
-`AOI_BROWSER_RUNTIME` 可改为其他专用临时目录；启动和清理必须使用同一值。`AOI_BROWSER_TIMEOUT_SECONDS` 可设 30–1800 秒（用于超时测试）。`AOI_BROWSER_IMAGE` 可覆盖镜像，但更换版本/架构后需重新验证。
-
-## 沙箱兼容
-
-该镜像原有 Chromium 包装器使用 `--no-sandbox`；本适配用独立启动脚本替换它，保留证书检查、Chromium sandbox、容器 seccomp 和非 root 浏览器用户。未使用 privileged、SYS_ADMIN 或 seccomp=unconfined。
-
-`scripts/browser-login/seccomp.json` 基于 [Moby profiles](https://github.com/moby/profiles/blob/2ceae35d351c156cb5a8efc0fdc4a08cf94569d8/seccomp/default.json)，仅增加 `clone/setns/unshare`，允许 Chromium 建立自己的 user namespace sandbox，其余默认系统调用限制保留。原许可证见同目录 `SECCOMP-LICENSE`。这扩大了本容器的 namespace 调用权限，需随镜像升级复核。
-
-## 可选配置与后续部署边界
-
-AoI 只有同时配置以下三项才显示浏览器登录入口；全部不配置则继续手动输入方案：
-
-| 环境变量 | 用途 |
-| --- | --- |
-| `AOI_BROWSER_LOGIN_URL` | AoI 后端访问适配服务的 origin |
-| `AOI_BROWSER_LOGIN_PUBLIC_URL` | 用户浏览器访问串流入口的 origin |
-| `AOI_BROWSER_LOGIN_KEY_FILE` | AoI 可读的独立适配服务密钥文件 |
-
-地址分开配置，允许未来 AoI 和浏览器适配服务分机。配置校验接受 HTTPS，HTTP 只接受回环地址。本地脚本有意固定回环 Host/Origin；它不是可直接对公网部署的服务。可信网络、HTTPS、反向代理、远程访问认证、密钥分发和远端容器管理需单独设计和验证。
-
-Pixiv 登录采用与 gallery-dl 相同的移动端 PKCE 流程，临时 verifier 只在服务端内存保存。适配服务只处理本次官方回调，以完成页面替代唤起原生 App；AoI 及时交换短效授权码，并通过原有设置逻辑保存返回的 refresh token。FANBOX 复用的是保留的 Pixiv 网页会话，让用户在官方页面确认授权；没有使用 App refresh token 兑换 FANBOX Cookie。
-
-FANBOX API 正常响应中的有效 `Set-Cookie` 会被动保存，且不会覆盖用户后来修改或清除的值；这不是主动续期。网页登录失效、官方验证或授权失败仍需用户处理。后台导入先读取元数据，认证失败时停止，不继续下载资源；任务显示「需要登录」及登录入口，保存新凭据后重试。权限不足也可能触发相同提示，重新登录不能补足赞助权限。
-
-## 验证
-
-仓库检查使用 `npm run check`。服务测试用独立 DATA_DIR 和禁止外网的 MockAgent 覆盖 PKCE 交换、网页会话保留/清除、按需回显、并发、未登录、过期、清理失败及访问边界；本地代理测试覆盖 HTTP CONNECT 和 SOCKS5 域名转发。登录状态表达式验证当前 metadata 格式和匿名状态。
-
-手动联调必须分别记录：真实镜像启动、GUI 点击/输入、未登录拒绝、取消删除、超时删除，以及用户官方登录后的提取/保存/关闭结果。Mock 测试成功不能代替最后一项。运行时检查仅输出状态和资源用量；不要记录 Cookie、token、账号、HAR、profile 或登录后的截图。
-
-网页登录成功不等于后端导入请求一定可用。Cloudflare 的 HTML 拦截响应不会判为登录失效，可选处理方式见 [FlareSolverr 本地联调](flaresolverr-local.md)。API 返回的 JSON 401/403 或受限帖子仍显示不可访问提示。
-
-## 可选局域网手机联调
-
-默认仍仅监听回环地址。显式设置 `AOI_BROWSER_LAN_IP` 为本机私有 IPv4 后，启动或 restart 会让 AoI 监听 `0.0.0.0:43127`，浏览器串流监听 `0.0.0.0:43130`（HTTPS）；控制接口继续只在 `127.0.0.1:43129`，局域网 HTTPS 入口拒绝 `/sessions` 控制请求，不提供 CONNECT 代理。
+只启动浏览器服务可使用同目录的 Compose 文件。先创建专用密钥文件，供 AoI 和浏览器服务分别只读挂载：
 
 ```sh
-AOI_BROWSER_LAN_IP=192.168.1.10 AOI_PROXY_URL=http://127.0.0.1:8888 node scripts/browser-login/dev.mjs restart
+umask 077
+openssl rand -hex 32 > /secure/path/browser-key
+AOI_BROWSER_KEY_FILE=/secure/path/browser-key \
+  docker compose -f scripts/browser-login/compose.yaml up -d --build
+# 停止并移除这个 Compose 项目的容器；密钥由操作者单独管理
+AOI_BROWSER_KEY_FILE=/secure/path/browser-key \
+  docker compose -f scripts/browser-login/compose.yaml down
 ```
 
-示例 IP 必须替换成本机实际地址，首次启动使用 `up`。手机与电脑处于同一可信局域网，在 `http://本机地址:43127/settings` 填写本次专用 `lan-access.txt` 中的 Key。Key 为 0600 文件，不写入命令行或启动日志。状态 API 和凭据读取继续要求认证；AoI 的 HTTP 入口只适用于可信测试网络，不能作为公网部署方式。
+上述路径需替换为实际专用目录。不要将密钥放进源码目录、Git、命令参数或文档。Compose 仅发布回环端口；它与完整联调启动器二选一。
 
-串流需要浏览器安全上下文，因此启动器生成一天有效的独立自签名叶证书（非根证书，不自动安装信任），首次打开 HTTPS 串流地址需手动确认证书提示。各移动浏览器对自签名页面的安全 API 支持可能不同，应实测；没有关闭浏览器证书检查或修改 Selkies 安全上下文判断。证书和局域网 Key 都由 `down` 清理。取消局域网模式时显式使用 `AOI_BROWSER_LAN_IP=''` 执行 restart。
+## 配置
 
-FANBOX 自动检测仅在用户发起的登录会话内每两秒读取容器里的既有页面状态与 Cookie，不刷新网页、不额外请求官方 API，不轮询帖子。取得有效登录状态后保存并销毁容器；无登录/网络故障/权限验证时保留人工操作入口，到期仍清理。
+AoI 只有同时配置以下三项才启用浏览器入口：
+
+| AoI 环境变量 | 用途 |
+| --- | --- |
+| `AOI_BROWSER_LOGIN_URL` | 后端访问控制服务的 origin |
+| `AOI_BROWSER_LOGIN_PUBLIC_URL` | 用户访问串流的 origin |
+| `AOI_BROWSER_LOGIN_KEY_FILE` | 64 位小写十六进制共享密钥文件 |
+| `AOI_BROWSER_LOGIN_TRUSTED_HTTP` | 默认 false；明确使用可信内网或 K8s Service 的 HTTP 控制接口时设 true，仅放宽控制地址 |
+
+默认接受 HTTPS 或回环 HTTP。公网串流始终需要 HTTPS。可信 HTTP 开关不取消 Bearer 认证，也不放宽公网串流 URL 要求；内网链路需要传输加密时，应在服务网格或内网代理配置 TLS/mTLS。
+
+| 浏览器服务环境变量 | 用途 |
+| --- | --- |
+| `AOI_BROWSER_PUBLIC_ORIGIN` | 外部完整 origin，例如 `https://browser.example.com`；必须与 AoI 的 PUBLIC_URL 相同 |
+| `AOI_BROWSER_KEY_FILE` | 默认 `/run/secrets/browser-key` |
+| `AOI_BROWSER_PORT` / `AOI_BROWSER_VIEWER_PORT` | 默认 43129 / 43130 |
+| `AOI_BROWSER_TIMEOUT_SECONDS` | 30–1800，默认 900；包括用户交互，启动另有 90 秒上限 |
+| `AOI_BROWSER_PROXY_FILE` | 可选 JSON 文件，`fanbox` / `pixiv` 字段是浏览器所在网络可达的代理 URL；空字符串表示直连，缺省字段沿用 AoI 传入的代理 |
+| `AOI_BROWSER_TLS_CERT_FILE` / `AOI_BROWSER_TLS_KEY_FILE` | 可选、同时配置，串流端口直接提供 TLS；外部反向代理终止 TLS 时不设置 |
+
+AoI 与浏览器服务可以分机部署。AoI 使用的 `localhost` 代理地址对远端容器通常无效，应通过浏览器侧代理文件覆盖。密钥、TLS 私钥和含认证信息的代理配置通过只读 Secret/文件挂载，不放进镜像。
+
+## K8s 部署约束
+
+部署为 **一个常驻 Deployment、单副本、Recreate 更新策略**。每次登录不会创建 Pod、Job 或容器。无需 Docker daemon、宿主 socket、privileged 或用于创建 Pod 的 RBAC；建议关闭 service account token 自动挂载。AoI 只依赖稳定 Service 地址。
+
+- 浏览器镜像以 root 启动 s6 管理服务，Chromium 使用独立非 root 用户和正常 sandbox。不能直接套用要求整个容器非 root 的策略。
+- `/config` 使用 memory 型 emptyDir，建议上限 768 MiB；`/run/aoi` 使用 16 MiB memory 型 emptyDir；`/dev/shm` 使用 1 GiB memory 型 emptyDir。不挂载持久浏览器 profile。
+- 资源限制建议从 2 CPU / 3 GiB 内存开始，使用 CPU 渲染，无 GPU 申请。临时内存卷也计入 Pod 内存；需按实际环境测量 requests。
+- 只为 43129 和 43130 创建 Service 端口。控制端口用 NetworkPolicy 限制到 AoI，不能进入公网 Ingress/Gateway。公开 HTTPS 只转发 43130，保留外部 Host，支持 WebSocket Upgrade；连接超时至少覆盖最长会话。
+- 镜像 `/health` 在启动清理完成后才就绪；建议 startup/readiness probe 使用控制端口 `/health`。cleanup 失败时返回 503 并拒绝新会话。terminationGracePeriodSeconds 至少 60，给进程和临时状态清理留出时间。
+- Chromium sandbox 所需 seccomp 配置位于 `scripts/browser-login/seccomp.json`，基于 Moby 默认 profile，仅额外允许 `clone/setns/unshare`。Docker 使用 `security_opt`；K8s 需由节点管理员安装该 profile，再设置 `seccompProfile.type: Localhost` 和对应路径。不使用 Unconfined 或 SYS_ADMIN 代替。不同节点内核仍需实测。
+
+以上为通用部署契约，仓库不包含特定集群、域名或本机调试现场配置。尚未在目标 K8s 集群部署验证。
+
+## 会话、登录态和清理
+
+浏览器使用临时 HOME/profile，成功、取消、超时后删除；同时停止浏览器、桌面和串流进程，清除上一会话的画面和剪贴板内存。管理进程持有会话子进程 stdin 管道作为租约，管理进程异常退出会使管道 EOF 触发清理；独立截止时间也由子进程执行。s6 重启管理服务时，会等待旧清理完成，重新清理后才开放接口。容器或 Pod 重建时不会恢复未完成授权，用户需重新发起登录。
+
+为后续 FANBOX 官方授权复用 Pixiv 登录，仅保留 Pixiv 域 `PHPSESSID` 白名单到 AoI 的 `DATA_DIR/pixiv-browser-cookies.json`（0600），下次注入新的临时浏览器；不保存完整 profile。清除 Pixiv 登录态时同步删除它。
+
+Pixiv 使用移动端 PKCE 授权码获取 refresh token 并原样保存，不唤起本机 App/xdg-open。FANBOX 登录只检查已打开的首页或设置页中的登录布尔状态和适用的会话 Cookie；不读取帖子或图片，不通过下载证明登录。自动检测只在当前用户发起的会话内进行，不刷新页面或额外请求官方 API。
+
+FANBOX 复用的是 Pixiv 网页会话，由用户在官方页面确认授权；没有使用 Pixiv App refresh token 兑换 FANBOX Cookie。FANBOX API 响应中有效 `Set-Cookie` 会被动保存，这不是自动续期；失效后仍需用户重新登录。后台导入认证失败会停止并显示「需要登录」，保存新凭据后可重试。
+
+## 交互与验证
+
+移动会话使用 390 × 844 固定桌面和 390 × 760 移动页面；桌面会话使用 1280 × 800。外层页面按 visualViewport 缩放串流，以适应软键盘。手机仍使用 Selkies 官方虚拟键盘与剪贴板；不添加自定义粘贴机制。密码保存提示由专用 Chromium policy 关闭。
+
+仓库验证：
+
+```sh
+npm run check
+# 需要 Docker 和已构建的镜像；独立测试容器，拒绝所有官方站点网络请求
+node scripts/browser-login/smoke.mjs
+```
+
+镜像 smoke 覆盖同一容器的多次会话、未登录拒绝、取消和超时清理、旧令牌失效、管理进程崩溃恢复、手机尺寸以及 TLS 终止代理后的访问边界。它不使用用户 DATA_DIR，不读取账号、Cookie、页面内容或图片。真实官方登录的授权码交换、会话保存和自动关闭仍需分别联调，不能由 smoke 代替。
+
+## 局域网手机联调
+
+显式设置 `AOI_BROWSER_LAN_IP` 为本机私有 IPv4，启动器会让 AoI 监听 `0.0.0.0:43127`，串流监听 `0.0.0.0:43130`（HTTPS）；控制接口仍只发布在宿主回环地址。
+
+```sh
+AOI_BROWSER_LAN_IP=192.168.1.10 node scripts/browser-login/dev.mjs restart
+```
+
+示例 IP 需替换。手机使用专用运行目录内 `lan-access.txt` 的 Key 访问 AoI。启动器生成独立自签名叶证书，不安装根证书，首次打开串流需用户手动确认证书提示。该 HTTP AoI 入口只用于可信本地测试网络。用 `AOI_BROWSER_LAN_IP=''` restart 恢复回环模式。
+
+网页成功不保证 FANBOX API 请求不受 Cloudflare 拦截；可选处理见 [FlareSolverr 本地联调](flaresolverr-local.md)。

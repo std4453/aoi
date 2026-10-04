@@ -36,7 +36,7 @@ AoI（Angel of Images），你的本地图片管家。
 
 ugoira 保存为独立 `.ugoira` 文件，属于逻辑图片媒体（API `mediaType: ugoira`），按一个作品文件统计。文件本身是 ZIP，包含原始帧文件和 `manifest.json`：`{"format":"aoi-ugoira","version":1,"frames":[{"file":"000000.jpg","delay":125}]}`，延迟单位为毫秒。最多 1000 帧、单帧 32 MiB、解压总量不超过 512 MiB 或 `MAX_EXTRACTED_SIZE`，不向文件系统解压不可信路径。图片列表用首帧生成封面，查看器提供播放/暂停；压缩打包保留完整 `.ugoira`，不会把动画转成单张 JPEG。下载的文件可通过文件夹或 ZIP 再次导入。副本同步完整动画文件，副本服务也需更新到支持此格式的版本。
 
-Pixiv 和 FANBOX 均支持可选的官方浏览器登录，默认未启用。启用后可在配置弹窗中启动隔离 Chromium，手动完成官方登录后自动保存凭据；仍可切换手动输入。Pixiv 网页会话可供后续 FANBOX 官方授权复用，独立于 App refresh token。配置、代理、会话清理和本地验证见 [本地浏览器登录联调](docs/browser-login-local.md)。
+Pixiv 和 FANBOX 均支持可选的官方浏览器登录，默认未启用。启用后可在配置弹窗中启动独立浏览器会话，手动完成官方登录后自动保存凭据；仍可切换手动输入。Pixiv 网页会话可供后续 FANBOX 官方授权复用，独立于 App refresh token。Chromium、Selkies 和会话管理打包为单个常驻容器，登录时只启停内部进程，不创建容器或 Pod。配置、K8s 部署边界和本地验证见 [浏览器登录服务](docs/browser-login-local.md)。
 
 ### FANBOX 导入配置
 

@@ -6,163 +6,83 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, timingSafeEqual, createHash } from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { launchSession } from './session-runtime.mjs';
 
 const exec = promisify(execFile);
 const directory = path.dirname(fileURLToPath(import.meta.url));
-const runtime = path.resolve(process.env.AOI_BROWSER_RUNTIME || '/tmp/aoi-browser-login-dev');
 const port = Number(process.env.AOI_BROWSER_PORT || 43129);
-const localOrigin = `http://127.0.0.1:${port}`;
-const publicOrigin = process.env.AOI_BROWSER_PUBLIC_ORIGIN || localOrigin;
+const viewerPort = Number(process.env.AOI_BROWSER_VIEWER_PORT || 43130);
+const publicOrigin = process.env.AOI_BROWSER_PUBLIC_ORIGIN || 'http://127.0.0.1:43130';
 const publicUrl = new URL(publicOrigin);
 const tlsCertFile = process.env.AOI_BROWSER_TLS_CERT_FILE;
 const tlsKeyFile = process.env.AOI_BROWSER_TLS_KEY_FILE;
-if (publicOrigin !== localOrigin && (publicUrl.protocol !== 'https:' || !tlsCertFile || !tlsKeyFile || !publicUrl.port || publicUrl.pathname !== '/' || publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash)) throw new Error('LAN viewer requires an explicit HTTPS origin and certificate');
-const docker = process.env.DOCKER_BIN || 'docker';
-const image = process.env.AOI_BROWSER_IMAGE || 'lscr.io/linuxserver/chromium@sha256:2d32e1b2b28aa92973aa0f58c433c0b045db6e1224d7001eeaa9cde1a474ce13';
+if (publicUrl.origin !== publicOrigin || publicUrl.username || publicUrl.password ||
+    !(publicUrl.protocol === 'https:' || publicUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname))) throw new Error('Invalid public viewer origin');
+if (Boolean(tlsCertFile) !== Boolean(tlsKeyFile)) throw new Error('Configure both viewer TLS files');
 const ttl = Number(process.env.AOI_BROWSER_TIMEOUT_SECONDS || 900) * 1000;
-const containerName = 'aoi-browser-login-dev';
-if (!Number.isInteger(port) || port < 1024 || port > 65535 || !Number.isFinite(ttl) || ttl < 30000 || ttl > 1800000) throw new Error('Invalid broker configuration');
-await fs.mkdir(runtime, { recursive: true, mode: 0o700 });
-await fs.chmod(runtime, 0o700);
-const keyPath = path.join(runtime, 'broker.key');
-try { await fs.writeFile(keyPath, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 }); }
-catch (error) { if (error.code !== 'EEXIST') throw error; }
-const key = (await fs.readFile(keyPath, 'utf8')).trim();
+if (![port, viewerPort].every(value => Number.isInteger(value) && value > 1023 && value <= 65535) || port === viewerPort || !Number.isFinite(ttl) || ttl < 30000 || ttl > 1800000) throw new Error('Invalid broker configuration');
+const key = (await fs.readFile(process.env.AOI_BROWSER_KEY_FILE || '/run/secrets/browser-key', 'utf8')).trim();
 if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid broker key');
+const proxyOverride = process.env.AOI_BROWSER_PROXY_FILE
+  ? JSON.parse(await fs.readFile(process.env.AOI_BROWSER_PROXY_FILE, 'utf8')) : undefined;
 let session;
 let busy = false;
 let cleaning;
+let unhealthy = false;
 const peers = new Set();
 const equal = (a, b) => timingSafeEqual(createHash('sha256').update(a || '').digest(), createHash('sha256').update(b || '').digest());
-const run = (args, timeout = 30000) => exec(docker, args, { timeout, maxBuffer: 128 * 1024 });
 const send = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
-const requestOrigin = req => req.socket.encrypted ? publicOrigin : localOrigin;
-const validHost = req => req.headers.host === new URL(requestOrigin(req)).host;
-const sameOrigin = req => !req.headers.origin || req.headers.origin === requestOrigin(req);
+const validHost = req => req.headers.host === publicUrl.host;
+const sameOrigin = req => !req.headers.origin || req.headers.origin === publicOrigin;
 const authenticated = req => session && Date.parse(session.expiresAt) > Date.now() && equal((req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith('aoi_browser='))?.slice(12), session.viewerToken);
+const closePeers = () => { for (const peer of peers) peer.destroy(); };
 
 function cleanup() {
   if (cleaning) return cleaning;
   cleaning = removeSession().finally(() => { cleaning = undefined; });
   return cleaning;
 }
-
 async function removeSession() {
-  if (!session) return;
   const previous = session;
-  clearTimeout(previous.timer);
-  for (const peer of peers) peer.destroy();
-  if (!previous.containerId) {
-    const owned = await run(['ps', '-aq', '--filter', `label=io.aoi.session=${previous.id}`]);
-    if (/^[a-f0-9]{12,64}$/.test(owned.stdout.trim())) previous.containerId = owned.stdout.trim();
-  }
-  if (previous.containerId) {
-    try { await run(['rm', '-f', previous.containerId]); }
-    catch {
-      // --rm or the in-container deadline may already have removed it.
-      const remaining = await run(['ps', '-aq', '--filter', `id=${previous.containerId}`]);
-      if (remaining.stdout.trim()) throw new Error('cleanup incomplete');
-    }
-  }
-  await fs.rm(previous.envFile, { force: true });
-  session = undefined;
-}
-
-async function start(input) {
-  if (cleaning) await cleaning;
-  if (session) await cleanup(); // A restarted AoI has a new PKCE verifier; never reuse its old authorization.
-  // Never adopt or delete an existing container, even one with our fixed dev name.
-  const existing = await run(['ps', '-aq', '--filter', `name=^/${containerName}$`]);
-  if (existing.stdout.trim()) throw new Error('existing container');
-  const id = randomUUID();
-  const password = randomBytes(32).toString('hex');
-  const envFile = path.join(runtime, `${id}.env`);
-  await fs.writeFile(envFile, `CUSTOM_USER=aoi\nPASSWORD=${password}\n`, { mode: 0o600, flag: 'wx' });
-  session = { id, envFile, password, provider: input.provider, proxyUrl: input.proxyUrl, proxyToken: randomBytes(32).toString('hex'), launchToken: randomBytes(32).toString('hex'), viewerToken: randomBytes(32).toString('hex') };
+  if (!previous) return;
+  previous.expiresAt = new Date(0).toISOString();
+  closePeers();
   try {
-    const result = await run(['run', '-d', '--rm', '--name', containerName,
-      '--label', 'io.aoi.purpose=browser-login-dev', '--log-driver', 'none',
-      '--label', `io.aoi.session=${id}`,
-      '--security-opt', `seccomp=${path.join(directory, 'seccomp.json')}`,
-      '--cpus', '2', '--memory', '3g', '--shm-size', '1g',
-      '--tmpfs', '/config:rw,size=768m,mode=1777',
-      '--publish', '127.0.0.1::3000', '--env-file', envFile,
-      '--env', 'PUID=1000', '--env', 'PGID=1000', '--env', 'TZ=Etc/UTC',
-      '--env', 'AUTO_GPU=false', '--env', 'SELKIES_USE_CPU=true|locked',
-      '--env', 'SELKIES_ENCODER=jpeg', '--env', 'SELKIES_FRAMERATE=20',
-      '--env', 'SELKIES_MANUAL_RESOLUTION=true|locked',
-      '--env', `SELKIES_MANUAL_WIDTH=${input.mobile ? 390 : 1280}`, '--env', `SELKIES_MANUAL_HEIGHT=${input.mobile ? 844 : 800}`,
-      '--env', 'SELKIES_ENABLE_AUDIO=false|locked', '--env', 'SELKIES_ENABLE_MICROPHONE=false|locked',
-      '--env', 'SELKIES_FILE_TRANSFERS=none', '--env', 'SELKIES_COMMAND_ENABLED=false',
-      '--env', 'HARDEN_DESKTOP=true', '--env', 'DISABLE_IPV6=true',
-      '--mount', `type=bind,source=${directory},target=/opt/aoi,readonly`,
-      '--mount', `type=bind,source=${path.join(directory, 'chromium-policy.json')},target=/etc/chromium/policies/managed/aoi-login.json,readonly`,
-      '--mount', `type=bind,source=${path.join(directory, 'chromium.sh')},target=/defaults/autostart,readonly`,
-      '--mount', `type=bind,source=${path.join(directory, 'chromium.sh')},target=/defaults/autostart_wayland,readonly`,
-      image], 120000);
-    session.containerId = result.stdout.trim();
-    if (!/^[a-f0-9]{64}$/.test(session.containerId)) throw new Error('invalid container');
-    // Bound startup as well, including a broker crash before Chromium is ready.
-    await run(['exec', '-d', session.containerId, 'sh', '-c', `sleep ${Math.ceil(ttl / 1000) + 90}; /run/s6/basedir/bin/halt`]);
-    const init = JSON.stringify({ ...input, proxyUrl: undefined, ttl: Math.ceil(ttl / 1000), brokerPort: port, proxyToken: session.proxyToken });
-    await pipeExec(['python3', '-c', 'import sys,os; p="/config/aoi-login.json"; fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600); os.write(fd,sys.stdin.buffer.read()); os.close(fd); open("/config/aoi-proxy-enabled","w").close()'], init);
-    await run(['exec', '-d', session.containerId, 'python3', '/opt/aoi/container-proxy.py']);
-    const mapped = await run(['port', session.containerId, '3000/tcp']);
-    const match = /^127\.0\.0\.1:(\d+)\s*$/.exec(mapped.stdout);
-    if (!match) throw new Error('invalid port binding');
-    session.port = Number(match[1]);
-    const deadline = Date.now() + 90000;
-    while (Date.now() < deadline) {
-      try {
-        await run(['exec', session.containerId, 'python3', '-c', 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:9222/json/version",timeout=2).close()'], 4000);
-        session.expiresAt = new Date(Date.now() + ttl).toISOString();
-        // This deadline survives a broker crash; --rm then discards /config tmpfs.
-        await run(['exec', '-d', session.containerId, 'sh', '-c', `sleep ${Math.ceil(ttl / 1000)}; /run/s6/basedir/bin/halt`]);
-        const expire = () => void cleanup().catch(() => {
-          console.error('Browser cleanup failed; retrying');
-          if (session) session.timer = setTimeout(expire, 5000);
-        });
-        session.timer = setTimeout(expire, ttl);
-        // autostart may race /config initialization; ensure the browser uses its local proxy.
-        await run(['exec', '-d', session.containerId, 'python3', '/opt/aoi/browser-worker.py']);
-        for (let attempt = 0; attempt < 30; attempt++) {
-          try {
-            await new Promise((resolve, reject) => {
-              const request = http.get({ host: '127.0.0.1', port: session.port, path: '/', headers: { Authorization: `Basic ${Buffer.from(`aoi:${session.password}`).toString('base64')}` }, timeout: 2000 }, response => { response.resume(); response.statusCode === 200 ? resolve() : reject(new Error()); });
-              request.on('error', reject); request.on('timeout', () => request.destroy(new Error()));
-            });
-            break;
-          } catch { if (attempt === 29) throw new Error('stream unavailable'); await new Promise(resolve => setTimeout(resolve, 500)); }
-        }
-        await fs.rm(envFile, { force: true });
-        return session;
-      } catch { await new Promise(resolve => setTimeout(resolve, 1000)); }
-    }
-    throw new Error('browser unavailable');
-  } catch {
-    await cleanup();
-    throw new Error('browser unavailable');
-  }
+    await previous.runtime.close();
+    if (session === previous) session = undefined;
+  } catch { unhealthy = true; throw new Error('cleanup incomplete'); }
 }
-
-async function pipeExec(args, input = '') {
-  return new Promise((resolve, reject) => {
-    const child = spawn(docker, ['exec', '-i', session.containerId, ...args], { stdio: ['pipe', 'pipe', 'ignore'] });
-    const chunks = []; let length = 0;
-    const timer = setTimeout(() => { child.kill(); reject(new Error('capture timeout')); }, 15000);
-    child.stdout.on('data', chunk => { length += chunk.length; if (length > 65536) { child.kill(); reject(new Error('capture too large')); } else chunks.push(chunk); });
-    child.on('error', () => { clearTimeout(timer); reject(new Error('capture failed')); });
-    child.on('close', code => { clearTimeout(timer); code ? reject(new Error('capture failed')) : resolve(Buffer.concat(chunks).toString('utf8')); });
-    child.stdin.on('error', () => {}); child.stdin.end(input);
+async function start(input) {
+  if (unhealthy) throw new Error('browser cleanup incomplete');
+  if (cleaning) await cleaning;
+  if (session) await cleanup();
+  const current = { id: randomUUID(), provider: input.provider, port: 3000,
+    proxyUrl: proxyOverride?.[input.provider] ?? input.proxyUrl, expiresAt: new Date(Date.now() + 90000).toISOString(),
+    launchToken: randomBytes(32).toString('hex'), viewerToken: randomBytes(32).toString('hex') };
+  session = current;
+  current.runtime = launchSession({ ...input, proxyUrl: undefined, ttl: ttl / 1000 }, clean => {
+    if (!clean) unhealthy = true;
+    if (session === current) { closePeers(); current.expiresAt = new Date(0).toISOString(); }
   });
+  try {
+    await current.runtime.ready;
+    const response = await fetch('http://127.0.0.1:3000/', { signal: AbortSignal.timeout(3000) });
+    await response.body?.cancel();
+    if (!response.ok) throw new Error('stream unavailable');
+    current.expiresAt = new Date(Date.now() + ttl).toISOString();
+    return current;
+  } catch { await cleanup(); throw new Error('browser unavailable'); }
 }
 async function capture() {
-  const result = session.provider === 'pixiv'
-    ? await pipeExec(['python3', '-c', 'import pathlib; p=pathlib.Path("/config/aoi-result.json"); print(p.read_text() if p.exists() else "{}")'])
-    : await pipeExec(['python3', '/opt/aoi/capture.py']);
-  return JSON.parse(result);
+  if (session.provider === 'pixiv') {
+    try { return JSON.parse(await fs.readFile('/run/aoi/session/result.json', 'utf8')); }
+    catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
+  }
+  // stdout is a private bounded IPC result, never a log.
+  const result = await exec('python3', [path.join(directory, 'capture.py')], { timeout: 15000, maxBuffer: 32768 });
+  return JSON.parse(result.stdout);
 }
 async function readInput(req) {
   const chunks = []; let size = 0;
@@ -176,22 +96,26 @@ async function readInput(req) {
 }
 
 function upstreamHeaders(req) {
-  const headers = { ...req.headers, host: `127.0.0.1:${session.port}`, authorization: `Basic ${Buffer.from(`aoi:${session.password}`).toString('base64')}` };
+  const headers = { ...req.headers, host: `127.0.0.1:${session.port}` };
   delete headers.cookie;
+  delete headers.authorization;
+  delete headers['proxy-authorization'];
+  delete headers['x-forwarded-host'];
+  delete headers['x-forwarded-proto'];
   delete headers['x-aoi-browser-login'];
   return headers;
 }
 
-const handleRequest = async (req, res) => {
-  if (!validHost(req)) return send(res, 403, { error: 'invalid_host' });
+const handleRequest = async (req, res, control = false) => {
+  if (!control && !validHost(req)) return send(res, 403, { error: 'invalid_host' });
   const url = new URL(req.url, publicOrigin);
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  if (url.pathname === '/health' && req.method === 'GET') return send(res, 200, { status: 'ok', active: Boolean(session) });
+  if (control && url.pathname === '/health' && req.method === 'GET') return send(res, unhealthy ? 503 : 200, { status: unhealthy ? 'unavailable' : 'ok', active: Boolean(session && Date.parse(session.expiresAt) > Date.now()) });
   if (url.pathname.startsWith('/sessions')) {
-    // The LAN listener serves only the viewer, never the browser control API.
-    if (req.socket.encrypted) return send(res, 404, { error: 'not_found' });
+    // Listener identity is explicit; never trust X-Forwarded-* to grant control access.
+    if (!control) return send(res, 404, { error: 'not_found' });
     if (!equal(req.headers.authorization, `Bearer ${key}`)) return send(res, 401, { error: 'unauthorized' });
     if (busy) return send(res, 409, { error: 'busy' });
     busy = true;
@@ -213,6 +137,7 @@ const handleRequest = async (req, res) => {
     } catch { return send(res, 503, { error: 'browser_unavailable' }); }
     finally { busy = false; }
   }
+  if (control) return send(res, 404, { error: 'not_found' });
   if (url.pathname === '/open' && req.method === 'GET') {
     const nonce = randomBytes(16).toString('base64');
     res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors 'none'`);
@@ -255,8 +180,8 @@ const handleRequest = async (req, res) => {
     for await (const chunk of req) { size += chunk.length; if (size > 1024) { return send(res, 413, { error: 'too_large' }); } chunks.push(chunk); }
     try {
       const { token } = JSON.parse(Buffer.concat(chunks).toString());
-      if (!session || typeof token !== 'string' || !equal(token, session.launchToken)) return send(res, 401, { error: 'unauthorized' });
-      res.setHeader('Set-Cookie', `aoi_browser=${session.viewerToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.ceil(ttl / 1000)}${req.socket.encrypted ? '; Secure' : ''}`);
+      if (!session || Date.parse(session.expiresAt) <= Date.now() || typeof token !== 'string' || !equal(token, session.launchToken)) return send(res, 401, { error: 'unauthorized' });
+      res.setHeader('Set-Cookie', `aoi_browser=${session.viewerToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.ceil(ttl / 1000)}${publicUrl.protocol === 'https:' ? '; Secure' : ''}`);
       return send(res, 200, { connected: true });
     } catch { return send(res, 400, { error: 'invalid_request' }); }
   }
@@ -271,13 +196,23 @@ const handleRequest = async (req, res) => {
   proxy.on('error', () => { if (!res.headersSent) send(res, 502, { error: 'browser_unavailable' }); else res.destroy(); });
   req.pipe(proxy);
 };
-const server = http.createServer(handleRequest);
-const viewerServer = publicOrigin !== localOrigin ? https.createServer({ cert: await fs.readFile(tlsCertFile), key: await fs.readFile(tlsKeyFile) }, handleRequest) : undefined;
-
-server.on('connect', async (req, socket, head) => {
-  if (!session || !equal(req.headers['proxy-authorization'], `Bearer ${session.proxyToken}`)) { socket.end('HTTP/1.1 407 Proxy Authentication Required\r\n\r\n'); return; }
+// Reset interrupted sessions before exposing readiness (e.g. s6 restarts the broker).
+await exec('python3', [path.join(directory, 'session-runner.py'), 'reset'], { timeout: 45000 });
+const safeHandle = control => (req, res) => { void handleRequest(req, res, control).catch(() => {
+  if (!res.headersSent) send(res, 503, { error: 'browser_unavailable' }); else res.destroy();
+}); };
+const server = http.createServer(safeHandle(true));
+const viewerServer = tlsCertFile
+  ? https.createServer({ cert: await fs.readFile(tlsCertFile), key: await fs.readFile(tlsKeyFile) }, safeHandle(false))
+  : http.createServer(safeHandle(false));
+// This proxy binds only container loopback. Browsers use no upstream credentials.
+const proxyServer = http.createServer((req, res) => send(res, 405, { error: 'https_required' }));
+proxyServer.on('connect', async (req, socket, head) => {
+  const current = session;
+  if (!current || Date.parse(current.expiresAt) <= Date.now()) { socket.end('HTTP/1.1 407 Proxy Authentication Required\r\n\r\n'); return; }
   try {
-    const upstream = await connectViaProxy(req.url, session.proxyUrl);
+    const upstream = await connectViaProxy(req.url, current.proxyUrl);
+    if (session !== current || Date.parse(current.expiresAt) <= Date.now()) { upstream.destroy(); socket.destroy(); return; }
     socket.write('HTTP/1.1 200 Connection established\r\n\r\n');
     if (head.length) upstream.write(head);
     peers.add(socket); peers.add(upstream);
@@ -289,7 +224,7 @@ server.on('connect', async (req, socket, head) => {
 });
 
 const upgrade = (req, socket, head) => {
-  if (!validHost(req) || !authenticated(req) || req.headers.origin !== requestOrigin(req)) { socket.destroy(); return; }
+  if (!validHost(req) || !authenticated(req) || req.headers.origin !== publicOrigin) { socket.destroy(); return; }
   const upstream = net.connect(session.port, '127.0.0.1', () => {
     const headers = upstreamHeaders(req);
     upstream.write(`${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n`);
@@ -302,14 +237,18 @@ const upgrade = (req, socket, head) => {
   socket.on('error', () => upstream.destroy());
   upstream.on('error', () => socket.destroy());
 };
-server.on('upgrade', upgrade);
-viewerServer?.on('upgrade', upgrade);
-server.requestTimeout = 20000;
-server.headersTimeout = 10000;
-server.listen(port, '127.0.0.1', () => console.log(`Browser login broker: ${localOrigin}`));
-viewerServer?.listen(Number(publicUrl.port), '0.0.0.0', () => console.log(`Browser login viewer: ${publicOrigin}`));
+server.on('upgrade', (_req, socket) => socket.destroy());
+server.on('connect', (_req, socket) => socket.destroy());
+viewerServer.on('upgrade', upgrade);
+viewerServer.on('connect', (_req, socket) => socket.destroy());
+for (const listener of [server, viewerServer, proxyServer]) {
+  listener.requestTimeout = 20000;
+  listener.headersTimeout = 10000;
+}
+server.listen(port, '0.0.0.0', () => console.log('Browser control service ready'));
+viewerServer.listen(viewerPort, '0.0.0.0', () => console.log('Browser viewer ready'));
+proxyServer.listen(9223, '127.0.0.1');
 for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
-  server.close();
-  viewerServer?.close();
+  server.close(); viewerServer.close(); proxyServer.close();
   void cleanup().then(() => process.exit(0), () => { console.error('Browser cleanup failed'); process.exit(1); });
 });

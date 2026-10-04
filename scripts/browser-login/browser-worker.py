@@ -11,8 +11,8 @@ import urllib.request
 from urllib.parse import urlsplit, parse_qs
 from capture import CDP, PIXIV_DOMAINS, pixiv_cookies
 
-ROOT = pathlib.Path('/config')
-RESULT = ROOT / 'aoi-result.json'
+ROOT = pathlib.Path('/run/aoi/session')
+RESULT = ROOT / 'result.json'
 
 def read_json(file):
     return json.loads(pathlib.Path(file).read_text())
@@ -23,7 +23,7 @@ def save_json(file, value):
         json.dump(value, stream)
 
 def main():
-    config = read_json('/config/aoi-login.json')
+    config = read_json(str(ROOT / 'input.json'))
     page = None
     for _ in range(60):
         try:
@@ -51,11 +51,14 @@ def main():
         c.call('Emulation.setTouchEmulationEnabled', {'enabled': True})
         c.call('Emulation.setUserAgentOverride', {'userAgent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36'})
     if config['provider'] != 'pixiv':
-        c.call('Page.navigate', {'url': config['url']})
+        c.serial += 1
+        c.send({'id': c.serial, 'method': 'Page.navigate', 'params': {'url': config['url']}})
+        (ROOT / 'ready').touch(mode=0o600)
         return
     # Navigation can pause at the callback immediately when the web session is reusable.
     c.serial += 1
     c.send({'id': c.serial, 'method': 'Page.navigate', 'params': {'url': config['url']}})
+    (ROOT / 'ready').touch(mode=0o600)
     deadline = time.monotonic() + config['ttl']
     c.sock.settimeout(2)
     while time.monotonic() < deadline:
