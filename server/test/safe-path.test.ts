@@ -5,7 +5,7 @@ import {
   normalizeRelativePath,
   resolveWithin,
   validateIdentifier,
-} from '../src/services/safe-path.js';
+} from '~/services/safe-path';
 
 test('normalizes portable nested paths', () => {
   assert.equal(normalizeRelativePath('图集/landscape.jpg'), '图集/landscape.jpg');

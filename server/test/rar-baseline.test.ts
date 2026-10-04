@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { UploadTask, Pack } from '../../shared/types.js';
+import type { UploadTask, Pack } from '~/types';
 import { corpus, fixtureBytes, sha256, verifyRarCorpus } from '../../scripts/check-rar.mjs';
-import { startTestServer, stopTestServer } from './helpers/server-process.js';
-import { taskErrorMessage } from '../../client/src/features/uploads/task-display.ts';
+import { startTestServer, stopTestServer } from './helpers/server-process';
+import { taskErrorMessage } from '../../client/src/features/uploads/task-display';
 
 test('installed 7z decodes the pinned RAR4/RAR5 corpus byte for byte', () => {
   verifyRarCorpus();

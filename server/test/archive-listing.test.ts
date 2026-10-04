@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { is7zLinkField } from '../src/services/archive-extractor.js';
+import { is7zLinkField } from '~/services/archive-extractor';
 
 test('7-Zip 26 RAR listing permits empty link metadata but still rejects real links', () => {
   // Ordinary RAR5 files include all three empty fields in 7-Zip 26.03.

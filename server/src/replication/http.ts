@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { config } from '../config/index.js';
-import { beginMutation } from './state.js';
-import { getPack } from '../db/repositories.js';
-import { replicaReady } from '../db/snapshot-repository.js';
-import { replicationStatus } from './replicator.js';
+import { config } from '~/config';
+import { beginMutation } from './state';
+import { getPack } from '~/db/repositories';
+import { replicaReady } from '~/db/snapshot-repository';
+import { replicationStatus } from './replicator';
 
 export function registerReplicationHooks(app: FastifyInstance): void {
   if (!config.isReplica && config.snapshotEnabled) {

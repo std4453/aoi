@@ -1,15 +1,15 @@
 import type Database from 'better-sqlite3';
-import m001 from './migrations/001_add_compressed_size.js';
-import m002 from './migrations/002_add_structure_type.js';
-import m003 from './migrations/003_add_blurhashes_and_backfill.js';
-import m004 from './migrations/004_add_source_type.js';
-import m005 from './migrations/005_add_pack_files.js';
-import m006 from './migrations/006_cleanup_orphaned_relations.js';
-import m007 from './migrations/007_add_archive_md5.js';
-import m008 from './migrations/008_add_content_verification.js';
-import m009 from './migrations/009_add_snapshots.js';
-import m010 from './migrations/010_add_upload_tasks.js';
-import m011 from './migrations/011_add_task_error_codes.js';
+import m001 from './migrations/001_add_compressed_size';
+import m002 from './migrations/002_add_structure_type';
+import m003 from './migrations/003_add_blurhashes_and_backfill';
+import m004 from './migrations/004_add_source_type';
+import m005 from './migrations/005_add_pack_files';
+import m006 from './migrations/006_cleanup_orphaned_relations';
+import m007 from './migrations/007_add_archive_md5';
+import m008 from './migrations/008_add_content_verification';
+import m009 from './migrations/009_add_snapshots';
+import m010 from './migrations/010_add_upload_tasks';
+import m011 from './migrations/011_add_task_error_codes';
 
 export interface Migration {
   name: string;

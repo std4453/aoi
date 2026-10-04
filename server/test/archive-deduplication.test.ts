@@ -8,8 +8,8 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 import { ZipArchive } from 'archiver';
 import sharp from 'sharp';
-import migration from '../src/db/migrations/007_add_archive_md5.js';
-import { startTestServer, stopTestServer } from './helpers/server-process.js';
+import migration from '~/db/migrations/007_add_archive_md5';
+import { startTestServer, stopTestServer } from './helpers/server-process';
 
 test('archive duplicate confirmation, historical hashes, cancellation and concurrent uploads', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-dedup-'));

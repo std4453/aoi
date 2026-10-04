@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { getDb } from '../db/connection.js';
-import { createJobIfIdle, getPack, updatePackStatus } from '../db/repositories.js';
-import { getExtractedImagesDir, getExtractedVideosDir } from './storage.js';
-import { resolveWithin } from './safe-path.js';
-import type { DuplicatePack, PackStatus } from '../../../shared/types.js';
+import { getDb } from '~/db/connection';
+import { createJobIfIdle, getPack, updatePackStatus } from '~/db/repositories';
+import { getExtractedImagesDir, getExtractedVideosDir } from './storage';
+import { resolveWithin } from './safe-path';
+import type { DuplicatePack, PackStatus } from '~/types';
 
 export const FINGERPRINT_VERSION = 'media-md5-v1';
 

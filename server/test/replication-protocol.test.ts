@@ -3,9 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson, digest, makeManifest, manifestPack, validateIndex, validateManifest, contractValues, safeContentFile } from '../src/replication/protocol.js';
-import { beginMutation, snapshotFence, assertSnapshotFence } from '../src/replication/state.js';
-import type { StoredPack } from '../src/db/repositories.js';
+import { canonicalJson, digest, makeManifest, manifestPack, validateIndex, validateManifest, contractValues, safeContentFile } from '~/replication/protocol';
+import { beginMutation, snapshotFence, assertSnapshotFence } from '~/replication/state';
+import type { StoredPack } from '~/db/repositories';
 
 const pack: StoredPack = { id: 'pack1', name: 'Pack', originalFilename: 'archive.zip', originalSize: 9,
   originalFormat: 'zip', sourceType: 'archive', status: 'generated', imageCount: 1, videoCount: 0,

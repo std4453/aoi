@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { encrypt, type File as MegaFile } from 'megajs';
-import { MegaPasswordError, resolveMegaUrl, validateMegaUrl } from '../src/services/mega-link.js';
-import { describeMegaShare, downloadMegaShare, megaShareTitle, planMegaFiles } from '../src/services/mega-download.js';
+import { MegaPasswordError, resolveMegaUrl, validateMegaUrl } from '~/services/mega-link';
+import { describeMegaShare, downloadMegaShare, megaShareTitle, planMegaFiles } from '~/services/mega-download';
 
 const handle = 'GRBSjBCI';
 const key = 'W-PD47BgVmkIB9x_c5DFPilhYrtwk21hdwyppp-1pO8';

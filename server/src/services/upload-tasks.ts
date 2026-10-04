@@ -1,17 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { CreateUploadTaskRequest, UploadTask } from '../../../shared/types.js';
-import { getDb } from '../db/connection.js';
-import { createPack, createJob, setPackTags, getPack, getPackFiles, listPacks, getLatestJob, getLatestUploadJob, updateJobOptions, updatePackArchivePassword, hasAnyActiveJob, updatePackStatus } from '../db/repositories.js';
-import { createUploadTask, getUploadTask, listUploadTasks, updateUploadTask, getUploadTaskMetadata, updateUploadTaskMetadata } from '../db/upload-task-repository.js';
-import { getLiveMatches, getVerification, scheduleVerification } from './content-verification.js';
-import { jobQueue } from './job-queue.js';
-import { getArchivePath, getUploadPath, ensureDir } from './storage.js';
-import { parseFanboxUrl } from './fanbox-client.js';
-import { parsePixivUrl } from './pixiv-importer.js';
-import { archiveErrorCode, jobFailureCode } from './task-errors.js';
+import type { CreateUploadTaskRequest, UploadTask } from '~/types';
+import { getDb } from '~/db/connection';
+import { createPack, createJob, setPackTags, getPack, getPackFiles, listPacks, getLatestJob, getLatestUploadJob, updateJobOptions, updatePackArchivePassword, hasAnyActiveJob, updatePackStatus } from '~/db/repositories';
+import { createUploadTask, getUploadTask, listUploadTasks, updateUploadTask, getUploadTaskMetadata, updateUploadTaskMetadata } from '~/db/upload-task-repository';
+import { getLiveMatches, getVerification, scheduleVerification } from './content-verification';
+import { jobQueue } from './job-queue';
+import { getArchivePath, getUploadPath, ensureDir } from './storage';
+import { parseFanboxUrl } from './fanbox-client';
+import { parsePixivUrl } from './pixiv-importer';
+import { archiveErrorCode, jobFailureCode } from './task-errors';
 
-export * from '../db/upload-task-repository.js';
+export * from '~/db/upload-task-repository';
 
 /** Persist the task, pack and queued download together before starting network work. */
 export function createPixivUploadTask(input: CreateUploadTaskRequest): UploadTask {

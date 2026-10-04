@@ -1,11 +1,11 @@
-import { TaskError } from '../../../shared/task-errors.js';
+import { TaskError } from '../../../shared/task-errors';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import { z } from 'zod';
-import { config } from '../config/index.js';
-import { resolveWithin } from './safe-path.js';
-import type { PixivSettings } from '../../../shared/types.js';
+import { config } from '~/config';
+import { resolveWithin } from './safe-path';
+import type { PixivSettings } from '~/types';
 
 export const refreshTokenSchema = z.string().trim().max(8192).regex(/^[^\s]*$/);
 const settingsPath = () => resolveWithin(config.dataDir, 'pixiv-settings.json');

@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { config } from '../config/index.js';
-import { normalizeRelativePath } from './safe-path.js';
-import type { CompressionOptions, FileSelection } from '../types.js';
+import { config } from '~/config';
+import { normalizeRelativePath } from './safe-path';
+import type { CompressionOptions, FileSelection } from '~/types';
 
 const compressionOptionsSchema = z.object({
   format: z.literal('jpeg'),

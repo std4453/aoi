@@ -1,16 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config/index.js';
-import { resolveWithin, validateIdentifier } from './safe-path.js';
+import { config } from '~/config';
+import { resolveWithin, validateIdentifier } from './safe-path';
 
 type DiskSpaceResult = { diskPath: string; free: number; size: number };
+type DiskSpaceChecker = (path: string) => Promise<DiskSpaceResult>;
 
 // check-disk-space has ESM/CJS interop issues with Node16 resolution.
 // Use dynamic import and cache the result.
 let _checkDiskSpace: ((path: string) => Promise<DiskSpaceResult>) | null = null;
 async function checkDiskSpace(directoryPath: string): Promise<DiskSpaceResult> {
   if (!_checkDiskSpace) {
-    const mod = await import('check-disk-space');
+    const mod = await import('check-disk-space') as {
+      default: DiskSpaceChecker | { default: DiskSpaceChecker };
+    };
     const fn = mod.default ?? mod;
     _checkDiskSpace = typeof fn === 'function' ? fn : fn.default;
   }

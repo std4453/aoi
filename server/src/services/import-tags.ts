@@ -1,6 +1,6 @@
-import { getDb } from '../db/connection.js';
-import { createTag, listTags } from '../db/repositories.js';
-import type { Tag } from '../../../shared/types.js';
+import { getDb } from '~/db/connection';
+import { createTag, listTags } from '~/db/repositories';
+import type { Tag } from '~/types';
 
 export function ensureImportTags(names: string[]): Tag[] {
   return getDb().transaction(() => {

@@ -1,11 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getFanboxClient, parseFanboxUrl } from '../services/fanbox-client.js';
-import { readFanboxSettings, saveFanboxSettings } from '../services/fanbox-auth.js';
-import { ensureImportTags } from '../services/import-tags.js';
-import { beginMutation } from '../replication/state.js';
-import { browserLoginEnabled } from '../services/browser-login.js';
-import type { FanboxMetadata, FanboxSettings } from '../../../shared/types.js';
+import { getFanboxClient, parseFanboxUrl } from '~/services/fanbox-client';
+import { readFanboxSettings, saveFanboxSettings } from '~/services/fanbox-auth';
+import { ensureImportTags } from '~/services/import-tags';
+import { beginMutation } from '~/replication/state';
+import { browserLoginEnabled } from '~/services/browser-login';
+import type { FanboxMetadata, FanboxSettings } from '~/types';
 
 export const registerFanboxRoutes: FastifyPluginAsync = async app => {
   app.get<{ Querystring: { reveal?: string } }>('/api/settings/fanbox', async (request, reply) => {

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { describeMegaShare } from '../services/mega-download.js';
+import { describeMegaShare } from '~/services/mega-download';
 
 export const registerMegaRoutes: FastifyPluginAsync = async app => {
   app.post('/api/packs/mega-metadata', async (request, reply) => {

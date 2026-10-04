@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config/index.js';
-import { contentRevision, initializeDataset, readManifestCache, saveManifestCache, sourceView } from '../db/snapshot-repository.js';
-import { getPack, hasAnyActiveJob } from '../db/repositories.js';
-import { resolveWithin } from '../services/safe-path.js';
-import { snapshotFence, assertSnapshotFence } from './state.js';
-import { canonicalJson, compare, contractValues, hashFile, makeManifest, packMetadata, safeContentFile, type Manifest, type SnapshotIndex, type FileInfo } from './protocol.js';
+import { config } from '~/config';
+import { contentRevision, initializeDataset, readManifestCache, saveManifestCache, sourceView } from '~/db/snapshot-repository';
+import { getPack, hasAnyActiveJob } from '~/db/repositories';
+import { resolveWithin } from '~/services/safe-path';
+import { snapshotFence, assertSnapshotFence } from './state';
+import { canonicalJson, compare, contractValues, hashFile, makeManifest, packMetadata, safeContentFile, type Manifest, type SnapshotIndex, type FileInfo } from './protocol';
 
 const published = new Map<string, Manifest>();
 const signaturesByPack = new Map<string, Record<string, string>>();

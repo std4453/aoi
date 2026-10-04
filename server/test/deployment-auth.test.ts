@@ -5,7 +5,7 @@ import path from 'node:path';
 import https from 'node:https';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
-import { startTestServer, stopTestServer, waitForExit } from './helpers/server-process.js';
+import { startTestServer, stopTestServer, waitForExit } from './helpers/server-process';
 
 const origin = 'https://frontend.example.com';
 

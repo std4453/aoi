@@ -8,11 +8,11 @@ import sharp from 'sharp';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-rar-'));
 process.env.DATA_DIR = root;
-const { initDb, closeDb } = await import('../src/db/connection.js');
-const { createPack, getPack, updatePackStatus } = await import('../src/db/repositories.js');
-const { archiveExtractor, is7zLinkField } = await import('../src/services/archive-extractor.js');
-const { createUploadTask, updateUploadTask, getSyncedUploadTask } = await import('../src/services/upload-tasks.js');
-const { getArchivePath, getExtractedImagesDir } = await import('../src/services/storage.js');
+const { initDb, closeDb } = await import('~/db/connection');
+const { createPack, getPack, updatePackStatus } = await import('~/db/repositories');
+const { archiveExtractor, is7zLinkField } = await import('~/services/archive-extractor');
+const { createUploadTask, updateUploadTask, getSyncedUploadTask } = await import('~/services/upload-tasks');
+const { getArchivePath, getExtractedImagesDir } = await import('~/services/storage');
 await initDb();
 test.after(() => { closeDb(); fs.rmSync(root, { recursive: true, force: true }); });
 

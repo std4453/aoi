@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import { config } from '../config/index.js';
-import { publisher } from '../replication/replicator.js';
-import { cachedManifest, cachedSignature } from '../replication/snapshots.js';
-import { canonicalJson, digest, safeContentFile } from '../replication/protocol.js';
-import { parseRange } from '../services/file-range.js';
+import { config } from '~/config';
+import { publisher } from '~/replication/replicator';
+import { cachedManifest, cachedSignature } from '~/replication/snapshots';
+import { canonicalJson, digest, safeContentFile } from '~/replication/protocol';
+import { parseRange } from '~/services/file-range';
 
 export const registerSnapshotRoutes: FastifyPluginAsync = async app => {
   if (config.isReplica || !config.snapshotEnabled) return;

@@ -1,6 +1,6 @@
-import type { Job, TaskErrorCode } from '../../../shared/types.js';
-import { TaskError } from '../../../shared/task-errors.js';
-import { isArchivePasswordError } from './archive-errors.js';
+import type { Job, TaskErrorCode } from '~/types';
+import { TaskError } from '../../../shared/task-errors';
+import { isArchivePasswordError } from './archive-errors';
 
 export function jobFailureCode(type: Job['type']): TaskErrorCode {
   return type === 'extract' ? 'EXTRACTION_FAILED' : type === 'verify' ? 'VERIFICATION_FAILED'

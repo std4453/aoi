@@ -2,10 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { normalizeRelativePath, validateIdentifier, resolveWithin } from '../services/safe-path.js';
-import { protocolVersion, dataScope } from '../version.js';
-import type { PackSnapshot, PackSnapshotIndex } from '../../../shared/types.js';
-import type { StoredPack } from '../db/repositories.js';
+import { normalizeRelativePath, validateIdentifier, resolveWithin } from '~/services/safe-path';
+import { protocolVersion, dataScope } from '~/version';
+import type { PackSnapshot, PackSnapshotIndex } from '~/types';
+import type { StoredPack } from '~/db/repositories';
 
 const id = z.string().refine(value => { try { validateIdentifier(value); return true; } catch { return false; } });
 const hash = z.string().regex(/^[a-f0-9]{64}$/);

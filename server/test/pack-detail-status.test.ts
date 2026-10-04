@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { shouldPollPack, shouldReloadPackPreview } from '../../client/src/lib/packStatus.js';
-import type { Pack } from '../../shared/types.js';
+import { shouldPollPack, shouldReloadPackPreview } from '../../client/src/lib/packStatus';
+import type { Pack } from '~/types';
 
 for (const source of ['pixiv', 'fanbox']) test(`details poll server-side ${source} downloads through completion or failure`, () => {
   const pixiv = { sourceType: 'folder', originalFormat: source } as const;

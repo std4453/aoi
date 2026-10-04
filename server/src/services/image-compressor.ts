@@ -3,15 +3,15 @@ import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
 import pLimit from 'p-limit';
-import { config } from '../config/index.js';
+import { config } from '~/config';
 import {
   getExtractedImagesDir,
   getGeneratedDir,
   ensureDir,
-} from './storage.js';
-import type { CompressionOptions, CompressionResult, FileSelection } from '../types.js';
-import { buildJpegOutputPaths } from './jpeg-output-path.js';
-import { isUgoira, readUgoiraManifest } from './ugoira.js';
+} from './storage';
+import type { CompressionOptions, CompressionResult, FileSelection } from '~/types';
+import { buildJpegOutputPaths } from './jpeg-output-path';
+import { isUgoira, readUgoiraManifest } from './ugoira';
 
 const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.avif', '.heic', '.heif', '.ugoira',

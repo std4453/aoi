@@ -1,9 +1,9 @@
-import { scheduleVerification, getVerification, getLiveMatches, continueFolderVerification } from '../services/content-verification.js';
+import { scheduleVerification, getVerification, getLiveMatches, continueFolderVerification } from '~/services/content-verification';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
-import type { ArchiveUploadRequest, UploadTaskStatus } from '../../../shared/types.js';
-import { getDb } from '../db/connection.js';
-import { hashArchive, backfillArchiveHashes, withUploadLock } from '../services/archive-deduplication.js';
+import type { ArchiveUploadRequest, UploadTaskStatus } from '~/types';
+import { getDb } from '~/db/connection';
+import { hashArchive, backfillArchiveHashes, withUploadLock } from '~/services/archive-deduplication';
 import path from 'node:path';
 import {
   listPacks,
@@ -32,16 +32,16 @@ import {
   getPendingPackFileCount,
   hasAnyActiveJob,
   toPublicPack,
-} from '../db/repositories.js';
-import { removePackFiles, ensureDir, getArchivePath, getThumbnailsDir, getExtractedImagesDir, getExtractedVideosDir, getFolderStagingDir, getUploadPath, getPath } from '../services/storage.js';
-import { config } from '../config/index.js';
-import { jobQueue } from '../services/job-queue.js';
-import { normalizeRelativePath, resolveWithin } from '../services/safe-path.js';
-import { buildJpegOutputPaths } from '../services/jpeg-output-path.js';
-import { folderProcessor } from '../services/folder-processor.js';
-import { isUgoira, readUgoiraFrame, readUgoiraManifest } from '../services/ugoira.js';
-import { safeContentFile } from '../replication/protocol.js';
-import { getUploadTask, updateUploadTask, updateUploadTaskMetadata, listUploadTasks, deleteUploadTask } from '../services/upload-tasks.js';
+} from '~/db/repositories';
+import { removePackFiles, ensureDir, getArchivePath, getThumbnailsDir, getExtractedImagesDir, getExtractedVideosDir, getFolderStagingDir, getUploadPath, getPath } from '~/services/storage';
+import { config } from '~/config';
+import { jobQueue } from '~/services/job-queue';
+import { normalizeRelativePath, resolveWithin } from '~/services/safe-path';
+import { buildJpegOutputPaths } from '~/services/jpeg-output-path';
+import { folderProcessor } from '~/services/folder-processor';
+import { isUgoira, readUgoiraFrame, readUgoiraManifest } from '~/services/ugoira';
+import { safeContentFile } from '~/replication/protocol';
+import { getUploadTask, updateUploadTask, updateUploadTaskMetadata, listUploadTasks, deleteUploadTask } from '~/services/upload-tasks';
 
 const MAX_NAME_LENGTH = 200;
 const MAX_FILENAME_LENGTH = 255;
@@ -955,8 +955,8 @@ function buildFileTree(
   imageFiles: { relPath: string; size: number }[],
   videoFiles: { relPath: string; size: number }[],
   thumbnailDir: string | null
-): import('../types.js').FileTreeNode[] {
-  type NodeMap = Map<string, import('../types.js').FileTreeNode>;
+): import('~/types').FileTreeNode[] {
+  type NodeMap = Map<string, import('~/types').FileTreeNode>;
   const rootChildren: NodeMap = new Map();
   const allNodes: Map<string, NodeMap> = new Map();
   allNodes.set('', rootChildren);
@@ -1054,7 +1054,7 @@ function buildFileTree(
   }
 
   // Compute folder sizes (sum of all descendant file sizes)
-  function computeFolderSize(node: import('../types.js').FileTreeNode): number {
+  function computeFolderSize(node: import('~/types').FileTreeNode): number {
     if (node.type !== 'folder') return node.size ?? 0;
     let total = 0;
     for (const child of node.children ?? []) {

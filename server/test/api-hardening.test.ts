@@ -10,7 +10,7 @@ import sharp from 'sharp';
 import {
   startTestServer,
   stopTestServer,
-} from './helpers/server-process.js';
+} from './helpers/server-process';
 
 async function makeTestImage(): Promise<Buffer> {
   return sharp({

@@ -1,4 +1,4 @@
-import { TaskError } from '../../../shared/task-errors.js';
+import { TaskError } from '../../../shared/task-errors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -6,10 +6,10 @@ import { pipeline } from 'node:stream/promises';
 import { fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { config } from '../config/index.js';
-import { getFileCategory } from './file-classifier.js';
-import { readFanboxSettings, rotateFanboxSession } from './fanbox-auth.js';
-import { FanboxChallengeClient, type FanboxChallengeResolver } from './fanbox-challenge.js';
+import { config } from '~/config';
+import { getFileCategory } from './file-classifier';
+import { readFanboxSettings, rotateFanboxSession } from './fanbox-auth';
+import { FanboxChallengeClient, type FanboxChallengeResolver } from './fanbox-challenge';
 
 export function parseFanboxUrl(value: string): { id: string; url: string } {
   try {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { findUnhashedArchives, setArchiveMd5 } from '../db/repositories.js';
-import { getArchivePath } from './storage.js';
+import { findUnhashedArchives, setArchiveMd5 } from '~/db/repositories';
+import { getArchivePath } from './storage';
 
 export async function hashArchive(filePath: string): Promise<string> {
   const hash = createHash('md5');

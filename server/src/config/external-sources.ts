@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { parseProxyUrl } from '../services/outbound-fetch.js';
+import { parseProxyUrl } from '~/services/outbound-fetch';
 
 const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(value => value === 'true' || value === '1');
 const schema = z.object({

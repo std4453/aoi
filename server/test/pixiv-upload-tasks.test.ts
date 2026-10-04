@@ -7,12 +7,12 @@ import Fastify from 'fastify';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-pixiv-tasks-'));
 process.env.DATA_DIR = dataDir;
-const { initDb, closeDb, getDb } = await import('../src/db/connection.js');
-const { getPack, getLatestJob, createPack, createJob, updateJobStatus, updatePackStatus } = await import('../src/db/repositories.js');
-const { jobQueue } = await import('../src/services/job-queue.js');
-const { recoverUploadTasks, listUploadTasks, getSyncedUploadTask } = await import('../src/services/upload-tasks.js');
-const { registerUploadTaskRoutes } = await import('../src/routes/upload-tasks.js');
-const { registerPixivRoutes } = await import('../src/routes/pixiv.js');
+const { initDb, closeDb, getDb } = await import('~/db/connection');
+const { getPack, getLatestJob, createPack, createJob, updateJobStatus, updatePackStatus } = await import('~/db/repositories');
+const { jobQueue } = await import('~/services/job-queue');
+const { recoverUploadTasks, listUploadTasks, getSyncedUploadTask } = await import('~/services/upload-tasks');
+const { registerUploadTaskRoutes } = await import('~/routes/upload-tasks');
+const { registerPixivRoutes } = await import('~/routes/pixiv');
 await initDb();
 // Exercise persistence and route transitions without contacting Pixiv.
 const originalStart = jobQueue.start;

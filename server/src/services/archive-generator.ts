@@ -6,9 +6,9 @@ import {
   getGeneratedDir,
   getGeneratedPath,
   ensureDir,
-} from './storage.js';
-import type { CompressionOptions, FileSelection } from '../types.js';
-import { isUgoira } from './ugoira.js';
+} from './storage';
+import type { CompressionOptions, FileSelection } from '~/types';
+import { isUgoira } from './ugoira';
 
 function walkFiles(dir: string, root?: string): { fullPath: string; relativePath: string }[] {
   const base = root ?? dir;
@@ -139,7 +139,7 @@ export const archiveGenerator = {
             fs.rmSync(tempDir, { recursive: true, force: true });
 
             const stat = fs.statSync(finalOutputPath);
-            const { updatePackCompressedSize } = await import('../db/repositories.js');
+            const { updatePackCompressedSize } = await import('~/db/repositories');
             updatePackCompressedSize(packId, stat.size);
             const manifest = {
               packId,

@@ -4,22 +4,22 @@ import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import yauzl from 'yauzl';
 import iconv from 'iconv-lite';
-import type { Pack } from '../types.js';
+import type { Pack } from '~/types';
 import {
   getArchivePath,
   ensureDir,
   getExtractedImagesDir,
   getExtractedVideosDir,
   getPath,
-} from './storage.js';
+} from './storage';
 import {
   getFileCategory,
   moveFilesFromTemp,
   type ExtractStats,
-} from './file-classifier.js';
-import { config } from '../config/index.js';
-import { normalizeRelativePath, resolveWithin } from './safe-path.js';
-import { isArchivePasswordError } from './archive-errors.js';
+} from './file-classifier';
+import { config } from '~/config';
+import { normalizeRelativePath, resolveWithin } from './safe-path';
+import { isArchivePasswordError } from './archive-errors';
 
 class ArchiveSafetyError extends Error {
   override name = 'ArchiveSafetyError';
@@ -460,7 +460,7 @@ export const archiveExtractor = {
       result = await extract7z(archivePath, imagesDir, videosDir);
     }
 
-    const { updatePackStats } = await import('../db/repositories.js');
+    const { updatePackStats } = await import('~/db/repositories');
     updatePackStats(pack.id, {
       imageCount: result.imageCount,
       videoCount: result.videoCount,

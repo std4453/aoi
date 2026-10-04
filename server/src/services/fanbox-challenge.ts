@@ -1,6 +1,6 @@
-import { TaskError } from '../../../shared/task-errors.js';
+import { TaskError } from '../../../shared/task-errors';
 import { fetch, Headers, Response, type Dispatcher } from 'undici';
-import { validateFanboxSession } from './fanbox-auth.js';
+import { validateFanboxSession } from './fanbox-auth';
 
 const maxResponseBytes = 16 * 1024 * 1024;
 const failed = () => new TaskError('CHALLENGE_FAILED', 'FlareSolverr 未能通过 FANBOX 验证，请稍后重试');

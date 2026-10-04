@@ -15,7 +15,7 @@ test('data size cache shares scans, serves stale values, and recovers from failu
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
-  const { getTotalDataSize } = await import('../src/services/storage.js');
+  const { getTotalDataSize } = await import('~/services/storage');
   const archiveDir = path.join(dataDir, 'archives');
   fs.mkdirSync(archiveDir);
   let now = Date.now();

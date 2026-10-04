@@ -1,15 +1,15 @@
-import { TaskError } from '../../../shared/task-errors.js';
+import { TaskError } from '../../../shared/task-errors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { PassThrough, Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { API, File as MegaFile } from 'megajs';
-import type { MegaMetadata, TaskErrorCode } from '../../../shared/types.js';
-import { config } from '../config/index.js';
-import { normalizeRelativePath, resolveWithin } from './safe-path.js';
-import { MegaPasswordError, resolveMegaUrl } from './mega-link.js';
-import { createOutboundFetch } from './outbound-fetch.js';
+import type { MegaMetadata, TaskErrorCode } from '~/types';
+import { config } from '~/config';
+import { normalizeRelativePath, resolveWithin } from './safe-path';
+import { MegaPasswordError, resolveMegaUrl } from './mega-link';
+import { createOutboundFetch } from './outbound-fetch';
 
 export interface MegaDownloadResult {
   kind: 'archive' | 'folder';

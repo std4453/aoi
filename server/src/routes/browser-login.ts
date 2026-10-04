@@ -1,10 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { browserLogin, browserLoginEnabled } from '../services/browser-login.js';
-import { readFanboxSettings } from '../services/fanbox-auth.js';
-import { readPixivSettings } from '../services/pixiv-auth.js';
-import type { BrowserLoginProvider } from '../../../shared/types.js';
-import { config } from '../config/index.js';
+import { browserLogin, browserLoginEnabled } from '~/services/browser-login';
+import { readFanboxSettings } from '~/services/fanbox-auth';
+import { readPixivSettings } from '~/services/pixiv-auth';
+import type { BrowserLoginProvider } from '~/types';
+import { config } from '~/config';
 
 export const registerBrowserLoginRoutes: FastifyPluginAsync = async app => {
   // With no AoI key, only same-origin loopback callers can control a browser.

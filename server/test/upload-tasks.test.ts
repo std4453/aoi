@@ -7,9 +7,9 @@ import test from 'node:test';
 import { ZipArchive } from 'archiver';
 import sharp from 'sharp';
 import Database from 'better-sqlite3';
-import type { UploadTask } from '../../shared/types.js';
-import { startTestServer, stopTestServer } from './helpers/server-process.js';
-import migration from '../src/db/migrations/010_add_upload_tasks.js';
+import type { UploadTask } from '~/types';
+import { startTestServer, stopTestServer } from './helpers/server-process';
+import migration from '~/db/migrations/010_add_upload_tasks';
 
 test('upload tasks persist, bind once, preserve completed packs, and recover folder uploads', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-upload-tasks-'));

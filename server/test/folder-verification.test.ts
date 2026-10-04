@@ -7,8 +7,8 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 import { ZipArchive } from 'archiver';
 import sharp from 'sharp';
-import { startTestServer, stopTestServer } from './helpers/server-process.js';
-import type { Pack, PackFile, FolderUploadStatus } from '../../shared/types.js';
+import { startTestServer, stopTestServer } from './helpers/server-process';
+import type { Pack, PackFile, FolderUploadStatus } from '~/types';
 
 const png = () => sharp({ create: { width: 24, height: 24, channels: 3, background: '#3867d6' } }).png().toBuffer();
 

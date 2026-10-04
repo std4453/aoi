@@ -1,18 +1,18 @@
-import { isTaskErrorCode } from '../../../shared/task-errors.js';
+import { isTaskErrorCode } from '../../../shared/task-errors';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
-import type { CreateUploadTaskRequest, UploadTask } from '../../../shared/types.js';
-import { getPack, getPackFiles, listTags, hasAnyActiveJob, deletePack, updatePackStatus } from '../db/repositories.js';
+import type { CreateUploadTaskRequest, UploadTask } from '~/types';
+import { getPack, getPackFiles, listTags, hasAnyActiveJob, deletePack, updatePackStatus } from '~/db/repositories';
 import { createUploadTask, getUploadTaskMetadata, updateUploadTaskMetadata, updateUploadTask,
-  getSyncedUploadTask, listSyncedUploadTasks, deleteUploadTask, retryPackTask, createPostUploadTask } from '../services/upload-tasks.js';
-import { continueFolderVerification } from '../services/content-verification.js';
-import { getUploadPath, removePackFiles } from '../services/storage.js';
-import { jobQueue } from '../services/job-queue.js';
-import { config } from '../config/index.js';
-import { withUploadLock } from '../services/archive-deduplication.js';
-import { validateMegaUrl } from '../services/mega-link.js';
-import { parseFanboxUrl } from '../services/fanbox-client.js';
-import { parsePixivUrl } from '../services/pixiv-importer.js';
+  getSyncedUploadTask, listSyncedUploadTasks, deleteUploadTask, retryPackTask, createPostUploadTask } from '~/services/upload-tasks';
+import { continueFolderVerification } from '~/services/content-verification';
+import { getUploadPath, removePackFiles } from '~/services/storage';
+import { jobQueue } from '~/services/job-queue';
+import { config } from '~/config';
+import { withUploadLock } from '~/services/archive-deduplication';
+import { validateMegaUrl } from '~/services/mega-link';
+import { parseFanboxUrl } from '~/services/fanbox-client';
+import { parsePixivUrl } from '~/services/pixiv-importer';
 
 function password(value: unknown): string | undefined {
   if (value === undefined) return undefined;
@@ -50,7 +50,7 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
       const input = validateCreate(request.body);
       const task = ['pixiv', 'fanbox'].includes(input.source) ? createPostUploadTask(input) : createUploadTask(input);
       if (task.source === 'mega') {
-        const { startMegaImport } = await import('../services/mega-import.js');
+        const { startMegaImport } = await import('~/services/mega-import');
         void startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name });
       }
       return task;
@@ -130,7 +130,7 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
       continueFolderVerification(task.packId);
       jobQueue.start();
     } else if (task.source === 'mega') {
-      const { continueMegaImport } = await import('../services/mega-import.js');
+      const { continueMegaImport } = await import('~/services/mega-import');
       void continueMegaImport(task.id);
     } else {
       const response = await fastify.inject({ method: 'POST', url: `/api/upload-tasks/${task.id}/complete`, headers: { authorization: request.headers.authorization ?? '' }, payload: { allowDuplicate: true } });
@@ -147,7 +147,7 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
       const patch = { ...(input.sharePassword !== undefined ? { sharePassword: password(input.sharePassword) } : {}), ...(input.archivePassword !== undefined ? { archivePassword: password(input.archivePassword) } : {}) };
       updateUploadTaskMetadata(task.id, patch);
       if (task.source === 'mega') {
-        const { startMegaImport, hasPendingMegaHandoff } = await import('../services/mega-import.js');
+        const { startMegaImport, hasPendingMegaHandoff } = await import('~/services/mega-import');
         if (!task.packId || hasPendingMegaHandoff(task)) {
           void startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name }, Boolean(task.packId));
         } else await retryPackTask(task, input.archivePassword);
@@ -163,7 +163,7 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
       let task = getSyncedUploadTask(request.params.id);
       if (!task) return { ok: true };
       if (task.source === 'mega') {
-        const { cancelMegaImport } = await import('../services/mega-import.js');
+        const { cancelMegaImport } = await import('~/services/mega-import');
         await cancelMegaImport(task.id);
         // The worker may have materialized a pack while cancellation was queued.
         task = getSyncedUploadTask(task.id)!;

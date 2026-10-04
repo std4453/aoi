@@ -5,8 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
-import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process.js';
-import { type Manifest, type SnapshotIndex } from '../src/replication/protocol.js';
+import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process';
+import { type Manifest, type SnapshotIndex } from '~/replication/protocol';
 
 async function eventually(check: () => Promise<boolean>, message: string, timeout = 25_000) {
   const deadline = Date.now() + timeout;

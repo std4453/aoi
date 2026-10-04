@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { moveFilesFromTemp, walkDir } from './file-classifier.js';
-import type { ExtractStats } from './file-classifier.js';
-import { getFolderStagingDir, getExtractedImagesDir, getExtractedVideosDir } from './storage.js';
+import { moveFilesFromTemp, walkDir } from './file-classifier';
+import type { ExtractStats } from './file-classifier';
+import { getFolderStagingDir, getExtractedImagesDir, getExtractedVideosDir } from './storage';
 
 interface FolderProcessResult extends ExtractStats {
   structureType: string;

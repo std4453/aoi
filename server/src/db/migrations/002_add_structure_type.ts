@@ -1,4 +1,4 @@
-import type { Migration } from '../migrations.js';
+import type { Migration } from '~/db/migrations';
 
 export default {
   name: '002_add_structure_type',

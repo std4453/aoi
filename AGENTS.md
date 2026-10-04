@@ -33,9 +33,11 @@ npm --prefix client install
 
 ## 编码风格与命名规范
 
-遵循现有 TypeScript 风格：严格类型、两空格缩进、单引号、分号，多行结构保留尾逗号。React 组件使用 `PascalCase`，Hook 使用 `useCamelCase`，变量和函数使用 `camelCase`，服务端模块文件使用 kebab-case。服务端采用 ESM；即使源文件是 TypeScript，本地导入也必须写 `.js` 扩展名。前后端共用类型统一维护在 `shared/types.ts`。
+遵循现有 TypeScript 风格：严格类型、两空格缩进、单引号、分号，多行结构保留尾逗号。React 组件使用 `PascalCase`，Hook 使用 `useCamelCase`，变量和函数使用 `camelCase`，服务端模块文件使用 kebab-case。服务端采用 ESM；TypeScript 源码中的相对模块导入省略扩展名，目录中的 `index.ts` 可直接用目录路径导入。构建使用 `tsc` 后运行 `tsc-alias`，为产物补全 `.js` 或 `/index.js`；通过 `npm run build:server` 或服务端的 `npm run build` 执行完整构建。前后端共用类型统一维护在 `shared/types.ts`。
 
 数据库变更必须新增有序、幂等的迁移文件，例如 `server/src/db/migrations/006_add_field.ts`，并在 `migrations.ts` 中注册。
+
+服务端的 `~/` 指向 `server/src/`。同目录或子目录使用简短的 `./…` 导入；跨目录引用服务端模块时优先使用 `~/…`，例如 `~/db/connection`。共享类型统一通过 `~/types` 导入，由 `server/src/types.ts` 转出；别名不用于文件系统路径或 `new URL()`。开发与测试使用服务端的 tsconfig，编译产物中的别名由 `tsc-alias` 转为相对路径。
 
 ## 测试要求
 

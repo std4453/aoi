@@ -7,9 +7,9 @@ import { once } from 'node:events';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Database from 'better-sqlite3';
-import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process.js';
-import { canonicalJson, contractValues, digest, makeManifest } from '../src/replication/protocol.js';
-import type { StoredPack } from '../src/db/repositories.js';
+import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process';
+import { canonicalJson, contractValues, digest, makeManifest } from '~/replication/protocol';
+import type { StoredPack } from '~/db/repositories';
 
 async function eventually(check: () => Promise<boolean>, message: string, timeout = 20_000) {
   const deadline = Date.now() + timeout;
