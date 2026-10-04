@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useUploadTasks } from './useUploadTasks';
 import { showError } from '../../components/Toast';
 import { showTaskToast, type TaskToastHandle } from './TaskToast';
-import { FanboxSettingsDialog, PixivSettingsDialog } from '../../components/ExternalSourcesSettings';
+import FanboxSettings from '../../components/FanboxSettings';
+import PixivSettings from '../../components/PixivSettings';
 import type { UploadTask } from '../../../../shared/types';
 import { uploadView } from './view-state';
 import { taskStates, taskNeedsLogin } from './task-display';
@@ -71,6 +72,6 @@ export default function UploadTaskNotifications() {
     if (!loginTask) return;
     void resume(loginTask.id).catch(error => showError(error instanceof Error ? error.message : '重试失败'));
   };
-  return loginTask?.source === 'pixiv' ? <PixivSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} />
-    : loginTask?.source === 'fanbox' ? <FanboxSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : null;
+  return loginTask?.source === 'pixiv' ? <PixivSettings onClose={() => setLoginTask(null)} onSaved={saved} />
+    : loginTask?.source === 'fanbox' ? <FanboxSettings onClose={() => setLoginTask(null)} onSaved={saved} /> : null;
 }

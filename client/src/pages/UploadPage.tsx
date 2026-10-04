@@ -1,137 +1,19 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import UploadForm, { draftTitle } from '../features/uploads/UploadForm';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronUp, FileArchive, FolderOpen, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, Upload } from 'lucide-react';
 import type { UploadTask } from '../../../shared/types';
 import { useUploadCards, useUploadDraft } from '../features/uploads/useUploadTasks';
-import { formatBytes } from '../lib/utils';
 import { DuplicateCard } from '../components/DuplicateUploadModal';
-import { TextInput, PasswordInput } from '../components/Form';
-import TagSelectField from '../components/TagSelectField';
+import { PasswordInput } from '../components/Form';
 import PackProcessingResult from '../features/uploads/PackProcessingResult';
-import ImportSources from '../components/ImportSources';
-import { FanboxSettingsDialog, PixivSettingsDialog } from '../components/ExternalSourcesSettings';
-import { ActionRow, Button, IconButton, TextButton } from '../components/Button';
+import FanboxSettings from '../components/FanboxSettings';
+import PixivSettings from '../components/PixivSettings';
+import { Button, IconButton, TextButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../features/uploads/TaskPresentation';
 import { taskNoticeMessage, taskProgressDisplay, taskStates, taskNeedsLogin } from '../features/uploads/task-display';
 import { TaskSurface, TaskActionRow, TaskNotice, TaskTextAction } from '../features/uploads/TaskPresentation';
 import { uploadView, getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../features/uploads/view-state';
-
-const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
-  : source === 'fanbox' ? 'FANBOX 导入' : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
-
-async function readDirectory(directory: FileSystemDirectoryEntry, root = directory.name): Promise<File[]> {
-  const files: File[] = [];
-  const reader = directory.createReader();
-  while (true) {
-    const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
-    if (entries.length === 0) break;
-    for (const entry of entries) {
-      const path = `${root}/${entry.name}`;
-      if (entry.isDirectory) files.push(...await readDirectory(entry as FileSystemDirectoryEntry, path));
-      else {
-        const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
-        Object.defineProperty(file, 'webkitRelativePath', { value: path });
-        files.push(file);
-      }
-    }
-  }
-  return files;
-}
-
-function UploadForm() {
-  const { draft, setDraft, resetDraft, start, starting, metadataLoading, metadataError, error: draftError } = useUploadDraft();
-  const formId = useId();
-  const archiveInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
-  const [dragging, setDragging] = useState(false);
-  const dragDepth = useRef(0);
-  const [scanning, setScanning] = useState(false);
-  const [error, setError] = useState('');
-  const [settings, setSettings] = useState(false);
-  const select = (files: File[], folder: boolean) => {
-    if (!files.length) { setError('文件夹为空'); return; }
-    if (!folder && !/\.(zip|rar|7z)$/i.test(files[0].name)) { setError('请选择 ZIP、RAR、7Z 压缩包或文件夹'); return; }
-    setError('');
-    setDraft({ source: folder ? 'folder' : 'archive', files,
-      name: folder ? files[0].webkitRelativePath.split('/')[0] : files[0].name.replace(/\.[^.]+$/, ''),
-    });
-  };
-  const drop = async (event: React.DragEvent) => {
-    if (!Array.from(event.dataTransfer.types).includes('Files')) return;
-    event.preventDefault();
-    dragDepth.current = 0;
-    setDragging(false);
-    if (starting || scanning) return;
-    const entry = event.dataTransfer.items[0]?.webkitGetAsEntry?.();
-    if (entry?.isDirectory) {
-      setScanning(true);
-      try { select(await readDirectory(entry as FileSystemDirectoryEntry), true); }
-      catch (error) { setError(error instanceof Error ? error.message : String(error)); }
-      finally { setScanning(false); }
-    } else select(Array.from(event.dataTransfer.files).slice(0, 1), false);
-  };
-  const remote = draft.source === 'mega' || draft.source === 'pixiv' || draft.source === 'fanbox';
-  const canStart = remote ? Boolean(draft.url.trim()) : draft.files.length > 0;
-  const title = draftTitle(draft.source);
-  return <div onDrop={event => { void drop(event); }}
-    onDragEnter={event => {
-      if (!Array.from(event.dataTransfer.types).includes('Files') || starting || scanning) return;
-      event.preventDefault(); dragDepth.current++; setDragging(true);
-    }}
-    onDragOver={event => {
-      if (!Array.from(event.dataTransfer.types).includes('Files')) return;
-      event.preventDefault(); event.dataTransfer.dropEffect = starting || scanning ? 'none' : 'copy';
-    }}
-    onDragLeave={event => {
-      if (!Array.from(event.dataTransfer.types).includes('Files')) return;
-      dragDepth.current = Math.max(0, dragDepth.current - 1);
-      if (!dragDepth.current) setDragging(false);
-    }}
-    className={`relative overflow-hidden rounded-xl border transition-colors ${draft.source ? 'bg-gray-900' : 'border-dashed pt-2'} ${dragging ? 'border-blue-500' : 'border-gray-700'}`}>
-    <div className={dragging ? 'invisible pointer-events-none' : ''} inert={dragging}>
-    <input ref={archiveInput} type="file" accept={/iPad|iPhone|iPod/.test(navigator.userAgent) ? undefined : '.zip,.rar,.7z'} className="hidden"
-      onChange={event => { select(Array.from(event.target.files || []), false); event.target.value = ''; }} />
-    <input ref={folderInput} type="file" {...{ webkitdirectory: '', directory: '' }} className="hidden"
-      onChange={event => { select(Array.from(event.target.files || []), true); event.target.value = ''; }} />
-    <div className="upload-card-heading upload-form-heading" data-expanded="true">
-      {draft.source ? <TaskSourceTitle source={draft.source} name={title} expanded />
-        : <span className="flex items-center justify-center gap-2 text-sm text-gray-400"><Upload size={20} aria-hidden="true" />上传图包</span>}
-    </div>
-    <div className="px-4 pb-4">
-    {!draft.source ? <>
-      <div className="py-3 text-center">
-        <ActionRow><Button variant="secondary" icon={<FileArchive size={16} />} onClick={() => archiveInput.current?.click()} disabled={starting || scanning}>选择压缩包</Button>
-          <Button variant="secondary" icon={<FolderOpen size={16} />} onClick={() => folderInput.current?.click()} disabled={starting || scanning}>选择文件夹</Button></ActionRow>
-        <p className="mt-2 text-xs text-gray-500">支持 ZIP、RAR、7Z 压缩包或文件夹</p>
-        {scanning && <p role="status" className="mt-2 text-xs text-gray-500">正在读取文件夹…</p>}
-      </div>
-      <ImportSources compact availableSources={['pixiv', 'mega', 'fanbox']} onSelect={source => { setSettings(false); resetDraft(); setDraft({ source }); }} />
-    </> : <form id={formId} onSubmit={event => { event.preventDefault(); if (canStart && !starting && !scanning) void start(); }} className="flex flex-col gap-3">
-      {remote && <div className="relative">
-        <TextInput type="url" required value={draft.url} onChange={event => setDraft({ url: event.target.value })} disabled={starting}
-          aria-label={draft.source === 'fanbox' ? '帖子网址' : draft.source === 'pixiv' ? '作品网址' : '分享链接'} aria-busy={metadataLoading} className={metadataLoading ? 'pr-20' : ''}
-          placeholder={draft.source === 'fanbox' ? '帖子网址（FANBOX）' : draft.source === 'pixiv' ? '作品网址（Pixiv）' : '分享链接（MEGA 文件或文件夹）'} />
-        {metadataLoading && <span role="status" className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-500">识别中…</span>}
-      </div>}
-      {metadataError && <div className="text-xs text-amber-400" role="status">{metadataError}
-        {(draft.source === 'pixiv' || draft.source === 'fanbox') && <> <TextButton onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}</div>}
-      <TextInput value={draft.name} onChange={event => setDraft({ name: event.target.value })} aria-label="图包名称"
-        placeholder={draft.source === 'pixiv' ? '图包名称（自动使用作品标题）' : draft.source === 'fanbox' ? '图包名称（自动使用投稿标题）'
-          : remote ? '图包名称（自动使用分享标题）' : '图包名称'} maxLength={200} disabled={starting} />
-      {!remote && <p className="text-xs text-gray-500">{draft.source === 'folder' ? `${draft.files.length} 个文件` : draft.files[0]?.name} · {formatBytes(draft.files.reduce((sum, file) => sum + file.size, 0))}</p>}
-      {draft.source === 'mega' && <PasswordInput value={draft.sharePassword} onChange={sharePassword => setDraft({ sharePassword })} placeholder="分享密码 / 解密密钥" disabled={starting} />}
-      {(draft.source === 'archive' || draft.source === 'mega') && <PasswordInput value={draft.archivePassword} onChange={archivePassword => setDraft({ archivePassword })} placeholder="压缩包密码" disabled={starting} />}
-    </form>}
-    {draft.source && <div className="mt-3"><TagSelectField value={draft.tagIds} onChange={tagIds => setDraft({ tagIds })} disabled={starting} /></div>}
-    {settings && draft.source === 'pixiv' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
-    {settings && draft.source === 'fanbox' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
-    {(error || draftError) && <p role="alert" className="mt-3 text-sm text-red-400">{error || draftError}</p>}
-    {draft.source && <ActionRow className="mt-4"><Button variant="secondary" onClick={() => { setSettings(false); setError(''); resetDraft(); }} disabled={starting}>取消上传</Button>
-      <Button variant="primary" type="submit" form={formId} disabled={!canStart || starting || scanning}>{starting ? '正在创建任务…' : remote ? '开始导入' : '开始上传'}</Button></ActionRow>}
-    </div></div>
-    {dragging && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-blue-400" role="status"><Upload size={32} /><span className="text-sm">松开以上传压缩包或文件夹</span></div>}
-  </div>;
-}
 
 function TaskCard({ task }: { task: UploadTask }) {
   const { expandedId, expand, dismiss, pause, resume, continueTask, reselect, hasLocalFiles, files } = useUploadCards();
@@ -192,8 +74,8 @@ function TaskCard({ task }: { task: UploadTask }) {
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${file.status === 'uploaded' ? 'bg-green-500' : file.status === 'failed' ? 'bg-red-400' : file.status === 'uploading' ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
             <span className="min-w-0 flex-1 truncate text-gray-400" title={file.path}>{file.path}</span><span className="shrink-0 text-gray-500">{file.status === 'uploaded' ? '完成' : file.status === 'failed' ? '失败' : `${file.size ? Math.round(file.transferred / file.size * 100) : 0}%`}</span>
           </div>)}</div>}</div>}
-        {settings && task.source === 'pixiv' && task.status === 'failed' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
-        {settings && task.source === 'fanbox' && task.status === 'failed' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
+        {settings && task.source === 'pixiv' && task.status === 'failed' && <PixivSettings onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
+        {settings && task.source === 'fanbox' && task.status === 'failed' && <FanboxSettings onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
         <input ref={input} type="file" className="hidden" {...(task.source === 'folder' ? { webkitdirectory: '', directory: '' } : { accept: '.zip,.rar,.7z' })}
           onChange={event => { const selected = Array.from(event.target.files || []); event.target.value = ''; if (selected.length) void run(() => reselect(task.id, selected)); }} />
         {busy && <p role="status" className="sr-only">正在处理…</p>}
