@@ -254,3 +254,28 @@ test('remote task flags prevent browser file transfers and drafts derive the fla
   draft.resetDraft();
   assert.equal(draft.getSnapshot().draft.isRemote, false);
 });
+
+test('MEGA adapter validates before fetching and forwards the changed share password', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const requested: Array<[string, string | undefined]> = [];
+  const draft = createUploadDraft({ fetchMegaMetadata: async (url, password) => {
+    requested.push([url, password]);
+    return { title: 'MEGA title', filename: 'test.zip', kind: 'archive', totalBytes: 4 };
+  } });
+  t.after(() => draft.dispose());
+  draft.setDraft({ source: 'mega', url: 'https://invalid.example/file/123', sharePassword: 'old' });
+  t.mock.timers.tick(500); await tick();
+  assert.equal(requested.length, 0);
+  draft.setDraft({ url: ' https://mega.nz/file/test#key ' });
+  draft.setDraft({ sharePassword: 'new' });
+  t.mock.timers.tick(500); await tick();
+  assert.deepEqual(requested, [['https://mega.nz/file/test#key', 'new']]);
+  assert.equal(draft.getSnapshot().draft.name, 'MEGA title');
+  draft.resetDraft();
+  draft.setDraft({ source: 'mega', url: 'https://mega.nz/file/test#key' });
+  await draft.submit(async input => {
+    assert.equal(input.name, 'MEGA 导入');
+    assert.deepEqual(input.tagIds, [], 'MEGA has no server auto-tagging');
+    return base;
+  });
+});

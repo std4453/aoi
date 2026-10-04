@@ -1,14 +1,16 @@
 import UploadDraftForm from './UploadDraftForm';
 import { useRef, useState } from 'react';
 import { FileArchive, FolderOpen, Upload } from 'lucide-react';
-import type { UploadTask } from '../../../../shared/types';
+import type { UploadTaskType } from '../../../../shared/types';
 import { useUploadDraft } from './useUploadTasks';
 import ImportSources from '../../components/ImportSources';
 import { ActionRow, Button } from '../../components/Button';
 import { TaskSourceTitle } from './TaskPresentation';
 
-export const draftTitle = (source: UploadTask['source'] | null) => source === 'pixiv' ? 'Pixiv 导入'
-  : source === 'fanbox' ? 'FANBOX 导入' : source === 'mega' ? 'MEGA 分享' : source === 'folder' ? '上传文件夹' : source === 'archive' ? '上传压缩包' : '上传图包';
+const draftTitles: Record<UploadTaskType, string> = {
+  pixiv: 'Pixiv 导入', fanbox: 'FANBOX 导入', mega: 'MEGA 分享', folder: '上传文件夹', archive: '上传压缩包',
+};
+export const draftTitle = (source: UploadTaskType | null) => source ? draftTitles[source] : '上传图包';
 
 async function readDirectory(directory: FileSystemDirectoryEntry, root = directory.name): Promise<File[]> {
   const files: File[] = [];
@@ -93,8 +95,8 @@ export default function UploadForm() {
         {scanning && <p role="status" className="mt-2 text-xs text-gray-500">正在读取文件夹…</p>}
       </div>
       <ImportSources compact availableSources={['pixiv', 'mega', 'fanbox']} onSelect={source => { resetDraft(); setDraft({ source }); }} />
+      {error && <p role="alert" className="mt-3 text-sm text-red-400">{error}</p>}
     </> : <UploadDraftForm scanning={scanning} error={error} onCancel={() => setError('')} />}
-    {!draft.source && error && <p role="alert" className="mt-3 text-sm text-red-400">{error}</p>}
     </div></div>
     {dragging && <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-blue-400" role="status"><Upload size={32} /><span className="text-sm">松开以上传压缩包或文件夹</span></div>}
   </div>;

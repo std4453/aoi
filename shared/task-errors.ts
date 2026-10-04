@@ -1,4 +1,4 @@
-import type { TaskErrorCategory, TaskErrorCode, UploadTask } from './types.js';
+import type { TaskErrorCategory, TaskErrorCode, UploadTaskType, RemoteTaskType } from './types.js';
 
 /** Stable wire codes; diagnostics are never interpreted by presentation components. */
 export const taskErrorCategories = {
@@ -17,7 +17,7 @@ export function isTaskErrorCode(value: unknown): value is TaskErrorCode {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(taskErrorCategories, value);
 }
 
-export function isRemoteSource(source: UploadTask['source'] | null): boolean {
+export function isRemoteSource(source: UploadTaskType | null): source is RemoteTaskType {
   return source === 'mega' || source === 'pixiv' || source === 'fanbox';
 }
 

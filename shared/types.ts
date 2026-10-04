@@ -152,6 +152,9 @@ export interface ArchiveUploadRequest {
   allowDuplicate?: boolean;
 }
 
+export type RemoteTaskType = 'pixiv' | 'fanbox' | 'mega';
+export type UploadTaskType = 'archive' | 'folder' | RemoteTaskType;
+
 export type UploadTaskState = 'uploading' | 'downloading' | 'paused' | 'needs_file' | 'processing' | 'duplicate' | 'password' | 'completed' | 'failed';
 
 export type TaskErrorCategory = 'authentication' | 'access' | 'network' | 'source' | 'storage' | 'password'
@@ -164,7 +167,7 @@ export type TaskErrorCode = 'AUTH_REQUIRED' | 'ACCESS_DENIED' | 'NETWORK_ERROR' 
 
 export interface UploadTask {
   id: string;
-  source: 'archive' | 'folder' | 'mega' | 'pixiv' | 'fanbox';
+  source: UploadTaskType;
   isRemote: boolean;
   name: string;
   filename: string;
@@ -192,7 +195,7 @@ export interface UploadTask {
 
 export interface CreateUploadTaskRequest {
   autoName?: boolean;
-  source: UploadTask['source'];
+  source: UploadTaskType;
   name: string;
   filename?: string;
   fileSize?: number;
