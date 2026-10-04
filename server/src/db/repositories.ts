@@ -234,6 +234,10 @@ export function updatePackStatus(id: string, status: PackStatus, errorMessage?: 
   );
 }
 
+export function updatePackArchivePassword(id: string, password: string | null): void {
+  run('UPDATE packs SET archive_password = ? WHERE id = ?', [password, id]);
+}
+
 export function updatePackStats(
   id: string,
   stats: { imageCount: number; videoCount: number; totalImagesSize: number; totalVideosSize: number }
@@ -391,6 +395,15 @@ export function getJob(id: string): Job | undefined {
   const row = queryOne('SELECT * FROM jobs WHERE id = ?', [id]);
   if (!row) return undefined;
   return rowToJob(row);
+}
+
+export function getLatestUploadJob(packId: string): Job | undefined {
+  const row = queryOne("SELECT * FROM jobs WHERE pack_id = ? AND type != 'compress' ORDER BY created_at DESC, rowid DESC LIMIT 1", [packId]);
+  return row ? rowToJob(row) : undefined;
+}
+
+export function updateJobOptions(id: string, options: string): void {
+  run('UPDATE jobs SET options = ? WHERE id = ?', [options, id]);
 }
 
 export function updateJobStatus(id: string, status: Job['status'], progress?: number, error?: string, errorCode?: TaskErrorCode): void {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CreateUploadTaskRequest, UploadTask } from '../../../shared/types.js';
 import { getDb } from '../db/connection.js';
-import { createPack, createJob, getJob, setPackTags, getPack, getPackFiles, listPacks, getLatestJob, hasAnyActiveJob, updatePackStatus } from '../db/repositories.js';
+import { createPack, createJob, setPackTags, getPack, getPackFiles, listPacks, getLatestJob, getLatestUploadJob, updateJobOptions, updatePackArchivePassword, hasAnyActiveJob, updatePackStatus } from '../db/repositories.js';
 import { createUploadTask, getUploadTask, listUploadTasks, updateUploadTask, getUploadTaskMetadata, updateUploadTaskMetadata } from '../db/upload-task-repository.js';
 import { getLiveMatches, getVerification, scheduleVerification } from './content-verification.js';
 import { jobQueue } from './job-queue.js';
@@ -12,11 +12,6 @@ import { parsePixivUrl } from './pixiv-importer.js';
 import { archiveErrorCode, jobFailureCode } from './task-errors.js';
 
 export * from '../db/upload-task-repository.js';
-
-function latestUploadJob(packId: string) {
-  const row = getDb().prepare("SELECT id FROM jobs WHERE pack_id = ? AND type != 'compress' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(packId) as { id: string } | undefined;
-  return row ? getJob(row.id) : undefined;
-}
 
 /** Persist the task, pack and queued download together before starting network work. */
 export function createPixivUploadTask(input: CreateUploadTaskRequest): UploadTask {
@@ -33,8 +28,7 @@ export function createPostUploadTask(input: CreateUploadTaskRequest): UploadTask
       originalSize: 0, originalFormat: source, sourceType: 'folder' });
     setPackTags(pack.id, input.tagIds ?? []);
     const job = createJob(pack.id, source);
-    getDb().prepare('UPDATE jobs SET options = ? WHERE id = ?')
-      .run(JSON.stringify({ autoName: input.autoName ?? false, autoTags: input.tagIds === undefined }), job.id);
+    updateJobOptions(job.id, JSON.stringify({ autoName: input.autoName ?? false, autoTags: input.tagIds === undefined }));
     return updateUploadTask(created.id, { packId: pack.id })!;
   })();
   jobQueue.start();
@@ -60,7 +54,7 @@ export function syncUploadTask(task: UploadTask): UploadTask {
   } else if (pack.status === 'awaiting_confirmation') {
     patch = { status: 'duplicate', matches: getLiveMatches(pack.id), transferredBytes: task.totalBytes, error: null };
   } else if (pack.status === 'failed') {
-    const job = latestUploadJob(pack.id);
+    const job = getLatestUploadJob(pack.id);
     // Pre-migration extraction jobs only have diagnostics; preserve password recovery.
     const errorCode = job?.errorCode ?? task.errorCode ?? (job?.type === 'extract'
       ? archiveErrorCode(new Error(job.error || pack.errorMessage || '')) : job ? jobFailureCode(job.type) : 'PROCESSING_FAILED');
@@ -166,14 +160,14 @@ export async function retryPackTask(task: UploadTask, archivePassword?: string):
   }
   if (pack.status !== 'failed') throw new Error('仅失败任务可以重试');
   if (task.source === 'pixiv' || task.source === 'fanbox') {
-    const latest = latestUploadJob(pack.id);
+    const latest = getLatestUploadJob(pack.id);
     if (!latest || ![task.source, 'verify', 'thumbnail'].includes(latest.type)) throw new Error('无法重试此导入任务');
     getDb().transaction(() => {
       if (latest.type === 'verify') scheduleVerification(pack.id);
       else {
         updatePackStatus(pack.id, latest.type === task.source ? 'uploading' : 'thumbnailing');
         const next = createJob(pack.id, latest.type);
-        if (latest.options) getDb().prepare('UPDATE jobs SET options = ? WHERE id = ?').run(latest.options, next.id);
+        if (latest.options) updateJobOptions(next.id, latest.options);
       }
       updateUploadTask(task.id, { status: latest.type === task.source ? 'downloading' : 'processing', error: null, progress: 0 });
     })();
@@ -184,8 +178,7 @@ export async function retryPackTask(task: UploadTask, archivePassword?: string):
     jobQueue.start();
   } else if (pack.sourceType === 'archive') {
     if (!fs.existsSync(getArchivePath(pack.id, `original.${pack.originalFormat}`))) throw new Error('原始压缩包缺失');
-    getDb().prepare('UPDATE packs SET archive_password = ? WHERE id = ?')
-      .run(archivePassword ?? getUploadTaskMetadata(task.id).archivePassword ?? null, pack.id);
+    updatePackArchivePassword(pack.id, archivePassword ?? getUploadTaskMetadata(task.id).archivePassword ?? null);
     updatePackStatus(pack.id, 'extracting');
     await jobQueue.enqueueUnique(pack.id, 'extract');
   } else {
