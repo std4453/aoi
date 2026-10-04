@@ -111,10 +111,12 @@ export default function ExternalLoginSettings({ provider, onClose, onSaved }: {
     </div>
     {!settings ? <div className="flex justify-center py-10" role="status"><Loader2 className="animate-spin text-gray-400" aria-label="读取配置中" /></div> : session ? <div className="space-y-5">
       <p className="text-sm leading-6 text-gray-300">完成 {name} 官方登录后将自动保存并关闭窗口。如未自动完成，可点击「我已登录」。</p>
-      <div className="ml-auto flex w-full items-center justify-end gap-2">
+      <div className="ml-auto flex w-full flex-wrap items-center justify-end gap-2">
         <TextButton className="shrink-0 whitespace-nowrap text-sm" disabled={busy} onClick={() => open(session)}>打开浏览器</TextButton>
-        <Button className="min-h-11 flex-1 whitespace-nowrap px-2" disabled={busy} onClick={() => void action('cancel')}>取消登录</Button>
-        <Button className="min-h-11 flex-1 whitespace-nowrap px-2" variant="primary" disabled={busy} onClick={() => void action('complete')}>{busy ? '正在验证…' : '我已登录'}</Button>
+        <div className="flex shrink-0 gap-2">
+          <Button className="w-28 shrink-0 whitespace-nowrap" disabled={busy} onClick={() => void action('cancel')}>取消登录</Button>
+          <Button className="w-28 shrink-0 whitespace-nowrap" variant="primary" disabled={busy} onClick={() => void action('complete')}>{busy ? '正在验证…' : '我已登录'}</Button>
+        </div>
       </div>
     </div> : mode === 'browser' && browserEnabled ? <div>
       <button type="button" disabled={busy} onClick={() => void action('start')} className="group relative flex min-h-40 w-full items-center justify-between gap-3 overflow-hidden rounded-xl border border-gray-700 bg-gray-800/60 text-left transition-colors hover:border-blue-500/60 hover:bg-gray-800 disabled:cursor-wait">
