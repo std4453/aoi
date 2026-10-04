@@ -1,3 +1,4 @@
+import { isRemoteSource } from '../../../../shared/task-errors';
 import type { CreateUploadTaskRequest, UploadTask } from '../../../../shared/types';
 import * as pixiv from '../../api/pixiv';
 import * as fanbox from '../../api/fanbox';
@@ -5,6 +6,7 @@ import * as mega from '../../api/mega';
 
 export interface UploadDraft {
   source: UploadTask['source'] | null;
+  isRemote: boolean;
   files: File[];
   name: string;
   url: string;
@@ -13,7 +15,7 @@ export interface UploadDraft {
   tagIds: string[];
 }
 
-const emptyDraft = (): UploadDraft => ({ source: null, files: [], name: '', url: '', sharePassword: '', archivePassword: '', tagIds: [] });
+const emptyDraft = (): UploadDraft => ({ source: null, isRemote: false, files: [], name: '', url: '', sharePassword: '', archivePassword: '', tagIds: [] });
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const defaults = { fetchPixivMetadata: pixiv.fetchPixivMetadata, fetchMegaMetadata: mega.fetchMegaMetadata, fetchFanboxMetadata: fanbox.fetchFanboxMetadata };
 export function createUploadDraft(overrides: Partial<typeof defaults> = {}) {
@@ -40,7 +42,7 @@ export function createUploadDraft(overrides: Partial<typeof defaults> = {}) {
     if (sourceChanged) reset();
     if (!sourceChanged && patch.name !== undefined) nameEdited = true;
     if (patch.tagIds !== undefined) tagsEdited = true;
-    publish({ draft: { ...snapshot.draft, ...patch } });
+    publish({ draft: { ...snapshot.draft, ...patch, isRemote: isRemoteSource(patch.source ?? snapshot.draft.source) } });
     if (!sourceChanged && patch.url === undefined && patch.sharePassword === undefined) return;
     clearTimeout(metadataTimer);
     const revision = ++metadataRevision;
@@ -48,7 +50,7 @@ export function createUploadDraft(overrides: Partial<typeof defaults> = {}) {
     const { source, url, sharePassword } = snapshot.draft;
     publish({ metadataLoading: false, metadataError: null, draft: {
       ...snapshot.draft,
-      ...(!nameEdited && (source === 'mega' || source === 'pixiv' || source === 'fanbox') ? { name: '' } : {}),
+      ...(!nameEdited && snapshot.draft.isRemote ? { name: '' } : {}),
       ...(!tagsEdited ? { tagIds: [] } : {}),
     } });
     const valid = source === 'pixiv'
@@ -79,7 +81,7 @@ export function createUploadDraft(overrides: Partial<typeof defaults> = {}) {
   async function submit(create: (input: CreateUploadTaskRequest, local: { files: File[]; tagIds: string[]; archivePassword?: string }) => Promise<UploadTask>) {
     if (snapshot.starting || !snapshot.draft.source) return;
     const draft = snapshot.draft;
-    const remote = draft.source === 'mega' || draft.source === 'pixiv' || draft.source === 'fanbox';
+    const remote = draft.isRemote;
     clearTimeout(metadataTimer); metadataRevision++;
     publish({ starting: true, error: null });
     try {

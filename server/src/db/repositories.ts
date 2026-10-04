@@ -1,3 +1,4 @@
+import type { TaskErrorCode } from '../../../shared/types.js';
 import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
 import { getDb } from './connection.js';
@@ -392,21 +393,21 @@ export function getJob(id: string): Job | undefined {
   return rowToJob(row);
 }
 
-export function updateJobStatus(id: string, status: Job['status'], progress?: number, error?: string): void {
+export function updateJobStatus(id: string, status: Job['status'], progress?: number, error?: string, errorCode?: TaskErrorCode): void {
   if (status === 'running') {
-    run("UPDATE jobs SET status = ?, progress = ?, started_at = COALESCE(started_at, datetime('now')) WHERE id = ?", [
+    run("UPDATE jobs SET status = ?, progress = ?, error = NULL, error_code = NULL, started_at = COALESCE(started_at, datetime('now')) WHERE id = ?", [
       status,
       progress ?? 0,
       id,
     ]);
   } else if (status === 'completed' || status === 'failed') {
     run(
-      "UPDATE jobs SET status = ?, progress = ?, error = ?, completed_at = datetime('now') WHERE id = ?",
-      [status, progress ?? 0, error ?? null, id]
+      "UPDATE jobs SET status = ?, progress = ?, error = ?, error_code = ?, completed_at = datetime('now') WHERE id = ?",
+      [status, progress ?? 0, error ?? null, status === 'failed' ? errorCode ?? null : null, id]
     );
   } else {
     run(
-      'UPDATE jobs SET status = ?, progress = ?, started_at = NULL, completed_at = NULL, error = NULL WHERE id = ?',
+      'UPDATE jobs SET status = ?, progress = ?, started_at = NULL, completed_at = NULL, error = NULL, error_code = NULL WHERE id = ?',
       [status, progress ?? 0, id]
     );
   }
@@ -490,6 +491,7 @@ function rowToJob(row: any): Job {
   return {
     ...row,
     packId: row.pack_id,
+    errorCode: row.error_code ?? null,
     createdAt: row.created_at,
     startedAt: row.started_at ?? null,
     completedAt: row.completed_at ?? null,

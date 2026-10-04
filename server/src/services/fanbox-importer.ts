@@ -1,3 +1,4 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
 import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
@@ -16,11 +17,11 @@ export async function importFanboxPack(
 ): Promise<void> {
   signal?.throwIfAborted();
   const pack = getPack(packId);
-  if (!pack || pack.originalFormat !== 'fanbox') throw new Error('FANBOX 图包不存在');
+  if (!pack || pack.originalFormat !== 'fanbox') throw new TaskError('SOURCE_UNAVAILABLE', 'FANBOX 图包不存在');
   const { id } = parseFanboxUrl(pack.originalFilename);
   const post = await client.post(id, signal);
   signal?.throwIfAborted();
-  if (!post.media.length) throw new Error('该 FANBOX 帖子没有可导入的图片或视频；文字、压缩包及外部嵌入链接会被跳过');
+  if (!post.media.length) throw new TaskError('NO_SUPPORTED_MEDIA', '该 FANBOX 帖子没有可导入的图片或视频；文字、压缩包及外部嵌入链接会被跳过');
   const dirs = { image: getExtractedImagesDir(packId), video: getExtractedVideosDir(packId) };
   const expected = { image: new Set<string>(), video: new Set<string>() };
   const stats = { imageCount: 0, videoCount: 0, totalImagesSize: 0, totalVideosSize: 0 };

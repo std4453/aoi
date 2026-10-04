@@ -9,9 +9,14 @@ import { jobQueue } from './job-queue.js';
 import { getArchivePath, getUploadPath, ensureDir } from './storage.js';
 import { parseFanboxUrl } from './fanbox-client.js';
 import { parsePixivUrl } from './pixiv-importer.js';
-import { isArchivePasswordError } from './archive-errors.js';
+import { archiveErrorCode, jobFailureCode } from './task-errors.js';
 
 export * from '../db/upload-task-repository.js';
+
+function latestUploadJob(packId: string) {
+  const row = getDb().prepare("SELECT id FROM jobs WHERE pack_id = ? AND type != 'compress' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(packId) as { id: string } | undefined;
+  return row ? getJob(row.id) : undefined;
+}
 
 /** Persist the task, pack and queued download together before starting network work. */
 export function createPixivUploadTask(input: CreateUploadTaskRequest): UploadTask {
@@ -49,16 +54,20 @@ export function syncUploadTask(task: UploadTask): UploadTask {
   let patch: Partial<UploadTask>;
   let processing: UploadTask['processing'];
   if (!pack) {
-    patch = { status: 'failed', error: '图包已被删除' };
+    patch = { status: 'failed', error: '图包已被删除', errorCode: 'SOURCE_UNAVAILABLE' };
   } else if (['extracted', 'generated', 'generating'].includes(pack.status)) {
     patch = { status: 'completed', progress: 100, transferredBytes: task.totalBytes, error: null, matches: [] };
   } else if (pack.status === 'awaiting_confirmation') {
     patch = { status: 'duplicate', matches: getLiveMatches(pack.id), transferredBytes: task.totalBytes, error: null };
   } else if (pack.status === 'failed') {
-    const password = isArchivePasswordError(pack.errorMessage ?? '');
+    const job = latestUploadJob(pack.id);
+    // Pre-migration extraction jobs only have diagnostics; preserve password recovery.
+    const errorCode = job?.errorCode ?? task.errorCode ?? (job?.type === 'extract'
+      ? archiveErrorCode(new Error(job.error || pack.errorMessage || '')) : job ? jobFailureCode(job.type) : 'PROCESSING_FAILED');
+    const password = errorCode === 'PASSWORD_REQUIRED' || errorCode === 'PASSWORD_INCORRECT';
     const interrupted = pack.sourceType === 'folder' && /上传中断/.test(pack.errorMessage ?? '');
     patch = { status: interrupted ? 'needs_file' : password ? 'password' : 'failed',
-      error: pack.errorMessage, ...(password ? { passwordKind: 'archive' as const } : {}) };
+      error: pack.errorMessage, errorCode, ...(password ? { passwordKind: 'archive' as const } : {}) };
   } else if (pack.status === 'uploading' && (task.source === 'pixiv' || task.source === 'fanbox')) {
     const job = getLatestJob(pack.id, task.source);
     const progress = job ? jobQueue.getProgress(job.id) : null;
@@ -157,8 +166,7 @@ export async function retryPackTask(task: UploadTask, archivePassword?: string):
   }
   if (pack.status !== 'failed') throw new Error('仅失败任务可以重试');
   if (task.source === 'pixiv' || task.source === 'fanbox') {
-    const row = getDb().prepare("SELECT id FROM jobs WHERE pack_id = ? AND type != 'compress' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(pack.id) as { id: string } | undefined;
-    const latest = row ? getJob(row.id) : undefined;
+    const latest = latestUploadJob(pack.id);
     if (!latest || ![task.source, 'verify', 'thumbnail'].includes(latest.type)) throw new Error('无法重试此导入任务');
     getDb().transaction(() => {
       if (latest.type === 'verify') scheduleVerification(pack.id);

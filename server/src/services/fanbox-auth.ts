@@ -1,3 +1,4 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
@@ -39,21 +40,21 @@ export function sessionFromCookieFile(text: string, now = Date.now()): string {
         !/^\d+$/.test(expires) || (Number(expires) !== 0 && Number(expires) * 1000 <= now)) continue;
     if (value) sessions.add(validateFanboxSession(value));
   }
-  if (sessions.size !== 1) throw new Error('Cookie 文件中缺少有效且唯一的 FANBOXSESSID，请从已登录的浏览器重新导出');
+  if (sessions.size !== 1) throw new TaskError('AUTH_REQUIRED', 'Cookie 文件中缺少有效且唯一的 FANBOXSESSID，请从已登录的浏览器重新导出');
   return [...sessions][0];
 }
 
 export function readFanboxSettings(): { sessionId: string; source: FanboxSettings['source'] } {
   if (config.fanbox.cookiesFile) {
     try { return { sessionId: sessionFromCookieFile(readBoundedFile(config.fanbox.cookiesFile)), source: 'cookie_file' }; }
-    catch { throw new Error('无法读取有效的 FANBOX Cookie 文件，请检查文件内容、有效期和权限'); }
+    catch { throw new TaskError('AUTH_REQUIRED', '无法读取有效的 FANBOX Cookie 文件，请检查文件内容、有效期和权限'); }
   }
   try {
     const saved = JSON.parse(readBoundedFile(settingsPath())) as { sessionId?: unknown };
     const sessionId = validateFanboxSession(saved.sessionId);
     return { sessionId, source: sessionId ? 'settings' : 'none' };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取 FANBOX 登录配置');
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new TaskError('AUTH_REQUIRED', '无法读取 FANBOX 登录配置');
     const sessionId = validateFanboxSession(config.fanbox.sessionId);
     return { sessionId, source: sessionId ? 'environment' : 'none' };
   }

@@ -1,3 +1,4 @@
+import { taskErrorCode } from './task-errors.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { UploadTask } from '../../../shared/types.js';
@@ -130,7 +131,7 @@ async function runImport(id: string, options: MegaImportOptions, signal: AbortSi
     if (signal.aborted) return;
     const message = error instanceof Error ? error.message : String(error);
     const password = error instanceof MegaPasswordError;
-    updateUploadTask(id, { status: password ? 'password' : 'failed', error: message.slice(0, 1_000),
+    updateUploadTask(id, { status: password ? 'password' : 'failed', error: message.slice(0, 1_000), errorCode: taskErrorCode(error, 'DOWNLOAD_FAILED'),
       ...(password ? { passwordKind: 'share' as const } : {}),
     });
   }

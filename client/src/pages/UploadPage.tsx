@@ -12,7 +12,7 @@ import ImportSources from '../components/ImportSources';
 import { FanboxSettingsDialog, PixivSettingsDialog } from '../components/ExternalSourcesSettings';
 import { ActionRow, Button, IconButton, TextButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../features/uploads/TaskPresentation';
-import { taskNoticeMessage, taskProgressDisplay, taskStates } from '../features/uploads/task-display';
+import { taskNoticeMessage, taskProgressDisplay, taskStates, taskNeedsLogin } from '../features/uploads/task-display';
 import { TaskSurface, TaskActionRow, TaskNotice, TaskTextAction } from '../features/uploads/TaskPresentation';
 import { uploadView, getUploadScrollY, saveUploadScrollY, getHandledRevealRevision, setHandledRevealRevision, taskRevealDelta, scrollWithTaskExpansion } from '../features/uploads/view-state';
 
@@ -157,7 +157,7 @@ function TaskCard({ task }: { task: UploadTask }) {
   };
   const taskFiles = files[task.id] || [];
   const progress = taskProgressDisplay(task);
-  const remote = task.source === 'mega' || task.source === 'pixiv' || task.source === 'fanbox';
+  const remote = task.isRemote;
   const indeterminate = progress.percentage === undefined;
   const showProgress = state.content === 'transfer' || state.content === 'processing';
   return <TaskSurface task={task} expanded={expanded}>
@@ -175,7 +175,7 @@ function TaskCard({ task }: { task: UploadTask }) {
         {showProgress && <div><div className="mb-1.5 flex justify-between gap-3 text-xs leading-4 text-gray-500"><span>{progress.label}{progress.detail && ` · ${progress.detail}`}</span>{!indeterminate && <span className="shrink-0">{progress.percentage}%</span>}</div>
           <div role="progressbar" aria-label={progress.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percentage} className="h-2 overflow-hidden rounded-full bg-gray-800"><div className={`h-full rounded-full bg-blue-500 ${indeterminate ? `w-1/3 ${task.status === 'paused' ? '' : 'animate-pulse'}` : 'transition-all duration-300'}`} style={indeterminate ? undefined : { width: `${progress.percentage}%` }} /></div></div>}
         {notice && <TaskNotice tone={state.tone}>{notice}
-          {(task.source === 'pixiv' || task.source === 'fanbox') && task.status === 'failed' && <> <TextButton disabled={busy} onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}
+          {taskNeedsLogin(task) && <> <TextButton disabled={busy} onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}
         </TaskNotice>}
         {task.status === 'duplicate' && task.matches.length > 0 && <div className="flex flex-col gap-2">
           {task.matches.map(pack => <DuplicateCard key={pack.id} pack={pack} disabled={busy} onSelect={() => navigate(`/packs/${pack.id}`)} />)}

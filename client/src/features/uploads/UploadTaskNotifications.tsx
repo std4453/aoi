@@ -30,7 +30,7 @@ export default function UploadTaskNotifications() {
     }
     for (const id of seen.current.keys()) if (!currentIds.has(id)) seen.current.delete(id);
     for (const task of tasks) {
-      const signature = `${task.status}:${task.error ?? ''}`;
+      const signature = `${task.status}:${task.errorCode ?? ''}:${task.error ?? ''}`;
       const state = taskStates[task.status];
       const message = state.tone === 'neutral' ? undefined : state.label;
       const previous = seen.current.get(task.id);

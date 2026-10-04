@@ -1,10 +1,11 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { PassThrough, Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { API, File as MegaFile } from 'megajs';
-import type { MegaMetadata } from '../../../shared/types.js';
+import type { MegaMetadata, TaskErrorCode } from '../../../shared/types.js';
 import { config } from '../config.js';
 import { normalizeRelativePath, resolveWithin } from './safe-path.js';
 import { MegaPasswordError, resolveMegaUrl } from './mega-link.js';
@@ -19,7 +20,7 @@ export interface MegaDownloadResult {
 }
 
 function safeName(name: string | null): string {
-  if (!name) throw new MegaPasswordError('无法解密 MEGA 文件名，请检查分享密钥');
+  if (!name) throw new MegaPasswordError('无法解密 MEGA 文件名，请检查分享密钥', 'PASSWORD_INCORRECT');
   const value = normalizeRelativePath(name, 'MEGA filename');
   if (value.includes('/') || /[:*?"<>|]/.test(value) || /[. ]$/.test(value) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value)) {
     throw new Error('MEGA 分享包含不安全的文件名');
@@ -33,7 +34,7 @@ export function planMegaFiles(root: MegaFile): Array<{ file: MegaFile; relativeP
   const paths = new Set<string>();
   let total = 0;
   function visit(file: MegaFile, prefix: string, depth: number): void {
-    if (depth > 128 || visited.has(file) || visited.size >= config.maxArchiveEntries) throw new Error('MEGA 分享目录层级或文件数量超出限制');
+    if (depth > 128 || visited.has(file) || visited.size >= config.maxArchiveEntries) throw new TaskError('RESOURCE_LIMIT', 'MEGA 分享目录层级或文件数量超出限制');
     visited.add(file);
     const relativePath = normalizeRelativePath(prefix + safeName(file.name));
     const identity = relativePath.toLowerCase();
@@ -44,7 +45,7 @@ export function planMegaFiles(root: MegaFile): Array<{ file: MegaFile; relativeP
     } else {
       if (!Number.isSafeInteger(file.size) || file.size! < 0) throw new Error('MEGA 文件大小无效');
       total += file.size!;
-      if (!Number.isSafeInteger(total) || total > (root.directory ? config.maxExtractedSize : config.maxUploadSize)) throw new Error('MEGA 分享超过导入大小限制');
+      if (!Number.isSafeInteger(total) || total > (root.directory ? config.maxExtractedSize : config.maxUploadSize)) throw new TaskError('RESOURCE_LIMIT', 'MEGA 分享超过导入大小限制');
       result.push({ file, relativePath, fileSize: file.size! });
     }
   }
@@ -87,14 +88,14 @@ async function withMegaShare<T>(options: MegaShareOptions,
       : Math.min(64 * 1024 * 1024, Math.max(1024 * 1024, config.maxArchiveEntries * 2_048));
     if (Number(response.headers.get('content-length')) > maxBytes) {
       await response.body?.cancel();
-      throw new Error('MEGA 响应超过资源限制');
+      throw new TaskError('RESOURCE_LIMIT', 'MEGA 响应超过资源限制');
     }
     if (!response.body) return response;
     let received = 0;
     const bounded = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, sink) {
         received += chunk.byteLength;
-        if (received > maxBytes) throw new Error('MEGA 响应超过资源限制');
+        if (received > maxBytes) throw new TaskError('RESOURCE_LIMIT', 'MEGA 响应超过资源限制');
         sink.enqueue(chunk);
       },
     }));
@@ -113,8 +114,13 @@ async function withMegaShare<T>(options: MegaShareOptions,
     return await consume(root, api, operationSignal);
   } catch (error) {
     if (error instanceof Error && /attributes could not be decrypted/i.test(error.message)) {
-      throw new MegaPasswordError('MEGA 解密密钥错误');
+      throw new MegaPasswordError('MEGA 解密密钥错误', 'PASSWORD_INCORRECT');
     }
+    // MEGAJS exposes protocol error identifiers in the message, not Error.code.
+    const identifier = error instanceof Error ? /^([A-Z]+) \(-\d+\)/.exec(error.message)?.[1] : undefined;
+    const codes: Record<string, TaskErrorCode> = { EOVERQUOTA: 'SOURCE_QUOTA', ESHAREROVERQUOTA: 'SOURCE_QUOTA',
+      ERATELIMIT: 'RATE_LIMITED', EAGAIN: 'NETWORK_ERROR', ENOENT: 'SOURCE_UNAVAILABLE' };
+    if (identifier && codes[identifier]) throw new TaskError(codes[identifier], (error as Error).message);
     throw error;
   } finally {
     // Public API(false) has no keepalive. Aborting also stops in-flight chunk fetches;
@@ -155,7 +161,7 @@ export async function downloadMegaShare(options: MegaShareOptions & {
     };
     const remainingBytes = entries.reduce((sum, entry) => sum + (isComplete(entry) ? 0 : entry.fileSize), 0);
     const space = await fs.promises.statfs(options.destination);
-    if (remainingBytes > Number(space.bavail) * Number(space.bsize)) throw new Error('磁盘剩余空间不足');
+    if (remainingBytes > Number(space.bavail) * Number(space.bsize)) throw new TaskError('STORAGE_FULL', '磁盘剩余空间不足');
     let transferredBytes = 0;
     const progress = () => options.onProgress?.({ name, kind: root.directory ? 'folder' : 'archive', totalBytes, transferredBytes });
     progress();
@@ -173,7 +179,7 @@ export async function downloadMegaShare(options: MegaShareOptions & {
       let received = 0;
       const meter = new Transform({ transform(chunk: Buffer, _encoding, callback) {
         received += chunk.length;
-        if (received > entry.fileSize) return callback(new Error('MEGA 实际文件大小超出声明值'));
+        if (received > entry.fileSize) return callback(new TaskError('RESOURCE_LIMIT', 'MEGA 实际文件大小超出声明值'));
         transferredBytes += chunk.length;
         progress();
         callback(null, chunk);

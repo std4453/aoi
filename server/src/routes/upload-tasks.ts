@@ -1,3 +1,4 @@
+import { isTaskErrorCode } from '../../../shared/task-errors.js';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
 import type { CreateUploadTaskRequest, UploadTask } from '../../../shared/types.js';
@@ -57,11 +58,11 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });
-  fastify.patch<{ Params: { id: string }; Body: { uploadId?: string; packId?: string; progress?: number; transferredBytes?: number; status?: UploadTask['status']; error?: string | null } }>('/api/upload-tasks/:id', async (request, reply) => {
+  fastify.patch<{ Params: { id: string }; Body: { uploadId?: string; packId?: string; progress?: number; transferredBytes?: number; status?: UploadTask['status']; error?: string | null; errorCode?: UploadTask['errorCode'] } }>('/api/upload-tasks/:id', async (request, reply) => {
     const task = getSyncedUploadTask(request.params.id);
     if (!task) return reply.code(404).send({ error: 'Upload task not found' });
     try {
-      if (['mega', 'pixiv', 'fanbox'].includes(task.source) || ['completed', 'processing', 'duplicate', 'password'].includes(task.status)) throw new Error('Task is controlled by the server');
+      if (task.isRemote || ['completed', 'processing', 'duplicate', 'password'].includes(task.status)) throw new Error('Task is controlled by the server');
       const input = request.body ?? {};
       const patch: Partial<UploadTask> = {};
       if (input.uploadId !== undefined) {
@@ -91,6 +92,11 @@ export const registerUploadTaskRoutes: FastifyPluginAsync = async fastify => {
         if (input.error !== null && (typeof input.error !== 'string' || input.error.length > 4_096)) throw new Error('Invalid error');
         patch.error = input.error;
       }
+      if (input.errorCode !== undefined) {
+        if (input.errorCode !== null && !isTaskErrorCode(input.errorCode)) throw new Error('Invalid error code');
+        patch.errorCode = input.errorCode;
+      }
+      if (patch.status === 'failed' && !patch.errorCode) patch.errorCode = 'UPLOAD_FAILED';
       if (patch.status === 'uploading' && task.status === 'needs_file' && task.packId) {
         const pack = getPack(task.packId);
         if (pack?.sourceType === 'folder' && pack.status === 'failed') updatePackStatus(pack.id, 'uploading');

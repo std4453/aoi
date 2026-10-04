@@ -1,3 +1,4 @@
+import { archiveErrorCode, jobFailureCode, taskErrorCode } from './task-errors.js';
 import { config } from '../config.js';
 import { beginMutation } from '../replication/state.js';
 import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification.js';
@@ -147,7 +148,7 @@ class JobQueue extends EventEmitter {
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
-      updateJobStatus(job.id, 'failed', 0, message);
+      updateJobStatus(job.id, 'failed', 0, message, job.type === 'extract' ? archiveErrorCode(err) : taskErrorCode(err, jobFailureCode(job.type)));
       console.error(`Job ${job.id} failed:`, message);
 
       try {

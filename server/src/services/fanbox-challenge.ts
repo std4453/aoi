@@ -1,8 +1,9 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import { fetch, Headers, Response, type Dispatcher } from 'undici';
 import { validateFanboxSession } from './fanbox-auth.js';
 
 const maxResponseBytes = 16 * 1024 * 1024;
-const failed = () => new Error('FlareSolverr 未能通过 FANBOX 验证，请稍后重试');
+const failed = () => new TaskError('CHALLENGE_FAILED', 'FlareSolverr 未能通过 FANBOX 验证，请稍后重试');
 
 /** Chromium renders JSON inside a pre element. Decode text only; never execute returned HTML. */
 function jsonText(value: string): string {
@@ -31,7 +32,7 @@ export class FanboxChallengeClient implements FanboxChallengeResolver {
     if (!/^https:\/\/api\.fanbox\.cc\/post\.info\?postId=[1-9]\d{0,19}$/.test(url)) throw failed();
     validateFanboxSession(sessionId);
     signal?.throwIfAborted();
-    if (this.busy) throw new Error('FANBOX 验证正在进行，请稍后重试');
+    if (this.busy) throw new TaskError('CHALLENGE_FAILED', 'FANBOX 验证正在进行，请稍后重试');
     this.busy = true;
     let response: Response | undefined;
     // Keep the slot until the service's maximum solve time, even if the caller cancels.

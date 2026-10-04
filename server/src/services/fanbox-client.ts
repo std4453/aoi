@@ -1,3 +1,4 @@
+import { TaskError } from '../../../shared/task-errors.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -47,8 +48,8 @@ const postSchema = z.object({
   user: z.object({ name: z.string().max(10000) }).nullish(), type: z.string().optional(),
   isRestricted: z.boolean().optional(), body: bodySchema.nullish(),
 });
-const accessError = () => new Error('FANBOX 帖子不可访问');
-const verificationError = () => new Error('FANBOX 拦截了服务器请求，请稍后重试');
+const accessError = () => new TaskError('ACCESS_DENIED', 'FANBOX 帖子不可访问');
+const verificationError = () => new TaskError('SOURCE_BLOCKED', 'FANBOX 拦截了服务器请求，请稍后重试');
 const cleanText = (value: string) => value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
 
 export function extractFanboxPost(raw: unknown, id: string): FanboxPost {
@@ -73,7 +74,7 @@ export function extractFanboxPost(raw: unknown, id: string): FanboxPost {
     if (seen.has(url.href)) return;
     seen.add(url.href);
     media.push({ url: url.href, extension, category });
-    if (media.length > 1000) throw new Error('FANBOX 帖子资源过多');
+    if (media.length > 1000) throw new TaskError('RESOURCE_LIMIT', 'FANBOX 帖子资源过多');
   }
   if (body.blocks) {
     for (const block of body.blocks ?? []) {
@@ -121,7 +122,7 @@ export class FanboxClient {
           ...(!media ? { Accept: 'application/json' } : {}),
         },
       });
-    } catch { signal?.throwIfAborted(); throw new Error('无法连接 FANBOX，请检查服务端网络或 AOI_PROXY_URL'); }
+    } catch { signal?.throwIfAborted(); throw new TaskError('NETWORK_ERROR', '无法连接 FANBOX，请检查服务端网络或 AOI_PROXY_URL'); }
     const contentType = response.headers.get('content-type') ?? '';
     const blocked = response.headers.get('cf-mitigated') === 'challenge' ||
       (response.status === 403 && !contentType.includes('application/json')) ||
@@ -135,8 +136,8 @@ export class FanboxClient {
       await response.body?.cancel();
       if (response.status === 403 && !response.headers.get('content-type')?.includes('application/json')) throw verificationError();
       if ([401, 403].includes(response.status)) throw accessError();
-      if (response.status === 404) throw new Error('FANBOX 帖子或资源不存在，可能已删除或无权访问');
-      if (response.status === 429) throw new Error('FANBOX 请求过于频繁，请稍后重试');
+      if (response.status === 404) throw new TaskError('ACCESS_DENIED', 'FANBOX 帖子或资源不存在，可能已删除或无权访问');
+      if (response.status === 429) throw new TaskError('RATE_LIMITED', 'FANBOX 请求过于频繁，请稍后重试');
       throw new Error(`FANBOX 请求失败（HTTP ${response.status}）`);
     }
     if (!media && sessionId) {
@@ -154,7 +155,7 @@ export class FanboxClient {
       let bytes = 0;
       for await (const chunk of response.body!) {
         bytes += chunk.length;
-        if (bytes > 8 * 1024 * 1024) throw new Error('FANBOX 响应过大');
+        if (bytes > 8 * 1024 * 1024) throw new TaskError('RESOURCE_LIMIT', 'FANBOX 响应过大');
         chunks.push(chunk);
       }
       let envelope: { body?: unknown; error?: unknown };
@@ -169,18 +170,18 @@ export class FanboxClient {
   }
 
   async download(media: FanboxMedia, destination: string, limit: number, signal?: AbortSignal): Promise<number> {
-    if (limit <= 0) throw new Error('FANBOX 资源超出导入大小限制');
+    if (limit <= 0) throw new TaskError('RESOURCE_LIMIT', 'FANBOX 资源超出导入大小限制');
     const response = await this.request(media.url, true, signal);
     const temporary = `${destination}.part`;
     let size = 0;
     try {
       const mime = response.headers.get('content-type')?.split(';')[0].toLowerCase() ?? '';
       if (!(mime.startsWith(`${media.category}/`) || mime === 'application/octet-stream')) throw new Error('FANBOX 返回的文件类型与资源不符');
-      if (Number(response.headers.get('content-length')) > limit) throw new Error('FANBOX 资源超出导入大小限制');
+      if (Number(response.headers.get('content-length')) > limit) throw new TaskError('RESOURCE_LIMIT', 'FANBOX 资源超出导入大小限制');
       await pipeline(Readable.fromWeb(response.body! as Parameters<typeof Readable.fromWeb>[0]),
         new Transform({ transform(chunk: Buffer, _encoding, callback) {
           size += chunk.length;
-          callback(size > limit ? new Error('FANBOX 资源超出导入大小限制') : null, chunk);
+          callback(size > limit ? new TaskError('RESOURCE_LIMIT', 'FANBOX 资源超出导入大小限制') : null, chunk);
         } }), fs.createWriteStream(temporary), { signal });
       if (!size) throw new Error('FANBOX 返回了空资源');
       if (media.category === 'image') {
