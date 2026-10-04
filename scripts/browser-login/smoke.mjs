@@ -57,6 +57,25 @@ try {
   assert.equal((await viewerRequest('/sessions', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'X-Forwarded-Proto': 'http' } })).status, 404);
   assert.equal((await viewerRequest('/')).status, 401);
   let session = await begin(false);
+  const brokerPid = (await run(['exec', id, 'pgrep', '-x', 'node'])).stdout.trim();
+  // Reset CONNECT clients while the configured upstream rejects them. The broker
+  // must survive these socket errors without s6 restarting it or ending the session.
+  await run(['exec', id, 'node', '--input-type=module', '-e', String.raw`
+    import net from 'node:net';
+    for (let attempt = 0; attempt < 100; attempt++) {
+      await new Promise(resolve => {
+        const socket = net.connect(9223, '127.0.0.1', () => {
+          socket.write('CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n',
+            () => setTimeout(() => socket.resetAndDestroy(), 1));
+        });
+        socket.on('error', () => {});
+        socket.on('close', resolve);
+      });
+    }
+  `]);
+  assert.equal((await run(['exec', id, 'pgrep', '-x', 'node'])).stdout.trim(), brokerPid);
+  assert.equal((await (await request('/health')).json()).active, true);
+  console.log('PASS CONNECT resets preserve the broker and active session');
   assert.equal((await request(`/sessions/${session.id}/capture`, 'POST')).status, 409);
   const attached = await viewerRequest('/attach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: session.launchToken }) });
   assert.equal(attached.status, 200);
