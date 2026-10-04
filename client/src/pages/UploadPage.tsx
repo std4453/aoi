@@ -116,7 +116,8 @@ function UploadForm() {
       {metadataError && <div className="text-xs text-amber-400" role="status">{metadataError}
         {(draft.source === 'pixiv' || draft.source === 'fanbox') && <> <TextButton onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}</div>}
       <TextInput value={draft.name} onChange={event => setDraft({ name: event.target.value })} aria-label="图包名称"
-        placeholder={remote ? '图包名称（自动使用分享标题）' : '图包名称'} maxLength={200} disabled={starting} />
+        placeholder={draft.source === 'pixiv' ? '图包名称（自动使用作品标题）' : draft.source === 'fanbox' ? '图包名称（自动使用投稿标题）'
+          : remote ? '图包名称（自动使用分享标题）' : '图包名称'} maxLength={200} disabled={starting} />
       {!remote && <p className="text-xs text-gray-500">{draft.source === 'folder' ? `${draft.files.length} 个文件` : draft.files[0]?.name} · {formatBytes(draft.files.reduce((sum, file) => sum + file.size, 0))}</p>}
       {draft.source === 'mega' && <PasswordInput value={draft.sharePassword} onChange={sharePassword => setDraft({ sharePassword })} placeholder="分享密码 / 解密密钥" disabled={starting} />}
       {(draft.source === 'archive' || draft.source === 'mega') && <PasswordInput value={draft.archivePassword} onChange={archivePassword => setDraft({ archivePassword })} placeholder="压缩包密码" disabled={starting} />}
