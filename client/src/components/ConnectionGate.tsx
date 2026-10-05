@@ -176,11 +176,11 @@ export default function ConnectionGate({ children }: { children: ReactNode }) {
                 <button type="button" onClick={() => void connect(server)} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-gray-800/50">
                   {connectingId === server.id ? <Loader2 size={20} className="shrink-0 animate-spin text-blue-400" /> : <Server size={20} className="shrink-0 text-gray-500" />}
                   <span className="min-w-0">
-                    <span className="block truncate font-medium">{server.alias}</span>
-                    <span className="flex items-center text-xs text-gray-500 mt-1">
-                      <span className="truncate">{server.address}</span>
+                    <span className="flex items-center font-medium">
+                      <span className="truncate">{server.alias}</span>
                       <ServerRoleTag role={healthByAddress[server.address]?.role ?? server.role} writable={healthByAddress[server.address]?.writable ?? server.writable} />
                     </span>
+                    <span className="block truncate text-xs text-gray-500 mt-1">{server.address}</span>
                   </span>
                 </button>
                 <button type="button" aria-label={`编辑 ${server.alias}`} title="编辑服务器" onClick={() => navigate(`/servers/edit/${server.id}`)} className="p-2.5 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white">
