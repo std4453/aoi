@@ -1,4 +1,3 @@
-import MegaSettingsDialog from '../../components/MegaSettingsDialog';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUploadTasks } from './useUploadTasks';
@@ -6,6 +5,7 @@ import { showError } from '../../components/Toast';
 import { showTaskToast, type TaskToastHandle } from './TaskToast';
 import FanboxSettingsDialog from '../../components/FanboxSettingsDialog';
 import PixivSettingsDialog from '../../components/PixivSettingsDialog';
+import MegaSettingsDialog from '../../components/MegaSettingsDialog';
 import type { UploadTask } from '../../../../shared/types';
 import { uploadView } from './view-state';
 import { taskStates, taskNeedsLogin } from './task-display';

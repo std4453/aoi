@@ -1,4 +1,3 @@
-import MegaSettingsDialog from '../components/MegaSettingsDialog';
 import UploadForm, { draftTitle } from '../features/uploads/UploadForm';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +9,7 @@ import { PasswordInput } from '../components/Form';
 import PackProcessingResult from '../features/uploads/PackProcessingResult';
 import FanboxSettingsDialog from '../components/FanboxSettingsDialog';
 import PixivSettingsDialog from '../components/PixivSettingsDialog';
+import MegaSettingsDialog from '../components/MegaSettingsDialog';
 import { Button, IconButton, TextButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../features/uploads/TaskPresentation';
 import { taskNoticeMessage, taskProgressDisplay, taskStates, taskNeedsLogin } from '../features/uploads/task-display';

@@ -1,4 +1,3 @@
-import MegaSettingsDialog from '../../components/MegaSettingsDialog';
 import { useId, useState } from 'react';
 import { useUploadDraft } from './useUploadTasks';
 import { formatBytes } from '../../lib/utils';
@@ -6,6 +5,7 @@ import { TextInput, PasswordInput } from '../../components/Form';
 import TagSelectField from '../../components/TagSelectField';
 import FanboxSettingsDialog from '../../components/FanboxSettingsDialog';
 import PixivSettingsDialog from '../../components/PixivSettingsDialog';
+import MegaSettingsDialog from '../../components/MegaSettingsDialog';
 import { ActionRow, Button, TextButton } from '../../components/Button';
 
 export default function UploadDraftForm({ scanning, error, onCancel }: {
