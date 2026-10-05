@@ -5,6 +5,7 @@ import { TextInput, PasswordInput } from '../../components/Form';
 import TagSelectField from '../../components/TagSelectField';
 import FanboxSettingsDialog from '../../components/FanboxSettingsDialog';
 import PixivSettingsDialog from '../../components/PixivSettingsDialog';
+import MegaSettingsDialog from '../../components/MegaSettingsDialog';
 import { ActionRow, Button, TextButton } from '../../components/Button';
 
 export default function UploadDraftForm({ scanning, error, onCancel }: {
@@ -25,7 +26,7 @@ export default function UploadDraftForm({ scanning, error, onCancel }: {
           {metadataLoading && <span role="status" className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-500">识别中…</span>}
         </div>}
         {metadataError && <div className="text-xs text-amber-400" role="status">{metadataError}
-          {(draft.source === 'pixiv' || draft.source === 'fanbox') && <> <TextButton onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}</div>}
+          {draft.isRemote && <> <TextButton onClick={() => setSettings(!settings)} aria-expanded={settings}>配置登录</TextButton></>}</div>}
         <TextInput value={draft.name} onChange={event => setDraft({ name: event.target.value })} aria-label="图包名称"
           placeholder={draft.source === 'pixiv' ? '图包名称（自动使用作品标题）' : draft.source === 'fanbox' ? '图包名称（自动使用投稿标题）'
             : remote ? '图包名称（自动使用分享标题）' : '图包名称'} maxLength={200} disabled={starting} />
@@ -40,5 +41,6 @@ export default function UploadDraftForm({ scanning, error, onCancel }: {
     </form>
     {settings && draft.source === 'pixiv' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
     {settings && draft.source === 'fanbox' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
+    {settings && draft.source === 'mega' && <MegaSettingsDialog onClose={() => setSettings(false)} onSaved={() => setDraft({ url: draft.url })} />}
   </>;
 }

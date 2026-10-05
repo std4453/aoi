@@ -5,6 +5,7 @@ import { showError } from '../../components/Toast';
 import { showTaskToast, type TaskToastHandle } from './TaskToast';
 import FanboxSettingsDialog from '../../components/FanboxSettingsDialog';
 import PixivSettingsDialog from '../../components/PixivSettingsDialog';
+import MegaSettingsDialog from '../../components/MegaSettingsDialog';
 import type { UploadTask } from '../../../../shared/types';
 import { uploadView } from './view-state';
 import { taskStates, taskNeedsLogin } from './task-display';
@@ -73,5 +74,5 @@ export default function UploadTaskNotifications() {
     void resume(loginTask.id).catch(error => showError(error instanceof Error ? error.message : '重试失败'));
   };
   return loginTask?.source === 'pixiv' ? <PixivSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} />
-    : loginTask?.source === 'fanbox' ? <FanboxSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : null;
+    : loginTask?.source === 'fanbox' ? <FanboxSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : loginTask?.source === 'mega' ? <MegaSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : null;
 }

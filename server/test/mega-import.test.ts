@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { encrypt, type File as MegaFile } from 'megajs';
+import { encrypt, type File as MegaFile } from '@std4453/megajs';
 import { MegaPasswordError, resolveMegaUrl, validateMegaUrl } from '~/services/mega-link';
 import { describeMegaShare, downloadMegaShare, megaShareTitle, planMegaFiles } from '~/services/mega-download';
 
@@ -163,10 +163,14 @@ test('MEGA downloader verifies full content, reuses finished files and rejects c
     assert.equal(fs.existsSync(path.join(directory, 'corrupt', 'contents', 'photos.zip')), false);
     corrupt = false;
     storageUrl = 'https://127.0.0.1/private';
-    await assert.rejects(downloadMegaShare({ ...options, destination: path.join(directory, 'untrusted') }), /不受信任/);
+    await assert.rejects(downloadMegaShare({ ...options, destination: path.join(directory, 'untrusted') }), {
+      code: 'SOURCE_UNAVAILABLE', message: 'MEGA 返回了不受信任的下载地址',
+    });
     storageUrl = 'https://storage.mega.co.nz/content';
     oversized = true;
-    await assert.rejects(downloadMegaShare({ ...options, destination: path.join(directory, 'oversized') }), /资源限制/);
+    await assert.rejects(downloadMegaShare({ ...options, destination: path.join(directory, 'oversized') }), {
+      code: 'RESOURCE_LIMIT', message: 'MEGA 响应超过资源限制',
+    });
   } finally {
     globalThis.fetch = originalFetch;
     fs.rmSync(directory, { recursive: true, force: true });

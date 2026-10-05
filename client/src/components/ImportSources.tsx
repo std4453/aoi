@@ -1,3 +1,5 @@
+import type { ComponentType } from 'react';
+import type { RemoteTaskType } from '../../../shared/types';
 import { IconButton } from './Button';
 import fanboxIcon from '../assets/fanbox.png';
 
@@ -18,10 +20,9 @@ export function FanboxIcon({ className = 'w-10 h-10' }: { className?: string }) 
   return <img src={fanboxIcon} className={className} alt="" aria-hidden="true" />;
 }
 
-const sources = [{ id: 'pixiv', label: 'Pixiv', Icon: PixivIcon }, { id: 'mega', label: 'MEGA', Icon: MegaIcon }, { id: 'fanbox', label: 'FANBOX', Icon: FanboxIcon }] as const;
-type Source = typeof sources[number]['id'];
+const sources = [{ id: 'pixiv', label: 'Pixiv', Icon: PixivIcon }, { id: 'mega', label: 'MEGA', Icon: MegaIcon }, { id: 'fanbox', label: 'FANBOX', Icon: FanboxIcon }] satisfies Array<{ id: RemoteTaskType; label: string; Icon: ComponentType<{ className?: string }> }>;
 
-export default function ImportSources({ onSelect, title = '导入自', card = false, compact = false, configuredSources = [], availableSources = ['pixiv'] }: { onSelect: (source: Source) => void; title?: string; card?: boolean; compact?: boolean; configuredSources?: readonly string[]; availableSources?: readonly Source[] }) {
+export default function ImportSources({ onSelect, title = '导入自', card = false, compact = false, configuredSources = [], availableSources = ['pixiv'] }: { onSelect: (source: RemoteTaskType) => void; title?: string; card?: boolean; compact?: boolean; configuredSources?: readonly RemoteTaskType[]; availableSources?: readonly RemoteTaskType[] }) {
   return <section className={compact ? 'mt-2 flex flex-wrap items-center justify-center gap-2' : card ? 'mt-3 bg-gray-900 rounded-xl p-4 border border-gray-800' : 'mt-6'} aria-label={title}>
     <h3 className={compact ? 'shrink-0 text-xs text-gray-500' : card ? 'text-sm font-medium text-white mb-3' : 'text-sm text-gray-500 mb-3'}>{title}</h3>
     <div className={compact ? 'flex flex-wrap gap-1' : 'flex flex-wrap gap-3'}>

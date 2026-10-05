@@ -38,6 +38,24 @@ ugoira 保存为独立 `.ugoira` 文件，属于逻辑图片媒体（API `mediaT
 
 Pixiv 和 FANBOX 均支持可选的官方浏览器登录，默认未启用。启用后可在配置弹窗中启动独立浏览器会话，手动完成官方登录后自动保存凭据；仍可切换手动输入。Pixiv 网页会话可供后续 FANBOX 官方授权复用，独立于 App refresh token。Chromium、Selkies 和会话管理打包为单个常驻容器，登录时只启停内部进程，不创建容器或 Pod。配置、K8s 部署边界和本地验证见 [浏览器登录服务](docs/browser-login-local.md)。
 
+### MEGA 账号与下载
+
+MEGA 分享默认可以匿名导入；也可以在「设置 → 外部来源 → MEGA」输入邮箱、密码和可选的二次验证码。登录后，分享元数据及下载票据请求使用该账号的会话，下载资源仍通过 `AOI_PROXY_URL`。密码和验证码只用于当次登录；持久化的 `DATA_DIR/mega-settings.json` 仅含会话 ID，权限为 `0600`，不保存网盘主密钥，不加载账号网盘目录。会话失效后，导入任务提示重新登录；不会静默改成匿名下载。清除登录态会撤销有效会话；未配置账号时沿用匿名导入。
+
+账号登录采用 MEGAJS 的 V1/V2 登录协议，不是 OAuth，也不复用 Pixiv/FANBOX 的浏览器登录。会话失效后需重新输入账号信息；本轮没有实现自动续期。下载额度仍由 MEGA 决定，登录并不保证额度或速度提升。
+
+服务端固定依赖 npm 包 `@std4453/megajs@1.3.10-beta.0`（`std4453/mega` fork，MIT）：分块保持有界预取，支持 CloudRAID 的五份数据加一份校验分片重组，完整下载仍验证 MAC。包内包含已构建的 Node.js 和浏览器产物，CI 和 Docker 通过锁文件安装，无需安装 Git 或现场构建该依赖。没有下载地址日志或探测请求。
+
+| 环境变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `MEGA_MAX_CONNECTIONS` | `8` | 同时预取的逻辑分块数，范围 2–16 |
+| `MEGA_INITIAL_CHUNK_SIZE` | `3355440` | 起始逻辑分块字节数 |
+| `MEGA_CHUNK_SIZE_INCREMENT` | `0` | 每块增长字节数，0 表示固定大小 |
+| `MEGA_MAX_CHUNK_SIZE` | `3355440` | 逻辑分块上限，最大 16 MiB |
+| `MEGA_CLOUD_RAID` | `true` | 请求支持 CloudRAID 的下载票据；设为 false 可使用普通票据 |
+
+CloudRAID 每个逻辑分块最多产生六个并发 HTTP 请求，获得五份有效分片后取消剩余请求。降低并发数可以减少内存和连接占用；起始分块不能超过最大分块。
+
 ### FANBOX 导入配置
 
 「导入自 → FANBOX」导入单个帖子内受支持的图片和视频，跳过文字、压缩包、封面和外部嵌入链接；复用上传任务、进度、去重确认、重试与重启恢复。需要登录时，在「设置 → 外部来源 → FANBOX」提供浏览器 Cookie 中的 `FANBOXSESSID` 值；配置弹窗支持按需回填，普通状态查询不返回凭据。
@@ -98,7 +116,7 @@ MEGA 导入接受 `https://mega.nz/file/…#…`、`https://mega.nz/folder/…#�
 
 输入链接后自动识别文件或文件夹标题，压缩包标题去掉扩展名；手工修改优先，提前提交也会在后台补齐默认标题。MEGA 公开分享未提供可靠的分享者显示名或作品标签，因此不自动生成作者标签。两个密码字段均支持显示／隐藏。
 
-公开分享通过服务端的 `megajs` 1.3.8（MIT）匿名读取，无需配置 MEGA 账号或登录凭证；下载仍受 MEGA 的访问、流量和限额约束。服务器须能够出站访问 MEGA HTTPS API 和存储节点。下载中断后复用已完整下载并通过 MAC 校验的文件，未完成的单个文件会重新下载以校验完整内容。导入复用 `MAX_UPLOAD_SIZE`、`MAX_EXTRACTED_SIZE` 和 `MAX_ARCHIVE_ENTRIES` 限制。
+公开分享通过服务端的 `@std4453/megajs`（MIT）读取，默认匿名，也可选用已配置的 MEGA 账号；下载仍受 MEGA 的访问、流量和限额约束。服务器须能够出站访问 MEGA HTTPS API 和存储节点。下载中断后复用已完整下载并通过 MAC 校验的文件，未完成的单个文件会重新下载以校验完整内容。导入复用 `MAX_UPLOAD_SIZE`、`MAX_EXTRACTED_SIZE` 和 `MAX_ARCHIVE_ENTRIES` 限制。
 
 需要代理时，设置服务端 `AOI_PROXY_URL` 后启动或重启服务。例如 PowerShell：
 

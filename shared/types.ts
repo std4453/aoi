@@ -342,3 +342,14 @@ export interface PackSnapshotIndex {
   datasetId: string;
   packs: Array<{ id: string; state: 'ready'; revision: string } | { id: string; state: 'pending' }>;
 }
+
+/** Account session metadata only; credentials are never returned by the API. */
+export interface MegaSettings {
+  configured: boolean;
+  expired: boolean;
+}
+export interface MegaLoginInput {
+  email: string;
+  password: string;
+  secondFactorCode?: string;
+}

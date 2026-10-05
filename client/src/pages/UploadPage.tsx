@@ -9,6 +9,7 @@ import { PasswordInput } from '../components/Form';
 import PackProcessingResult from '../features/uploads/PackProcessingResult';
 import FanboxSettingsDialog from '../components/FanboxSettingsDialog';
 import PixivSettingsDialog from '../components/PixivSettingsDialog';
+import MegaSettingsDialog from '../components/MegaSettingsDialog';
 import { Button, IconButton, TextButton } from '../components/Button';
 import { TaskSourceTitle, TaskSummaryContent } from '../features/uploads/TaskPresentation';
 import { taskNoticeMessage, taskProgressDisplay, taskStates, taskNeedsLogin } from '../features/uploads/task-display';
@@ -76,6 +77,7 @@ function TaskCard({ task }: { task: UploadTask }) {
           </div>)}</div>}</div>}
         {settings && task.source === 'pixiv' && task.status === 'failed' && <PixivSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
         {settings && task.source === 'fanbox' && task.status === 'failed' && <FanboxSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
+        {settings && task.source === 'mega' && task.status === 'failed' && <MegaSettingsDialog onClose={() => setSettings(false)} onSaved={() => { void run(() => resume(task.id)); }} />}
         <input ref={input} type="file" className="hidden" {...(task.source === 'folder' ? { webkitdirectory: '', directory: '' } : { accept: '.zip,.rar,.7z' })}
           onChange={event => { const selected = Array.from(event.target.files || []); event.target.value = ''; if (selected.length) void run(() => reselect(task.id, selected)); }} />
         {busy && <p role="status" className="sr-only">正在处理…</p>}

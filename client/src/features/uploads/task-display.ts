@@ -46,7 +46,7 @@ export function taskProgressDisplay(task: UploadTask): { label: string; detail?:
 
 /** The service decides whether credentials or permissions need user attention. */
 export function taskNeedsLogin(task: UploadTask): boolean {
-  return task.status === 'failed' && (task.source === 'pixiv' || task.source === 'fanbox') &&
+  return task.status === 'failed' && task.isRemote &&
     (task.errorCategory === 'authentication' || task.errorCategory === 'access');
 }
 
