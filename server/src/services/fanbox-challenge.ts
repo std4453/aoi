@@ -1,4 +1,4 @@
-import { TaskError } from '../../../shared/task-errors';
+import { TaskError } from '~/task-errors';
 import { fetch, Headers, Response, type Dispatcher } from 'undici';
 import { validateFanboxSession } from './fanbox-auth';
 

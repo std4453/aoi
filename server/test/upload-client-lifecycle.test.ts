@@ -1,4 +1,4 @@
-import { isRemoteSource } from '../../shared/task-errors';
+import { isRemoteSource } from '~/task-errors';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setImmediate as tick } from 'node:timers/promises';

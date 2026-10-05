@@ -1,4 +1,4 @@
-import { TaskError } from '../../../shared/task-errors';
+import { TaskError } from '~/task-errors';
 import fs from 'node:fs';
 import { config } from '~/config';
 import { getDb } from '~/db/connection';

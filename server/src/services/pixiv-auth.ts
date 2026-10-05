@@ -1,4 +1,4 @@
-import { TaskError } from '../../../shared/task-errors';
+import { TaskError } from '~/task-errors';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fetch, ProxyAgent, type Dispatcher, type Response } from 'undici';

@@ -1,4 +1,4 @@
-import { TaskError } from '../../../shared/task-errors';
+import { TaskError } from '~/task-errors';
 import fs from 'node:fs';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';

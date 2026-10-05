@@ -1,4 +1,4 @@
-import { TaskError } from '../../../shared/task-errors';
+import { TaskError } from '~/task-errors';
 import { createHmac, pbkdf2, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 

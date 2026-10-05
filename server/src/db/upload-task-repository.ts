@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './connection';
-import { isRemoteSource, taskErrorCategories } from '../../../shared/task-errors';
+import { isRemoteSource, taskErrorCategories } from '~/task-errors';
 import type { CreateUploadTaskRequest, UploadTask } from '~/types';
 
 export type UploadTaskMetadata = Omit<CreateUploadTaskRequest, 'source' | 'name' | 'filename' | 'fileSize'>;

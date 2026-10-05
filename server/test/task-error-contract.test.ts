@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { MockAgent, setGlobalDispatcher } from 'undici';
 import Fastify from 'fastify';
-import { TaskError, taskErrorCategories } from '../../shared/task-errors';
+import { TaskError, taskErrorCategories } from '~/task-errors';
 import type { TaskErrorCode, UploadTask } from '~/types';
 import { taskNeedsLogin, taskErrorMessage } from '../../client/src/features/uploads/task-display';
 import { archiveErrorCode, taskErrorCode } from '~/services/task-errors';

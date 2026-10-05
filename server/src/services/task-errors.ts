@@ -1,5 +1,5 @@
 import type { Job, TaskErrorCode } from '~/types';
-import { TaskError } from '../../../shared/task-errors';
+import { TaskError } from '~/task-errors';
 import { isArchivePasswordError } from './archive-errors';
 
 export function jobFailureCode(type: Job['type']): TaskErrorCode {

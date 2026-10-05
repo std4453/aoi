@@ -1,4 +1,4 @@
-import { TaskError } from '../../../shared/task-errors';
+import { TaskError } from '~/task-errors';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { config } from '~/config';

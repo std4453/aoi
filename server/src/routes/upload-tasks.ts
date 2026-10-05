@@ -1,4 +1,4 @@
-import { isTaskErrorCode } from '../../../shared/task-errors';
+import { isTaskErrorCode } from '~/task-errors';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
 import type { CreateUploadTaskRequest, UploadTask } from '~/types';
