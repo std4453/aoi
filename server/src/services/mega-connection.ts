@@ -1,4 +1,4 @@
-import { API } from 'megajs';
+import { API } from '@std4453/megajs';
 import { config } from '~/config';
 import { TaskError } from '~/task-errors';
 import { createOutboundFetch } from './outbound-fetch';

@@ -127,7 +127,7 @@ test('saved session authenticates share metadata; expiration blocks later tasks 
 test('signed-in share downloads attach sid to tickets but never storage URLs', async t => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
-  const { encrypt } = await import('megajs');
+  const { encrypt } = await import('@std4453/megajs');
   const plaintext = Buffer.alloc(512, 12);
   const encoder = encrypt(Buffer.alloc(24, 14)) as unknown as NodeJS.ReadWriteStream & { key: Buffer };
   const chunks: Buffer[] = [];

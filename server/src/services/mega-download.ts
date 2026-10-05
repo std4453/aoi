@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { PassThrough, Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { type API, File as MegaFile } from 'megajs';
+import { type API, File as MegaFile } from '@std4453/megajs';
 import type { MegaMetadata, TaskErrorCode } from '~/types';
 import { config } from '~/config';
 import { normalizeRelativePath, resolveWithin } from './safe-path';

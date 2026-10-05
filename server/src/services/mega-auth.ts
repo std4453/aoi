@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Storage } from 'megajs';
+import { Storage } from '@std4453/megajs';
 import { z } from 'zod';
 import { config } from '~/config';
 import { TaskError } from '~/task-errors';

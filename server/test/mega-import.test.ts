@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { encrypt, type File as MegaFile } from 'megajs';
+import { encrypt, type File as MegaFile } from '@std4453/megajs';
 import { MegaPasswordError, resolveMegaUrl, validateMegaUrl } from '~/services/mega-link';
 import { describeMegaShare, downloadMegaShare, megaShareTitle, planMegaFiles } from '~/services/mega-download';
 

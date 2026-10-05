@@ -44,7 +44,7 @@ MEGA 分享默认可以匿名导入；也可以在「设置 → 外部来源 →
 
 账号登录采用 MEGAJS 的 V1/V2 登录协议，不是 OAuth，也不复用 Pixiv/FANBOX 的浏览器登录。会话失效后需重新输入账号信息；本轮没有实现自动续期。下载额度仍由 MEGA 决定，登录并不保证额度或速度提升。
 
-服务端依赖固定提交的 `std4453/mega` fork：分块保持有界预取，支持 CloudRAID 的五份数据加一份校验分片重组，完整下载仍验证 MAC。安装 Git 依赖需要 Git、CA 证书及构建工具；Docker 的构建和依赖安装阶段已包含它们，运行阶段不需要 Git。没有下载地址日志或探测请求。
+服务端固定依赖 npm 包 `@std4453/megajs@1.3.10-beta.0`（`std4453/mega` fork，MIT）：分块保持有界预取，支持 CloudRAID 的五份数据加一份校验分片重组，完整下载仍验证 MAC。包内包含已构建的 Node.js 和浏览器产物，CI 和 Docker 通过锁文件安装，无需安装 Git 或现场构建该依赖。没有下载地址日志或探测请求。
 
 | 环境变量 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -116,7 +116,7 @@ MEGA 导入接受 `https://mega.nz/file/…#…`、`https://mega.nz/folder/…#�
 
 输入链接后自动识别文件或文件夹标题，压缩包标题去掉扩展名；手工修改优先，提前提交也会在后台补齐默认标题。MEGA 公开分享未提供可靠的分享者显示名或作品标签，因此不自动生成作者标签。两个密码字段均支持显示／隐藏。
 
-公开分享通过服务端的 `megajs` 1.3.8（MIT）匿名读取，无需配置 MEGA 账号或登录凭证；下载仍受 MEGA 的访问、流量和限额约束。服务器须能够出站访问 MEGA HTTPS API 和存储节点。下载中断后复用已完整下载并通过 MAC 校验的文件，未完成的单个文件会重新下载以校验完整内容。导入复用 `MAX_UPLOAD_SIZE`、`MAX_EXTRACTED_SIZE` 和 `MAX_ARCHIVE_ENTRIES` 限制。
+公开分享通过服务端的 `@std4453/megajs`（MIT）读取，默认匿名，也可选用已配置的 MEGA 账号；下载仍受 MEGA 的访问、流量和限额约束。服务器须能够出站访问 MEGA HTTPS API 和存储节点。下载中断后复用已完整下载并通过 MAC 校验的文件，未完成的单个文件会重新下载以校验完整内容。导入复用 `MAX_UPLOAD_SIZE`、`MAX_EXTRACTED_SIZE` 和 `MAX_ARCHIVE_ENTRIES` 限制。
 
 需要代理时，设置服务端 `AOI_PROXY_URL` 后启动或重启服务。例如 PowerShell：
 
