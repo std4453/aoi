@@ -4,7 +4,7 @@ import { Loader2, X } from 'lucide-react';
 import type { MegaSettings } from '../../../shared/types';
 import { fetchMegaSettings, loginMega, logoutMega } from '../api/mega';
 import { ActionRow, Button, IconButton } from './Button';
-import { FormField, TextInput } from './Form';
+import { FormField, PasswordInput, TextInput } from './Form';
 import { MegaIcon } from './ImportSources';
 import Modal from './Modal';
 import { showError, showSuccess } from './Toast';
@@ -46,10 +46,12 @@ export default function MegaSettingsDialog({ onClose, onSaved }: SettingsDialogP
         : <form onSubmit={event => { event.preventDefault(); void save(); }}>
           <div className="flex flex-col gap-3">
             <FormField label="邮箱"><TextInput type="email" autoComplete="username" required maxLength={254} value={email} disabled={busy} onChange={event => setEmail(event.target.value)} /></FormField>
-            <FormField label="密码"><TextInput type="password" autoComplete="current-password" required maxLength={1024} value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></FormField>
+            <FormField label="密码"><PasswordInput autoComplete="current-password" required maxLength={1024} value={password} disabled={busy} onChange={setPassword} /></FormField>
             <FormField label="二次验证码（如已启用）"><TextInput inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} disabled={busy} onChange={event => setCode(event.target.value)} /></FormField>
           </div>
-          <p className="mt-3 text-xs leading-5 text-gray-500">登录可选。仅保存导入所需的会话，不保存密码或验证码。下载额度由 MEGA 决定。</p>
+          <p className="mt-3 text-xs leading-5 text-gray-500">未登录及免费用户下载流量受限，可配置 Pro 账户以绕过限制，详见{' '}
+            <a href="https://help.mega.io/zh-hans/plans-storage/space-storage/transfer-quota" target="_blank" rel="noopener noreferrer" className="rounded p-0 leading-[inherit] text-blue-400 transition-colors hover:text-blue-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400">官方文档</a>
+          </p>
           <ActionRow className="mt-5">
             <Button disabled={busy} onClick={settings.configured ? () => void save(true) : onClose}>{settings.configured ? '清除登录态' : '取消'}</Button>
             <Button type="submit" variant="primary" disabled={busy || !email.trim() || !password}>{busy ? '处理中…' : '登录'}</Button>
