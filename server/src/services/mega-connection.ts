@@ -30,7 +30,7 @@ export function createMegaConnection(signal?: AbortSignal) {
     const endpoint = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port ||
       !['mega.nz', 'mega.co.nz'].some(domain => endpoint.hostname === domain || endpoint.hostname.endsWith(`.${domain}`))) {
-      throw new Error('MEGA 返回了不受信任的下载地址');
+      throw new TaskError('SOURCE_UNAVAILABLE', 'MEGA 返回了不受信任的下载地址');
     }
     const signals = [AbortSignal.timeout(60_000), operationSignal, init?.signal].filter((value): value is AbortSignal => !!value);
     const response = await outbound.fetch(endpoint, { ...init, signal: AbortSignal.any(signals), redirect: 'error' });

@@ -7,6 +7,7 @@ import { config } from '~/config';
 import { TaskError } from '~/task-errors';
 import type { MegaLoginInput, MegaSettings } from '~/types';
 import { createMegaConnection } from './mega-connection';
+import { taskErrorCode } from './task-errors';
 
 const sessionSchema = z.object({ sid: z.string().regex(/^[\w-]{58}$/), expired: z.boolean().optional() }).strict();
 type Session = z.infer<typeof sessionSchema>;
@@ -14,7 +15,7 @@ const settingsPath = () => path.join(config.dataDir, 'mega-settings.json');
 
 function loadSession(): Session | null {
   try {
-    if (fs.statSync(settingsPath()).size > 1024) throw new Error('Invalid session');
+    if (fs.statSync(settingsPath()).size > 1024) throw new TaskError('AUTH_REQUIRED', 'MEGA 登录配置无效');
     const value: unknown = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
     return value === null ? null : sessionSchema.parse(value);
   } catch (error) {
@@ -53,7 +54,7 @@ export function expireMegaSession(sid: string): void {
 
 let changing = false;
 export async function loginMega(input: MegaLoginInput): Promise<MegaSettings> {
-  if (changing) throw new Error('MEGA 登录正在进行，请稍后重试');
+  if (changing) throw new TaskError('RATE_LIMITED', 'MEGA 登录正在进行，请稍后重试');
   const connection = createMegaConnection(AbortSignal.timeout(90_000));
   const storage = new Storage({ ...input, autoload: false, autologin: false, keepalive: false });
   storage.api = connection.api;
@@ -65,12 +66,13 @@ export async function loginMega(input: MegaLoginInput): Promise<MegaSettings> {
     saveSession(sessionSchema.parse({ sid: storage.sid }));
     return readMegaSettings();
   } catch (error) {
+    if (error instanceof TaskError) throw error;
     const message = error instanceof Error ? error.message : '';
-    if (/^EMFAREQUIRED /.test(message)) throw new Error('请输入 MEGA 二次验证码');
-    if (/^(ENOENT|EACCESS|EKEY) /.test(message)) throw new Error('MEGA 邮箱、密码或验证码不正确');
-    if (/^(ETOOMANY|ERATELIMIT|EAGAIN) /.test(message)) throw new Error('MEGA 登录请求过于频繁，请稍后重试');
-    if (/^EBLOCKED /.test(message)) throw new Error('MEGA 账号已被限制');
-    throw new Error('MEGA 登录失败，请检查账号及代理连接后重试');
+    if (/^EMFAREQUIRED /.test(message)) throw new TaskError('AUTH_REQUIRED', '请输入 MEGA 二次验证码');
+    if (/^(ENOENT|EACCESS|EKEY) /.test(message)) throw new TaskError('AUTH_REQUIRED', 'MEGA 邮箱、密码或验证码不正确');
+    if (/^(ETOOMANY|ERATELIMIT|EAGAIN) /.test(message)) throw new TaskError('RATE_LIMITED', 'MEGA 登录请求过于频繁，请稍后重试');
+    if (/^EBLOCKED /.test(message)) throw new TaskError('ACCESS_DENIED', 'MEGA 账号已被限制');
+    throw new TaskError(taskErrorCode(error, 'PROCESSING_FAILED'), 'MEGA 登录失败，请检查账号及代理连接后重试');
   } finally {
     // Do not serialize Storage: toJSON includes account keys, options and MFA.
     delete (storage.options as Partial<typeof storage.options>).password;
@@ -81,7 +83,7 @@ export async function loginMega(input: MegaLoginInput): Promise<MegaSettings> {
 }
 
 export async function logoutMega(): Promise<MegaSettings> {
-  if (changing) throw new Error('MEGA 登录正在进行，请稍后重试');
+  if (changing) throw new TaskError('RATE_LIMITED', 'MEGA 登录正在进行，请稍后重试');
   changing = true;
   try {
     let session: Session | null = null;
@@ -91,8 +93,9 @@ export async function logoutMega(): Promise<MegaSettings> {
       connection.api.sid = session.sid;
       try { await connection.run(() => connection.api.request({ a: 'sml' })); }
       catch (error) {
+        if (error instanceof TaskError) throw error;
         if (!(error instanceof Error && /^ESID /.test(error.message))) {
-          throw new Error('无法撤销 MEGA 会话，请检查网络后重试');
+          throw new TaskError(taskErrorCode(error, 'PROCESSING_FAILED'), '无法撤销 MEGA 会话，请检查网络后重试');
         }
       } finally { await connection.close(); }
     }

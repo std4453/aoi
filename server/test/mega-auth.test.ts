@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import Fastify from 'fastify';
 import { ProxyAgent } from 'undici';
+import { TaskError, taskErrorCategories } from '~/task-errors';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-mega-auth-'));
 process.env.DATA_DIR = dataDir;
@@ -88,7 +89,11 @@ test('account login uses the configured proxy, saves only sid, and never loads c
 test('failed and malformed login responses preserve the saved session and return safe errors', async t => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
-  for (const failure of [-26, -9, { k: 'AA', csid: 'AA', privk: 'AA' }]) {
+  for (const [failure, code] of [
+    [-26, 'AUTH_REQUIRED'], [-9, 'AUTH_REQUIRED'], [-11, 'AUTH_REQUIRED'], [-14, 'AUTH_REQUIRED'],
+    [-6, 'RATE_LIMITED'], [-4, 'RATE_LIMITED'], [-16, 'ACCESS_DENIED'],
+    [{ k: 'AA', csid: 'AA', privk: 'AA' }, 'SOURCE_UNAVAILABLE'],
+  ] as const) {
     globalThis.fetch = async (_input, init) => {
       const request = JSON.parse(String(init?.body))[0];
       return Response.json([request.a === 'us0' ? { v: 2, s: salt.toString('base64url') } : failure]);
@@ -96,9 +101,57 @@ test('failed and malformed login responses preserve the saved session and return
     const result = await app.inject({ method: 'POST', url: '/api/settings/mega/login', payload: { email, password } });
     assert.equal(result.statusCode, 400);
     assert.doesNotMatch(result.body, /synthetic|privk|csid/);
+    assert.equal(result.json().errorCode, code);
+    assert.equal(result.json().errorCategory, taskErrorCategories[code]);
     if (failure === -26) assert.match(result.json().error, /二次验证码/);
     assert.equal(readMegaSession()?.sid, expectedSid);
   }
+});
+
+test('login and logout preserve network and resource error categories without changing the saved session', async t => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  for (const [failure, code] of [
+    [new TypeError('synthetic proxy failure', { cause: { code: 'ECONNREFUSED' } }), 'NETWORK_ERROR'],
+    [new DOMException('synthetic timeout', 'TimeoutError'), 'NETWORK_ERROR'],
+    [new TaskError('RESOURCE_LIMIT', 'MEGA 响应超过资源限制'), 'RESOURCE_LIMIT'],
+    [new Error('synthetic unexpected error'), 'PROCESSING_FAILED'],
+  ] as const) {
+    globalThis.fetch = async () => { throw failure; };
+    for (const request of [
+      { method: 'POST' as const, url: '/api/settings/mega/login', payload: { email, password } },
+      { method: 'DELETE' as const, url: '/api/settings/mega' },
+    ]) {
+      const result = await app.inject(request);
+      assert.equal(result.statusCode, 400);
+      assert.equal(result.json().errorCode, code);
+      assert.equal(result.json().errorCategory, taskErrorCategories[code]);
+      assert.doesNotMatch(result.body, /synthetic/);
+      assert.equal(readMegaSession()?.sid, expectedSid);
+    }
+  }
+});
+
+test('concurrent login and logout return a categorized busy error', async t => {
+  const original = globalThis.fetch;
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void;
+  const reachedFetch = new Promise<void>(resolve => { started = resolve; });
+  t.after(() => { release(); globalThis.fetch = original; });
+  globalThis.fetch = async () => { started(); await blocked; return Response.json([-9]); };
+  const pending = app.inject({ method: 'POST', url: '/api/settings/mega/login', payload: { email, password } });
+  await reachedFetch;
+  try {
+    for (const request of [
+      { method: 'POST' as const, url: '/api/settings/mega/login', payload: { email, password } },
+      { method: 'DELETE' as const, url: '/api/settings/mega' },
+    ]) {
+      const result = await app.inject(request);
+      assert.deepEqual(result.json(), { error: 'MEGA 登录正在进行，请稍后重试', errorCode: 'RATE_LIMITED', errorCategory: 'network' });
+    }
+  } finally { release(); await pending; }
+  assert.equal(readMegaSession()?.sid, expectedSid);
 });
 
 test('saved session authenticates share metadata; expiration blocks later tasks without anonymous fallback', async t => {
@@ -116,6 +169,10 @@ test('saved session authenticates share metadata; expiration blocks later tasks 
   await assert.rejects(describeMegaShare({ url }), { code: 'AUTH_REQUIRED' });
   assert.deepEqual(readMegaSettings(), { configured: true, expired: true });
   await assert.rejects(describeMegaShare({ url }), { code: 'AUTH_REQUIRED' });
+  assert.equal(requests, 1);
+  const metadata = await app.inject({ method: 'POST', url: '/api/packs/mega-metadata', payload: { url } });
+  assert.equal(metadata.json().errorCode, 'AUTH_REQUIRED');
+  assert.equal(metadata.json().errorCategory, 'authentication');
   assert.equal(requests, 1);
   const cleared = await app.inject({ method: 'DELETE', url: '/api/settings/mega' });
   assert.equal(cleared.statusCode, 200);

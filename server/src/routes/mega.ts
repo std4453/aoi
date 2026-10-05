@@ -1,7 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { TaskError, taskErrorCategories } from '~/task-errors';
 import { loginMega, logoutMega, readMegaSettings } from '~/services/mega-auth';
 import { describeMegaShare } from '~/services/mega-download';
+
+function errorResponse(error: unknown, fallback: string) {
+  return { error: error instanceof Error ? error.message : fallback,
+    ...(error instanceof TaskError ? { errorCode: error.code, errorCategory: taskErrorCategories[error.code] } : {}),
+  };
+}
 
 export const registerMegaRoutes: FastifyPluginAsync = async app => {
   app.get('/api/settings/mega', async (_request, reply) => {
@@ -16,12 +23,12 @@ export const registerMegaRoutes: FastifyPluginAsync = async app => {
     }).strict().safeParse(request.body);
     if (!input.success) return reply.code(400).send({ error: '请输入有效的 MEGA 邮箱、密码及二次验证码' });
     try { return await loginMega(input.data); }
-    catch (error) { return reply.code(400).send({ error: (error as Error).message }); }
+    catch (error) { return reply.code(400).send(errorResponse(error, 'MEGA 登录失败')); }
   });
   app.delete('/api/settings/mega', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
     try { return await logoutMega(); }
-    catch (error) { return reply.code(400).send({ error: (error as Error).message }); }
+    catch (error) { return reply.code(400).send(errorResponse(error, '无法撤销 MEGA 会话')); }
   });
   app.post('/api/packs/mega-metadata', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
@@ -32,7 +39,7 @@ export const registerMegaRoutes: FastifyPluginAsync = async app => {
       }).strict().parse(request.body);
       return await describeMegaShare(input);
     } catch (error) {
-      return reply.code(400).send({ error: error instanceof Error ? error.message : '无法识别 MEGA 分享' });
+      return reply.code(400).send(errorResponse(error, '无法识别 MEGA 分享'));
     }
   });
 };
