@@ -1,11 +1,11 @@
-import { config } from '../config/index.js';
+import { config } from '~/config';
 import type { FastifyPluginAsync } from 'fastify';
 import fs from 'node:fs';
-import { getGeneratedPath } from '../services/storage.js';
-import { getPack } from '../db/repositories.js';
+import { getGeneratedPath } from '~/services/storage';
+import { getPack } from '~/db/repositories';
 import { stat } from 'node:fs/promises';
 
-import { parseRange } from '../services/file-range.js';
+import { parseRange } from '~/services/file-range';
 
 export const registerDownloadRoutes: FastifyPluginAsync = async function (fastify) {
   fastify.get<{

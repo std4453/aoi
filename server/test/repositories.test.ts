@@ -7,14 +7,14 @@ import test from 'node:test';
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-repositories-'));
 process.env.DATA_DIR = dataDir;
 
-const connection = await import('../src/db/connection.js');
-const repositories = await import('../src/db/repositories.js');
-const { folderProcessor } = await import('../src/services/folder-processor.js');
+const connection = await import('~/db/connection');
+const repositories = await import('~/db/repositories');
+const { folderProcessor } = await import('~/services/folder-processor');
 const {
   ensureDir,
   getExtractedImagesDir,
   getFolderStagingDir,
-} = await import('../src/services/storage.js');
+} = await import('~/services/storage');
 
 test.after(() => {
   connection.closeDb();

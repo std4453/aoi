@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { parseProxyUrl } from '../services/outbound-fetch.js';
-import { readExternalConfig } from './external-sources.js';
+import { parseProxyUrl } from '~/services/outbound-fetch';
+import { readExternalConfig } from './external-sources';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

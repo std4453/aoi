@@ -1,4 +1,4 @@
-import type { Migration } from '../migrations.js';
+import type { Migration } from '~/db/migrations';
 
 export default {
   name: '003_add_blurhashes_and_backfill',

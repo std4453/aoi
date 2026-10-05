@@ -29,7 +29,7 @@ async function setup(t: TestContext) {
       else Reflect.deleteProperty(globalThis, name);
     });
   }
-  const connection = await import(`../../client/src/lib/connection.ts?case=${++caseId}`) as typeof import('../../client/src/lib/connection.js');
+  const connection = await import(`../../client/src/lib/connection.ts?case=${++caseId}`) as typeof import('../../client/src/lib/connection');
   t.after(() => connection.cancelConnection());
   connection.runtime.serverSelectionEnabled = true;
   return { connection, navigations };

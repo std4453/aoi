@@ -7,9 +7,9 @@ import {
   deletePreset as deletePresetFromDb,
   setDefaultPreset,
   getDefaultPreset,
-} from '../db/repositories.js';
-import type { CompressionOptions } from '../types.js';
-import { formatValidationError, parseCompressionOptions } from '../services/validation.js';
+} from '~/db/repositories';
+import type { CompressionOptions } from '~/types';
+import { formatValidationError, parseCompressionOptions } from '~/services/validation';
 
 export const registerPresetRoutes: FastifyPluginAsync = async function (fastify) {
   // List presets

@@ -8,11 +8,11 @@ import { MockAgent } from 'undici';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-pixiv-'));
 process.env.DATA_DIR = dataDir;
-const { initDb, closeDb, getDb } = await import('../src/db/connection.js');
-const { createPack, getPack, createJob, recoverInterruptedJobs, claimNextPendingJob, updateJobStatus } = await import('../src/db/repositories.js');
-const { PixivClient, parsePixivUrl, validatePixivImageUrl, importPixivPack } = await import('../src/services/pixiv-importer.js');
-const { getExtractedImagesDir } = await import('../src/services/storage.js');
-const { verifyPack } = await import('../src/services/content-verification.js');
+const { initDb, closeDb, getDb } = await import('~/db/connection');
+const { createPack, getPack, createJob, recoverInterruptedJobs, claimNextPendingJob, updateJobStatus } = await import('~/db/repositories');
+const { PixivClient, parsePixivUrl, validatePixivImageUrl, importPixivPack } = await import('~/services/pixiv-importer');
+const { getExtractedImagesDir } = await import('~/services/storage');
+const { verifyPack } = await import('~/services/content-verification');
 await initDb();
 test.after(() => { closeDb(); fs.rmSync(dataDir, { recursive: true, force: true }); });
 
@@ -111,9 +111,9 @@ test('interrupted Pixiv jobs are durable and requeued without duplicating a job'
 
 test('import routes validate input and atomically create tagged jobs', async t => {
   const { default: Fastify } = await import('fastify');
-  const { registerPixivRoutes } = await import('../src/routes/pixiv.js');
-  const { jobQueue } = await import('../src/services/job-queue.js');
-  const { createTag, listPacks } = await import('../src/db/repositories.js');
+  const { registerPixivRoutes } = await import('~/routes/pixiv');
+  const { jobQueue } = await import('~/services/job-queue');
+  const { createTag, listPacks } = await import('~/db/repositories');
   t.mock.method(jobQueue, 'start', () => {});
   const app = Fastify();
   await app.register(registerPixivRoutes);

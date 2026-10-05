@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
-import { startTestServer, stopTestServer } from './helpers/server-process.js';
+import { startTestServer, stopTestServer } from './helpers/server-process';
 
 const require = createRequire(import.meta.url);
 test('startup resumes a running FANBOX job through verification and previews using only mocked network', async () => {

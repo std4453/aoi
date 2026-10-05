@@ -8,19 +8,19 @@ import sharp from 'sharp';
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-image-collision-'));
 process.env.DATA_DIR = dataDir;
 
-const connection = await import('../src/db/connection.js');
-const repositories = await import('../src/db/repositories.js');
-const { archiveGenerator } = await import('../src/services/archive-generator.js');
-const { imageCompressor } = await import('../src/services/image-compressor.js');
-const { thumbnailGenerator } = await import('../src/services/thumbnail-generator.js');
-const { buildJpegOutputPaths } = await import('../src/services/jpeg-output-path.js');
+const connection = await import('~/db/connection');
+const repositories = await import('~/db/repositories');
+const { archiveGenerator } = await import('~/services/archive-generator');
+const { imageCompressor } = await import('~/services/image-compressor');
+const { thumbnailGenerator } = await import('~/services/thumbnail-generator');
+const { buildJpegOutputPaths } = await import('~/services/jpeg-output-path');
 const {
   ensureDir,
   getExtractedImagesDir,
   getGeneratedDir,
   getGeneratedPath,
   getThumbnailsDir,
-} = await import('../src/services/storage.js');
+} = await import('~/services/storage');
 
 test.after(() => {
   connection.closeDb();

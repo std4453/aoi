@@ -6,15 +6,15 @@ import {
   getPack,
   getPreset,
   hasActiveJob,
-} from '../db/repositories.js';
-import { jobQueue } from '../services/job-queue.js';
-import { getGeneratedDir } from '../services/storage.js';
-import type { CompressionOptions, FileSelection } from '../types.js';
+} from '~/db/repositories';
+import { jobQueue } from '~/services/job-queue';
+import { getGeneratedDir } from '~/services/storage';
+import type { CompressionOptions, FileSelection } from '~/types';
 import {
   formatValidationError,
   parseCompressionOptions,
   parseFileSelection,
-} from '../services/validation.js';
+} from '~/services/validation';
 
 export const registerProcessingRoutes: FastifyPluginAsync = async function (fastify) {
   const activeEventStreams = new Set<import('node:http').ServerResponse>();

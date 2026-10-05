@@ -4,15 +4,15 @@ import os from 'node:os';
 import sharp from 'sharp';
 import pLimit from 'p-limit';
 import { encode as blurhashEncode } from 'blurhash';
-import { config } from '../config/index.js';
+import { config } from '~/config';
 import {
   getExtractedImagesDir,
   getThumbnailsDir,
   ensureDir,
   getPath,
-} from './storage.js';
-import { buildJpegOutputPaths } from './jpeg-output-path.js';
-import { imageInput } from './ugoira.js';
+} from './storage';
+import { buildJpegOutputPaths } from './jpeg-output-path';
+import { imageInput } from './ugoira';
 
 /**
  * Blurhash 计算流程

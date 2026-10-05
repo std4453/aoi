@@ -3,14 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import migration from '../src/db/migrations/008_add_content_verification.js';
+import migration from '~/db/migrations/008_add_content_verification';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-verification-'));
 process.env.DATA_DIR = dataDir;
-const db = await import('../src/db/connection.js');
-const repo = await import('../src/db/repositories.js');
-const verification = await import('../src/services/content-verification.js');
-const storage = await import('../src/services/storage.js');
+const db = await import('~/db/connection');
+const repo = await import('~/db/repositories');
+const verification = await import('~/services/content-verification');
+const storage = await import('~/services/storage');
 await db.initDb();
 test.after(() => { db.closeDb(); fs.rmSync(dataDir, { recursive: true, force: true }); });
 test.afterEach(() => { for (const pack of repo.listPacks()) repo.deletePack(pack.id); });
@@ -128,7 +128,7 @@ test('cancelled hashing does not publish a partial result', async () => {
 });
 
 test('queue cancellation waits for verification streams to close and leaves no follow-up job', async () => {
-  const { jobQueue } = await import('../src/services/job-queue.js');
+  const { jobQueue } = await import('~/services/job-queue');
   const id = pack('folder', [['large.png', 'x'.repeat(1_000_000)]]);
   verification.scheduleVerification(id);
   let cancellation: Promise<void> | undefined;

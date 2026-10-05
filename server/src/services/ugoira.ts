@@ -5,8 +5,8 @@ import yauzl from 'yauzl';
 import { ZipArchive } from 'archiver';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { config } from '../config/index.js';
-import type { UgoiraManifest } from '../../../shared/types.js';
+import { config } from '~/config';
+import type { UgoiraManifest } from '~/types';
 
 export const ugoiraFramesSchema = z.array(z.object({
   file: z.string().regex(/^[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/i),

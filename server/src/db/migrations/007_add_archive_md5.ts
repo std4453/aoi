@@ -1,4 +1,4 @@
-import type { Migration } from '../migrations.js';
+import type { Migration } from '~/db/migrations';
 
 export default {
   name: '007_add_archive_md5',

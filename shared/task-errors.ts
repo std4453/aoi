@@ -1,4 +1,4 @@
-import type { TaskErrorCategory, TaskErrorCode, UploadTaskType, RemoteTaskType } from './types.js';
+import type { TaskErrorCategory, TaskErrorCode, UploadTaskType, RemoteTaskType } from './types';
 
 /** Stable wire codes; diagnostics are never interpreted by presentation components. */
 export const taskErrorCategories = {

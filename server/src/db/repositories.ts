@@ -1,8 +1,7 @@
-import type { TaskErrorCode } from '../../../shared/types.js';
 import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
-import { getDb } from './connection.js';
-import type { Pack, PackStatus, Preset, Job, CompressionOptions, Tag, PaginatedResponse, PackListParams, PackFile } from '../types.js';
+import { getDb } from './connection';
+import type { Pack, PackStatus, Preset, Job, CompressionOptions, Tag, PaginatedResponse, PackListParams, PackFile, TaskErrorCode } from '~/types';
 
 export type StoredPack = Pack & { archivePassword: string | null };
 

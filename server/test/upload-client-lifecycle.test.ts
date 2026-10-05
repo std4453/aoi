@@ -1,12 +1,12 @@
-import { isRemoteSource } from '../../shared/task-errors.js';
+import { isRemoteSource } from '~/task-errors';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setImmediate as tick } from 'node:timers/promises';
-import { createUploadTaskStore } from '../../client/src/features/uploads/task-store.ts';
-import { createLocalUploadExecutor, type UploadTransfer } from '../../client/src/features/uploads/local-upload.ts';
-import { createUploadDraft } from '../../client/src/features/uploads/draft.ts';
-import { createUploadViewState, TASK_EXIT_MS } from '../../client/src/features/uploads/view-state.ts';
-import type { UploadTask, PackFile, PixivMetadata } from '../../shared/types.js';
+import { createUploadTaskStore } from '../../client/src/features/uploads/task-store';
+import { createLocalUploadExecutor, type UploadTransfer } from '../../client/src/features/uploads/local-upload';
+import { createUploadDraft } from '../../client/src/features/uploads/draft';
+import { createUploadViewState, TASK_EXIT_MS } from '../../client/src/features/uploads/view-state';
+import type { UploadTask, PackFile, PixivMetadata } from '~/types';
 
 type UploadOptions = Parameters<NonNullable<Parameters<typeof createLocalUploadExecutor>[1]>['createTransfer']>[1];
 

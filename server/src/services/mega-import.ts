@@ -1,22 +1,22 @@
-import { taskErrorCode } from './task-errors.js';
+import { taskErrorCode } from './task-errors';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { UploadTask } from '../../../shared/types.js';
-import { getDb } from '../db/connection.js';
+import type { UploadTask } from '~/types';
+import { getDb } from '~/db/connection';
 import { createPack, getPack, setPackTags, findArchiveDuplicates, updatePackStats, updatePackStructureType, hasAnyActiveJob,
-  createPackFiles, getPackFiles, completePackFile } from '../db/repositories.js';
-import { getUploadTask, getUploadTaskMetadata, listUploadTasks, updateUploadTask, updateUploadTaskMetadata } from './upload-tasks.js';
-import { getArchivePath, getFolderStagingDir, getUploadPath, ensureDir } from './storage.js';
-import { resolveWithin } from './safe-path.js';
-import { downloadMegaShare, megaShareTitle, type MegaDownloadResult } from './mega-download.js';
-import { MegaPasswordError } from './mega-link.js';
-import { hashArchive, backfillArchiveHashes } from './archive-deduplication.js';
-import { folderProcessor } from './folder-processor.js';
-import { scheduleVerification, continueFolderVerification } from './content-verification.js';
-import { jobQueue } from './job-queue.js';
-import { beginMutation } from '../replication/state.js';
+  createPackFiles, getPackFiles, completePackFile } from '~/db/repositories';
+import { getUploadTask, getUploadTaskMetadata, listUploadTasks, updateUploadTask, updateUploadTaskMetadata } from './upload-tasks';
+import { getArchivePath, getFolderStagingDir, getUploadPath, ensureDir } from './storage';
+import { resolveWithin } from './safe-path';
+import { downloadMegaShare, megaShareTitle, type MegaDownloadResult } from './mega-download';
+import { MegaPasswordError } from './mega-link';
+import { hashArchive, backfillArchiveHashes } from './archive-deduplication';
+import { folderProcessor } from './folder-processor';
+import { scheduleVerification, continueFolderVerification } from './content-verification';
+import { jobQueue } from './job-queue';
+import { beginMutation } from '~/replication/state';
 
-export { validateMegaUrl } from './mega-link.js';
+export { validateMegaUrl } from './mega-link';
 
 interface MegaImportOptions {
   url?: string;

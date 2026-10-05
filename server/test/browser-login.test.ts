@@ -14,10 +14,10 @@ delete process.env.FANBOX_COOKIES_FILE;
 delete process.env.FANBOX_SESSION_ID;
 delete process.env.AUTH_KEY;
 fs.writeFileSync(process.env.AOI_BROWSER_LOGIN_KEY_FILE, 'b'.repeat(64), { mode: 0o600 });
-const { BrowserLogin, browserLogin } = await import('../src/services/browser-login.js');
-const { readFanboxSettings } = await import('../src/services/fanbox-auth.js');
-const { config } = await import('../src/config/index.js');
-const { registerBrowserLoginRoutes } = await import('../src/routes/browser-login.js');
+const { BrowserLogin, browserLogin } = await import('~/services/browser-login');
+const { readFanboxSettings } = await import('~/services/fanbox-auth');
+const { config } = await import('~/config');
+const { registerBrowserLoginRoutes } = await import('~/routes/browser-login');
 const { default: Fastify } = await import('fastify');
 const agent = new MockAgent();
 agent.disableNetConnect();
@@ -112,7 +112,7 @@ test('loopback login routes reject cross-site and malformed control requests', a
 });
 
 test('Vite preserves same-origin login requests without trusting forwarded headers', async () => {
-  const { default: vite } = await import('../../client/vite.config.ts');
+  const { default: vite } = await import('../../client/vite.config');
   const proxy = vite.server?.proxy?.['/api'];
   assert.equal(typeof proxy === 'object' && proxy.changeOrigin, false);
   const app = Fastify();
@@ -164,7 +164,7 @@ test('Pixiv browser login exchanges its PKCE code unchanged, preserves only web 
   await service.start('fanbox');
   pool.intercept({ path: `/sessions/${id}`, method: 'DELETE' }).reply(200, { closed: true });
   await service.cancel(id, 'fanbox');
-  const { clearPixivWebSession } = await import('../src/services/browser-login.js');
+  const { clearPixivWebSession } = await import('~/services/browser-login');
   clearPixivWebSession();
   assert.equal(fs.existsSync(path.join(data, 'pixiv-browser-cookies.json')), false);
 });

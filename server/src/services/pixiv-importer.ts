@@ -1,20 +1,20 @@
-import { TaskError } from '../../../shared/task-errors.js';
+import { TaskError } from '~/task-errors';
 import fs from 'node:fs';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fetch, ProxyAgent, type Dispatcher } from 'undici';
 import { z } from 'zod';
 import sharp from 'sharp';
-import { config } from '../config/index.js';
-import { getDb } from '../db/connection.js';
-import { getPack, getLatestJob, updatePackStats, updatePackStructureType, setPackTags } from '../db/repositories.js';
-import { ensureDir, getExtractedImagesDir } from './storage.js';
-import { resolveWithin } from './safe-path.js';
-import { scheduleVerification } from './content-verification.js';
-import { PixivAuth, readPixivJson, readPixivSettings } from './pixiv-auth.js';
-import { createUgoira, ugoiraFramesSchema } from './ugoira.js';
-import { ensureImportTags as ensurePixivTags } from './import-tags.js';
-export { ensureImportTags as ensurePixivTags } from './import-tags.js';
+import { config } from '~/config';
+import { getDb } from '~/db/connection';
+import { getPack, getLatestJob, updatePackStats, updatePackStructureType, setPackTags } from '~/db/repositories';
+import { ensureDir, getExtractedImagesDir } from './storage';
+import { resolveWithin } from './safe-path';
+import { scheduleVerification } from './content-verification';
+import { PixivAuth, readPixivJson, readPixivSettings } from './pixiv-auth';
+import { createUgoira, ugoiraFramesSchema } from './ugoira';
+import { ensureImportTags as ensurePixivTags } from './import-tags';
+export { ensureImportTags as ensurePixivTags } from './import-tags';
 
 export function parsePixivUrl(value: string): { id: string; url: string } {
   const url = new URL(value.trim());

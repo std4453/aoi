@@ -1,9 +1,9 @@
-import { TaskError } from '../../../shared/task-errors.js';
+import { TaskError } from '~/task-errors';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { config } from '../config/index.js';
-import { resolveWithin } from './safe-path.js';
-import type { FanboxSettings } from '../../../shared/types.js';
+import { config } from '~/config';
+import { resolveWithin } from './safe-path';
+import type { FanboxSettings } from '~/types';
 
 export function validateFanboxSession(value: unknown): string {
   if (typeof value !== 'string' || value.length > 8192 || !/^[A-Za-z0-9_%=.~-]*$/.test(value)) {

@@ -1,9 +1,9 @@
-import { beginMutation } from '../replication/state.js';
+import { beginMutation } from '~/replication/state';
 import fp from 'fastify-plugin';
 import { Server } from '@tus/server';
 import { FileStore } from '@tus/file-store';
-import { config } from '../config/index.js';
-import { ensureDir } from '../services/storage.js';
+import { config } from '~/config';
+import { ensureDir } from '~/services/storage';
 
 export const tusPlugin = fp(async function (fastify) {
   ensureDir(config.dirs.uploads);

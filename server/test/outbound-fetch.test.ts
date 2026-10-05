@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { connect, type Socket } from 'node:net';
 import { test } from 'node:test';
-import { createOutboundFetch, parseProxyUrl } from '../src/services/outbound-fetch.js';
+import { createOutboundFetch, parseProxyUrl } from '~/services/outbound-fetch';
 
 async function serve(server: Server) {
   const sockets = new Set<Socket>();

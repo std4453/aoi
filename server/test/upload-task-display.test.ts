@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage, taskNeedsLogin } from '../../client/src/features/uploads/task-display.ts';
-import { taskErrorCategories } from '../../shared/task-errors.js';
-import type { UploadTask } from '../../shared/types.js';
+import { taskErrorMessage, taskFailureLabel, taskProgressDisplay, taskStates, taskNoticeMessage, taskNeedsLogin } from '../../client/src/features/uploads/task-display';
+import { taskErrorCategories } from '~/task-errors';
+import type { UploadTask } from '~/types';
 
 const task: UploadTask = {
   id: 'test', source: 'archive', isRemote: false, errorCode: null, errorCategory: null, name: 'test', filename: 'test.zip',

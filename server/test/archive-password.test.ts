@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isArchivePasswordError } from '../src/services/archive-errors.js';
+import { isArchivePasswordError } from '~/services/archive-errors';
 
 test('only explicit password diagnostics request archive credentials', () => {
   for (const message of [

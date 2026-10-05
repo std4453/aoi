@@ -1,13 +1,13 @@
-import { TaskError } from '../../../shared/task-errors.js';
+import { TaskError } from '~/task-errors';
 import fs from 'node:fs';
-import { config } from '../config/index.js';
-import { getDb } from '../db/connection.js';
-import { getPack, getLatestJob, setPackTags, updatePackStats, updatePackStructureType } from '../db/repositories.js';
-import { ensureDir, getExtractedImagesDir, getExtractedVideosDir } from './storage.js';
-import { resolveWithin } from './safe-path.js';
-import { scheduleVerification } from './content-verification.js';
-import { ensureImportTags } from './import-tags.js';
-import { getFanboxClient, parseFanboxUrl } from './fanbox-client.js';
+import { config } from '~/config';
+import { getDb } from '~/db/connection';
+import { getPack, getLatestJob, setPackTags, updatePackStats, updatePackStructureType } from '~/db/repositories';
+import { ensureDir, getExtractedImagesDir, getExtractedVideosDir } from './storage';
+import { resolveWithin } from './safe-path';
+import { scheduleVerification } from './content-verification';
+import { ensureImportTags } from './import-tags';
+import { getFanboxClient, parseFanboxUrl } from './fanbox-client';
 
 export async function importFanboxPack(
   packId: string,

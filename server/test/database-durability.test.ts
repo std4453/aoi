@@ -8,7 +8,7 @@ import {
   startTestServer,
   stopTestServer,
   waitForExit,
-} from './helpers/server-process.js';
+} from './helpers/server-process';
 
 function createTestDir(name: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `aoi-${name}-`));

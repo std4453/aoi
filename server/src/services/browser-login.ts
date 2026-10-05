@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { fetch } from 'undici';
 import { z } from 'zod';
-import { config } from '../config/index.js';
-import { saveFanboxSettings, validateFanboxSession } from './fanbox-auth.js';
-import { exchangePixivCode, savePixivSettings } from './pixiv-auth.js';
-import { resolveWithin } from './safe-path.js';
-import type { BrowserLoginProvider, BrowserLoginSession } from '../../../shared/types.js';
+import { config } from '~/config';
+import { saveFanboxSettings, validateFanboxSession } from './fanbox-auth';
+import { exchangePixivCode, savePixivSettings } from './pixiv-auth';
+import { resolveWithin } from './safe-path';
+import type { BrowserLoginProvider, BrowserLoginSession } from '~/types';
 
 export function browserLoginEnabled(): boolean {
   return Boolean(config.browserLogin.url && config.browserLogin.keyFile && config.browserLogin.publicUrl);

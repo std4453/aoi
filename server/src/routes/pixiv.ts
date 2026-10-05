@@ -1,12 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getPack, toPublicPack } from '../db/repositories.js';
-import { parsePixivUrl, getPixivClient, ensurePixivTags } from '../services/pixiv-importer.js';
-import { readPixivSettings, savePixivSettings, refreshTokenSchema } from '../services/pixiv-auth.js';
-import { browserLoginEnabled, clearPixivWebSession } from '../services/browser-login.js';
-import { beginMutation } from '../replication/state.js';
-import { createPixivUploadTask } from '../services/upload-tasks.js';
-import type { PixivImportRequest, PixivMetadata, PixivSettings } from '../../../shared/types.js';
+import { getPack, toPublicPack } from '~/db/repositories';
+import { parsePixivUrl, getPixivClient, ensurePixivTags } from '~/services/pixiv-importer';
+import { readPixivSettings, savePixivSettings, refreshTokenSchema } from '~/services/pixiv-auth';
+import { browserLoginEnabled, clearPixivWebSession } from '~/services/browser-login';
+import { beginMutation } from '~/replication/state';
+import { createPixivUploadTask } from '~/services/upload-tasks';
+import type { PixivImportRequest, PixivMetadata, PixivSettings } from '~/types';
 
 const requestSchema = z.object({
   url: z.string().max(2048),

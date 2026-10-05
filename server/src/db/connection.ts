@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
-import { config } from '../config/index.js';
+import { config } from '~/config';
 
-import { runMigrations } from './migrations.js';
+import { runMigrations } from './migrations';
 
 const DEFAULT_COMPRESSION_OPTIONS = {
   format: 'jpeg' as const,

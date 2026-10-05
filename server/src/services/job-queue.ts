@@ -1,7 +1,7 @@
-import { archiveErrorCode, jobFailureCode, taskErrorCode } from './task-errors.js';
-import { config } from '../config/index.js';
-import { beginMutation } from '../replication/state.js';
-import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification.js';
+import { archiveErrorCode, jobFailureCode, taskErrorCode } from './task-errors';
+import { config } from '~/config';
+import { beginMutation } from '~/replication/state';
+import { scheduleVerification, verifyPack, failVerification, resumeHistoricalVerification } from './content-verification';
 import { EventEmitter } from 'node:events';
 import {
   cancelPendingJobs,
@@ -13,8 +13,8 @@ import {
   hasActiveJobOtherThan,
   updateJobProgress,
   updateJobStatus,
-} from '../db/repositories.js';
-import type { CompressionOptions, Job, JobProgress } from '../types.js';
+} from '~/db/repositories';
+import type { CompressionOptions, Job, JobProgress } from '~/types';
 
 export type JobEventType = 'progress';
 
@@ -83,8 +83,8 @@ class JobQueue extends EventEmitter {
           const controller = new AbortController();
           this.importAbort = { packId: job.packId, controller };
           const importPost = job.type === 'fanbox'
-            ? (await import('./fanbox-importer.js')).importFanboxPack
-            : (await import('./pixiv-importer.js')).importPixivPack;
+            ? (await import('./fanbox-importer')).importFanboxPack
+            : (await import('./pixiv-importer')).importPixivPack;
           await importPost(job.packId, (completed, total, bytes) => {
             this.emitProgress(job.id, {
               jobId: job.id, status: 'running', phase: 'downloading', completed, total,
@@ -152,13 +152,13 @@ class JobQueue extends EventEmitter {
       console.error(`Job ${job.id} failed:`, message);
 
       try {
-        const { getPack, updatePackStatus } = await import('../db/repositories.js');
+        const { getPack, updatePackStatus } = await import('~/db/repositories');
         const pack = getPack(job.packId);
         if (pack && job.type === 'verify') {
           failVerification(pack.id, message);
         } else if (pack && job.type === 'compress') {
           const { existsSync } = await import('node:fs');
-          const { getGeneratedPath } = await import('./storage.js');
+          const { getGeneratedPath } = await import('./storage');
           updatePackStatus(
             job.packId,
             existsSync(getGeneratedPath(job.packId)) ? 'generated' : 'extracted',
@@ -180,12 +180,12 @@ class JobQueue extends EventEmitter {
   }
 
   private async runExtractJob(job: Job): Promise<void> {
-    const { archiveExtractor } = await import('./archive-extractor.js');
+    const { archiveExtractor } = await import('./archive-extractor');
     const {
       clearPackArchivePassword,
       updatePackStatus,
       getPack,
-    } = await import('../db/repositories.js');
+    } = await import('~/db/repositories');
     const pack = getPack(job.packId);
     if (!pack) {
       throw new Error(`Pack not found: ${job.packId}`);
@@ -200,13 +200,13 @@ class JobQueue extends EventEmitter {
   }
 
   private async runThumbnailJob(job: Job): Promise<void> {
-    const { thumbnailGenerator } = await import('./thumbnail-generator.js');
+    const { thumbnailGenerator } = await import('./thumbnail-generator');
     const {
       getPack,
       updatePackStatus,
       updatePackBlurhashes,
-    } = await import('../db/repositories.js');
-    const { getGeneratedPath } = await import('./storage.js');
+    } = await import('~/db/repositories');
+    const { getGeneratedPath } = await import('./storage');
     const { existsSync } = await import('node:fs');
 
     updatePackStatus(job.packId, 'thumbnailing');
@@ -232,9 +232,9 @@ class JobQueue extends EventEmitter {
   }
 
   private async runCompressJob(job: Job): Promise<void> {
-    const { imageCompressor } = await import('./image-compressor.js');
-    const { archiveGenerator } = await import('./archive-generator.js');
-    const { updatePackStatus, getPack } = await import('../db/repositories.js');
+    const { imageCompressor } = await import('./image-compressor');
+    const { archiveGenerator } = await import('./archive-generator');
+    const { updatePackStatus, getPack } = await import('~/db/repositories');
     const pack = getPack(job.packId);
     if (!pack) throw new Error(`Pack not found: ${job.packId}`);
 
@@ -246,7 +246,7 @@ class JobQueue extends EventEmitter {
       scaleImages: parsed.scaleImages ?? true,
       maxDimension: parsed.maxDimension ?? 1920,
     };
-    const fileSelection = parsed.fileSelection as import('../types.js').FileSelection | undefined;
+    const fileSelection = parsed.fileSelection as import('~/types').FileSelection | undefined;
     updatePackStatus(pack.id, 'generating');
 
     await imageCompressor.compressPack(job.packId, options, progress => {

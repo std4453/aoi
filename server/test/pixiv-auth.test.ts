@@ -9,12 +9,12 @@ import Fastify from 'fastify';
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-pixiv-auth-'));
 process.env.DATA_DIR = dataDir;
 process.env.PIXIV_REFRESH_TOKEN = '';
-const { PixivClient, getPixivClient } = await import('../src/services/pixiv-importer.js');
-const { readPixivSettings } = await import('../src/services/pixiv-auth.js');
-const { registerPixivRoutes } = await import('../src/routes/pixiv.js');
-const { initDb, closeDb } = await import('../src/db/connection.js');
-const { listTags, getPack, updateJobStatus, getLatestJob } = await import('../src/db/repositories.js');
-const { jobQueue } = await import('../src/services/job-queue.js');
+const { PixivClient, getPixivClient } = await import('~/services/pixiv-importer');
+const { readPixivSettings } = await import('~/services/pixiv-auth');
+const { registerPixivRoutes } = await import('~/routes/pixiv');
+const { initDb, closeDb } = await import('~/db/connection');
+const { listTags, getPack, updateJobStatus, getLatestJob } = await import('~/db/repositories');
+const { jobQueue } = await import('~/services/job-queue');
 await initDb();
 test.after(() => { closeDb(); fs.rmSync(dataDir, { recursive: true, force: true }); });
 

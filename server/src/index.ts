@@ -1,30 +1,30 @@
-import { registerSnapshotRoutes } from './routes/snapshots.js';
-import { Replicator } from './replication/replicator.js';
-import { registerReplicationHooks } from './replication/http.js';
-import { scheduleVerification, getVerification, resumeHistoricalVerification } from './services/content-verification.js';
+import { registerSnapshotRoutes } from './routes/snapshots';
+import { Replicator } from './replication/replicator';
+import { registerReplicationHooks } from './replication/http';
+import { scheduleVerification, getVerification, resumeHistoricalVerification } from './services/content-verification';
 import Fastify from 'fastify';
-import { registerAuth } from './services/auth.js';
+import { registerAuth } from './services/auth';
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from './config/index.js';
-import { backupDb, closeDb, getDbPath, initDb } from './db/connection.js';
-import { registerPackRoutes } from './routes/packs.js';
-import { registerPixivRoutes } from './routes/pixiv.js';
-import { registerFanboxRoutes } from './routes/fanbox.js';
-import { registerBrowserLoginRoutes } from './routes/browser-login.js';
-import { registerMegaRoutes } from './routes/mega.js';
-import { registerUploadTaskRoutes } from './routes/upload-tasks.js';
-import { recoverArchiveTaskFiles, recoverUploadTasks, listUploadTasks, getUploadTaskMetadata } from './services/upload-tasks.js';
-import { registerPresetRoutes } from './routes/presets.js';
-import { registerProcessingRoutes } from './routes/processing.js';
-import { registerDownloadRoutes } from './routes/download.js';
-import { registerSystemRoutes } from './routes/system.js';
-import { tusPlugin } from './plugins/tus.js';
-import { jobQueue } from './services/job-queue.js';
+import { config } from './config';
+import { backupDb, closeDb, getDbPath, initDb } from './db/connection';
+import { registerPackRoutes } from './routes/packs';
+import { registerPixivRoutes } from './routes/pixiv';
+import { registerFanboxRoutes } from './routes/fanbox';
+import { registerBrowserLoginRoutes } from './routes/browser-login';
+import { registerMegaRoutes } from './routes/mega';
+import { registerUploadTaskRoutes } from './routes/upload-tasks';
+import { recoverArchiveTaskFiles, recoverUploadTasks, listUploadTasks, getUploadTaskMetadata } from './services/upload-tasks';
+import { registerPresetRoutes } from './routes/presets';
+import { registerProcessingRoutes } from './routes/processing';
+import { registerDownloadRoutes } from './routes/download';
+import { registerSystemRoutes } from './routes/system';
+import { tusPlugin } from './plugins/tus';
+import { jobQueue } from './services/job-queue';
 import {
   createJob,
   completePackFile,
@@ -37,17 +37,17 @@ import {
   updatePackStatus,
   updatePackStats,
   updatePackStructureType,
-} from './db/repositories.js';
-import type { CompressionOptions, Job } from './types.js';
+} from './db/repositories';
+import type { CompressionOptions, Job } from './types';
 import {
   ensureDir,
   getArchivePath,
   getFolderStagingDir,
   getGeneratedPath,
   getUploadPath,
-} from './services/storage.js';
-import { folderProcessor } from './services/folder-processor.js';
-import { resolveWithin } from './services/safe-path.js';
+} from './services/storage';
+import { folderProcessor } from './services/folder-processor';
+import { resolveWithin } from './services/safe-path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -193,14 +193,14 @@ function installShutdownHandlers(app: FastifyInstance, replicator?: Replicator):
     shutdownPromise = (async () => {
       app.log.info({ signal }, 'Graceful shutdown started');
       const closePromise = app.close();
-      const { shutdownMegaImports } = await import('./services/mega-import.js');
+      const { shutdownMegaImports } = await import('./services/mega-import');
       await shutdownMegaImports();
       await replicator?.stop();
       const drained = await jobQueue.shutdown(config.shutdownTimeout);
 
       if (!drained) {
         const interruptedJobId = jobQueue.getCurrentJobId();
-        const { terminateArchiveProcesses } = await import('./services/archive-extractor.js');
+        const { terminateArchiveProcesses } = await import('./services/archive-extractor');
         await terminateArchiveProcesses();
         await jobQueue.shutdown(2_500);
         jobQueue.requeueJob(interruptedJobId);
@@ -292,7 +292,7 @@ async function main() {
     const pendingMegaPackIds = new Set<string>();
     if (!config.isReplica) {
       recoverArchiveTaskFiles();
-      const { recoverMegaImports, hasPendingMegaHandoff } = await import('./services/mega-import.js');
+      const { recoverMegaImports, hasPendingMegaHandoff } = await import('./services/mega-import');
       await recoverMegaImports();
       for (const task of listUploadTasks()) {
         if (hasPendingMegaHandoff(task)) pendingMegaPackIds.add(task.packId!);
@@ -301,7 +301,7 @@ async function main() {
     recoverJobs(pendingMegaPackIds);
     if (!config.isReplica) {
       recoverUploadTasks();
-      const { startMegaImport } = await import('./services/mega-import.js');
+      const { startMegaImport } = await import('./services/mega-import');
       for (const task of listUploadTasks()) {
         if (task.source === 'mega' && !task.packId && task.status === 'downloading') {
           void startMegaImport(task.id, { ...getUploadTaskMetadata(task.id), name: task.name });

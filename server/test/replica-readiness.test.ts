@@ -7,8 +7,8 @@ import { once } from 'node:events';
 import { createServer, type ServerResponse } from 'node:http';
 import test from 'node:test';
 import sharp from 'sharp';
-import { contractValues, makeManifest } from '../src/replication/protocol.js';
-import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process.js';
+import { contractValues, makeManifest } from '~/replication/protocol';
+import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process';
 
 test('a fresh replica becomes readable while later packs are still downloading', { timeout: 30_000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-first-readable-'));

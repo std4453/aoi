@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
-import { makeManifest, canonicalJson } from '../src/replication/protocol.js';
-import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process.js';
+import { makeManifest, canonicalJson } from '~/replication/protocol';
+import { startTestServer, stopTestServer, type TestServer } from './helpers/server-process';
 
 async function eventually(check: () => Promise<boolean>, message: string) {
   const deadline = Date.now() + 15_000;

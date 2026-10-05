@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MockAgent } from 'undici';
-import { FanboxClient } from '../src/services/fanbox-client.js';
-import { FanboxChallengeClient } from '../src/services/fanbox-challenge.js';
-import { readExternalConfig } from '../src/config/external-sources.js';
+import { FanboxClient } from '~/services/fanbox-client';
+import { FanboxChallengeClient } from '~/services/fanbox-challenge';
+import { readExternalConfig } from '~/config/external-sources';
 
 const api = 'https://api.fanbox.cc';
 const solver = 'http://127.0.0.1:43132';

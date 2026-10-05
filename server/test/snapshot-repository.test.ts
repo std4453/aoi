@@ -4,15 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
-import migration from '../src/db/migrations/009_add_snapshots.js';
+import migration from '~/db/migrations/009_add_snapshots';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-snapshot-db-'));
 process.env.DATA_DIR = directory;
 delete process.env.AOI_REPLICA_SOURCE_URL;
-const { initDb, closeDb, getDb } = await import('../src/db/connection.js');
-const { createPack, updatePackStatus, updatePackStats, renamePack, createTag, setPackTags, renameTag } = await import('../src/db/repositories.js');
-const { contentRevision, writeState, readManifestCache } = await import('../src/db/snapshot-repository.js');
-const { SnapshotPublisher } = await import('../src/replication/snapshots.js');
+const { initDb, closeDb, getDb } = await import('~/db/connection');
+const { createPack, updatePackStatus, updatePackStats, renamePack, createTag, setPackTags, renameTag } = await import('~/db/repositories');
+const { contentRevision, writeState, readManifestCache } = await import('~/db/snapshot-repository');
+const { SnapshotPublisher } = await import('~/replication/snapshots');
 
 test('snapshot change tracking excludes local data and bookkeeping, but fences content and tag edits', async t => {
   await initDb();

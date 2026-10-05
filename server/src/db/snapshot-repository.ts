@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { getDb } from './connection.js';
-import { createJobIfIdle, getPack, hasAnyActiveJob, listPacks, updatePackStatus } from './repositories.js';
-import { canonicalJson, manifestPack, validateManifest, type Manifest, type SnapshotIndex } from '../replication/protocol.js';
+import { getDb } from './connection';
+import { createJobIfIdle, getPack, hasAnyActiveJob, listPacks, updatePackStatus } from './repositories';
+import { canonicalJson, manifestPack, validateManifest, type Manifest, type SnapshotIndex } from '~/replication/protocol';
 
 export function readState(key: string): string | undefined {
   return getDb().prepare('SELECT value FROM snapshot_state WHERE key=?').pluck().get(key) as string | undefined;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatJobProgress } from '../../client/src/lib/utils.js';
+import { formatJobProgress } from '../../client/src/lib/utils';
 
 test('verification progress displays bytes, while file processing displays file counts', () => {
   assert.equal(formatJobProgress({ phase: 'verifying', completed: 2147483648, total: 4294967296 }), '已校验 2.0 GB / 4.0 GB');

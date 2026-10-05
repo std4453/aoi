@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
-import type { UploadTask } from '../../shared/types.js';
-import { startTestServer, stopTestServer } from './helpers/server-process.js';
+import type { UploadTask } from '~/types';
+import { startTestServer, stopTestServer } from './helpers/server-process';
 
 test('startup keeps failed MEGA journals retryable through ordinary pack recovery', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-mega-handoff-startup-'));

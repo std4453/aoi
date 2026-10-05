@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { startTestServer, stopTestServer } from './helpers/server-process.js';
+import { startTestServer, stopTestServer } from './helpers/server-process';
 
 test('malformed MEGA metadata fails the request without taking down the server', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-mega-metadata-errors-'));

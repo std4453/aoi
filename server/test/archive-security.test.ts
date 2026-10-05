@@ -7,10 +7,10 @@ import test from 'node:test';
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-archive-security-'));
 process.env.DATA_DIR = dataDir;
 
-const connection = await import('../src/db/connection.js');
-const repositories = await import('../src/db/repositories.js');
-const { archiveExtractor } = await import('../src/services/archive-extractor.js');
-const { ensureDir, getArchivePath, getPath } = await import('../src/services/storage.js');
+const connection = await import('~/db/connection');
+const repositories = await import('~/db/repositories');
+const { archiveExtractor } = await import('~/services/archive-extractor');
+const { ensureDir, getArchivePath, getPath } = await import('~/services/storage');
 
 function makeStoredZip(entryName: string): Buffer {
   const name = Buffer.from(entryName);

@@ -8,12 +8,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aoi-extraction-test-'));
 process.env.DATA_DIR = path.join(root, 'data');
-const { initDb, closeDb } = await import('../src/db/connection.js');
+const { initDb, closeDb } = await import('~/db/connection');
 await initDb();
-const repo = await import('../src/db/repositories.js');
-const { archiveExtractor } = await import('../src/services/archive-extractor.js');
-const { jobQueue } = await import('../src/services/job-queue.js');
-const { registerPackRoutes } = await import('../src/routes/packs.js');
+const repo = await import('~/db/repositories');
+const { archiveExtractor } = await import('~/services/archive-extractor');
+const { jobQueue } = await import('~/services/job-queue');
+const { registerPackRoutes } = await import('~/routes/packs');
 const { default: Fastify } = await import('fastify');
 const { default: sharp } = await import('sharp');
 const app = Fastify();
