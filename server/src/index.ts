@@ -48,7 +48,6 @@ import {
 } from './services/storage.js';
 import { folderProcessor } from './services/folder-processor.js';
 import { resolveWithin } from './services/safe-path.js';
-import { errorDiagnostics } from './services/error-diagnostics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -230,11 +229,11 @@ function installShutdownHandlers(app: FastifyInstance, replicator?: Replicator):
   process.once('SIGINT', () => void shutdown('SIGINT'));
   process.once('SIGTERM', () => void shutdown('SIGTERM'));
   process.once('uncaughtException', error => {
-    app.log.fatal({ diagnostic: errorDiagnostics(error) }, 'Uncaught exception');
+    app.log.fatal({ err: error }, 'Uncaught exception');
     void shutdown('uncaughtException', 1);
   });
   process.once('unhandledRejection', reason => {
-    app.log.fatal({ diagnostic: errorDiagnostics(reason) }, 'Unhandled rejection');
+    app.log.fatal({ err: reason }, 'Unhandled rejection');
     void shutdown('unhandledRejection', 1);
   });
 }
