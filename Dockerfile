@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim AS build
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential python3 \
+    && apt-get install -y --no-install-recommends build-essential python3 git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -21,7 +21,7 @@ RUN npm run build
 FROM node:22-bookworm-slim AS production-dependencies
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential python3 \
+    && apt-get install -y --no-install-recommends build-essential python3 git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY server/package*.json ./

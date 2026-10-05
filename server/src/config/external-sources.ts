@@ -3,6 +3,13 @@ import { parseProxyUrl } from '~/services/outbound-fetch';
 
 const flag = z.enum(['true', 'false', '1', '0']).default('false').transform(value => value === 'true' || value === '1');
 const schema = z.object({
+  mega: z.object({
+    maxConnections: z.coerce.number().int().min(2).max(16).default(8),
+    initialChunkSize: z.coerce.number().int().min(16).max(16 * 1024 * 1024).default(3_355_440),
+    chunkSizeIncrement: z.coerce.number().int().min(0).max(16 * 1024 * 1024).default(0),
+    maxChunkSize: z.coerce.number().int().min(16).max(16 * 1024 * 1024).default(3_355_440),
+    cloudRaid: z.enum(['true', 'false', '1', '0']).default('true').transform(value => value === 'true' || value === '1'),
+  }).refine(value => value.initialChunkSize <= value.maxChunkSize, 'MEGA initial chunk must not exceed maximum'),
   pixiv: z.object({
     proxyUrl: z.string().url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)).optional(),
     cookie: z.string().max(8192).refine(value => !/[\r\n]/.test(value)).default(''),
@@ -22,6 +29,8 @@ const schema = z.object({
 /** Deployment environment names remain stable; consumers use service-specific groups. */
 export function readExternalConfig(env: NodeJS.ProcessEnv, outboundProxyUrl?: string) {
   const parsed = schema.parse({
+    mega: { maxConnections: env.MEGA_MAX_CONNECTIONS, initialChunkSize: env.MEGA_INITIAL_CHUNK_SIZE,
+      chunkSizeIncrement: env.MEGA_CHUNK_SIZE_INCREMENT, maxChunkSize: env.MEGA_MAX_CHUNK_SIZE, cloudRaid: env.MEGA_CLOUD_RAID },
     pixiv: { proxyUrl: env.PIXIV_PROXY_URL || undefined, cookie: env.PIXIV_COOKIE, refreshToken: env.PIXIV_REFRESH_TOKEN },
     fanbox: { sessionId: env.FANBOX_SESSION_ID, cookiesFile: env.FANBOX_COOKIES_FILE || undefined },
     browserLogin: { url: env.AOI_BROWSER_LOGIN_URL || undefined, publicUrl: env.AOI_BROWSER_LOGIN_PUBLIC_URL || undefined,

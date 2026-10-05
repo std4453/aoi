@@ -118,10 +118,17 @@ test('FANBOX access, content and challenge failures have distinct actions', () =
   assert.match(taskErrorMessage(failure('NO_SUPPORTED_MEDIA', fanbox)), /文字、压缩包及外部嵌入链接/);
   assert.equal(taskErrorMessage(failure('ACCESS_DENIED', fanbox)), 'FANBOX 帖子不可访问。');
   assert.equal(taskFailureLabel(failure('ACCESS_DENIED', fanbox)), '需要登录');
-  assert.equal(taskFailureLabel(failure('AUTH_REQUIRED', { source: 'pixiv' })), '需要登录');
+  assert.equal(taskFailureLabel(failure('AUTH_REQUIRED', { source: 'pixiv', isRemote: true })), '需要登录');
   for (const code of ['NETWORK_ERROR', 'SOURCE_BLOCKED', 'CHALLENGE_FAILED', 'RATE_LIMITED'] as const) {
     assert.equal(taskNeedsLogin(failure(code, fanbox)), false);
   }
   assert.equal(taskErrorMessage(failure('SOURCE_BLOCKED', fanbox)), 'FANBOX 拦截了服务器请求，请稍后重试。');
   assert.equal(taskErrorMessage(failure('CHALLENGE_FAILED', fanbox)), 'FANBOX 验证未完成，请稍后重试。');
+});
+
+test('MEGA expired sessions prompt login while quota failures remain retryable', () => {
+  const mega = { source: 'mega' as const, isRemote: true };
+  assert.equal(taskNeedsLogin(failure('AUTH_REQUIRED', mega)), true);
+  assert.equal(taskFailureLabel(failure('AUTH_REQUIRED', mega)), '需要登录');
+  assert.equal(taskNeedsLogin(failure('SOURCE_QUOTA', mega)), false);
 });

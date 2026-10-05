@@ -1,3 +1,4 @@
+import MegaSettingsDialog from '../../components/MegaSettingsDialog';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUploadTasks } from './useUploadTasks';
@@ -73,5 +74,5 @@ export default function UploadTaskNotifications() {
     void resume(loginTask.id).catch(error => showError(error instanceof Error ? error.message : '重试失败'));
   };
   return loginTask?.source === 'pixiv' ? <PixivSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} />
-    : loginTask?.source === 'fanbox' ? <FanboxSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : null;
+    : loginTask?.source === 'fanbox' ? <FanboxSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : loginTask?.source === 'mega' ? <MegaSettingsDialog onClose={() => setLoginTask(null)} onSaved={saved} /> : null;
 }
