@@ -229,11 +229,11 @@ function installShutdownHandlers(app: FastifyInstance, replicator?: Replicator):
   process.once('SIGINT', () => void shutdown('SIGINT'));
   process.once('SIGTERM', () => void shutdown('SIGTERM'));
   process.once('uncaughtException', error => {
-    app.log.fatal({ error }, 'Uncaught exception');
+    app.log.fatal({ err: error }, 'Uncaught exception');
     void shutdown('uncaughtException', 1);
   });
   process.once('unhandledRejection', reason => {
-    app.log.fatal({ reason }, 'Unhandled rejection');
+    app.log.fatal({ err: reason }, 'Unhandled rejection');
     void shutdown('unhandledRejection', 1);
   });
 }

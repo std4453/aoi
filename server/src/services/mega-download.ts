@@ -68,6 +68,24 @@ export function megaShareTitle(filename: string, kind: 'archive' | 'folder'): st
     .replace(/[\0\r\n]/g, ' ').slice(0, 200);
 }
 
+class MegaApi extends API {
+  constructor(options: ConstructorParameters<typeof API>[1], private readonly controller: AbortController) {
+    super(false, options);
+  }
+
+  override request(...[json, callback, retry]: Parameters<API['request']>): ReturnType<API['request']> {
+    // MEGAJS discards the promise returned by its callback dispatch. A metadata
+    // parser throw would otherwise escape loadAttributes() and terminate AoI.
+    return super.request(json, callback && ((error, response) => {
+      try {
+        callback(error, response);
+      } catch {
+        this.controller.abort(new TaskError('SOURCE_UNAVAILABLE', 'MEGA 返回的文件信息无效，请稍后重试'));
+      }
+    }), retry);
+  }
+}
+
 async function withMegaShare<T>(options: MegaShareOptions,
   consume: (root: MegaFile, api: API, signal: AbortSignal) => Promise<T>): Promise<T> {
   const url = await resolveMegaUrl(options.url, options.sharePassword);
@@ -75,7 +93,7 @@ async function withMegaShare<T>(options: MegaShareOptions,
   const controller = new AbortController();
   const operationSignal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
   const outbound = createOutboundFetch(config.outboundProxyUrl);
-  const api = new API(false, { fetch: async (input, init) => {
+  const api = new MegaApi({ fetch: async (input, init) => {
     const endpoint = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port ||
       !['mega.nz', 'mega.co.nz'].some(domain => endpoint.hostname === domain || endpoint.hostname.endsWith(`.${domain}`))) {
@@ -100,8 +118,9 @@ async function withMegaShare<T>(options: MegaShareOptions,
       },
     }));
     return new Response(bounded, { status: response.status, statusText: response.statusText, headers: response.headers });
-  } });
+  } }, controller);
   try {
+    operationSignal.throwIfAborted();
     const attributes = MegaFile.fromURL(url, { api }).loadAttributes();
     let abort: (() => void) | undefined;
     const aborted = new Promise<never>((_resolve, reject) => {
@@ -113,6 +132,8 @@ async function withMegaShare<T>(options: MegaShareOptions,
     });
     return await consume(root, api, operationSignal);
   } catch (error) {
+    // Stream pipelines wrap aborts; preserve the SDK failure for background tasks.
+    if (controller.signal.reason instanceof TaskError) throw controller.signal.reason;
     if (error instanceof Error && /attributes could not be decrypted/i.test(error.message)) {
       throw new MegaPasswordError('MEGA 解密密钥错误', 'PASSWORD_INCORRECT');
     }
